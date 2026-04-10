@@ -2,17 +2,19 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useAuth } from './AuthProvider'
 
 const navItems = [
-  { href: '/', label: 'Dashboard', icon: LayoutIcon },
+  { href: '/', label: 'Panel', icon: LayoutIcon },
   { href: '/chat', label: 'Chat', icon: ChatIcon },
-  { href: '/clients', label: 'Clients', icon: UsersIcon },
-  { href: '/calendar', label: 'Calendar', icon: CalendarIcon },
-  { href: '/agents', label: 'Agents', icon: CpuIcon },
+  { href: '/clients', label: 'Clientes', icon: UsersIcon },
+  { href: '/calendar', label: 'Calendario', icon: CalendarIcon },
+  { href: '/agents', label: 'Agentes', icon: CpuIcon },
 ]
 
 export default function Sidebar() {
   const pathname = usePathname()
+  const { user, logout } = useAuth()
 
   return (
     <aside className="fixed left-0 top-0 h-screen w-60 bg-slate-950 border-r border-slate-800 flex flex-col z-50">
@@ -20,7 +22,7 @@ export default function Sidebar() {
         <h1 className="text-xl font-bold text-slate-100 tracking-tight">
           <span className="text-violet-500">Comunity</span>Agent
         </h1>
-        <p className="text-xs text-slate-500 mt-1">Management Platform</p>
+        <p className="text-xs text-slate-500 mt-1">Plataforma de Gestión</p>
       </div>
 
       <nav className="flex-1 py-4 px-3 space-y-1">
@@ -47,13 +49,21 @@ export default function Sidebar() {
       <div className="p-4 border-t border-slate-800">
         <div className="flex items-center gap-3 px-2">
           <div className="w-8 h-8 rounded-full bg-violet-600/30 flex items-center justify-center">
-            <span className="text-xs font-semibold text-violet-400">CM</span>
+            <span className="text-xs font-semibold text-violet-400">
+              {user?.name?.charAt(0)?.toUpperCase() || 'U'}
+            </span>
           </div>
-          <div>
-            <p className="text-sm font-medium text-slate-200">Admin</p>
-            <p className="text-xs text-slate-500">Pro Plan</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-slate-200 truncate">{user?.name || 'Usuario'}</p>
+            <p className="text-xs text-slate-500">{user?.plan || 'Pro'} Plan</p>
           </div>
         </div>
+        <button
+          onClick={logout}
+          className="w-full mt-3 text-xs text-slate-500 hover:text-red-400 transition-colors text-left px-2"
+        >
+          Cerrar sesión
+        </button>
       </div>
     </aside>
   )

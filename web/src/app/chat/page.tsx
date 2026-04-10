@@ -1,19 +1,15 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { useAuth } from '@/components/AuthProvider'
+import { supabase } from '@/lib/supabase'
+import type { CMClient } from '@/types/database'
 import ChatMessage from '@/components/ChatMessage'
 
 const modes = [
-  { id: 'A', label: 'Mode A', description: 'Conversational' },
-  { id: 'B', label: 'Mode B', description: 'Approval' },
-  { id: 'C', label: 'Mode C', description: 'Autonomous' },
-]
-
-const clients = [
-  'All Clients',
-  'Moda & Style',
-  'Bliss Glamping',
-  'New Client...',
+  { id: 'A', label: 'Modo A', description: 'Conversacional' },
+  { id: 'B', label: 'Modo B', description: 'Aprobación' },
+  { id: 'C', label: 'Modo C', description: 'Autónomo' },
 ]
 
 interface Message {
@@ -23,19 +19,30 @@ interface Message {
 }
 
 export default function ChatPage() {
+  const { user } = useAuth()
+  const [clients, setClients] = useState<CMClient[]>([])
+  const [selectedClient, setSelectedClient] = useState('Todos los Clientes')
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
       content:
-        'Welcome to **ComunityAgent**. I am your community management orchestrator with 10 specialized agents and 68 skills at your service.\n\nSelect a client and mode above, then tell me what you need. I can:\n\n- **Create content** for any platform\n- **Plan calendars** and schedules\n- **Analyze metrics** and competition\n- **Manage community** engagement\n- **Build brand** identity and voice\n- **Run ads**, SEO, email campaigns\n- **Generate reports** and insights\n\nHow would you like to start?',
+        'Bienvenido a **ComunityAgent**. Soy tu orquestador de gestión de comunidades con 11 agentes especializados y 68 skills a tu servicio.\n\nSelecciona un cliente y modo arriba, luego dime qué necesitas. Puedo:\n\n- **Crear contenido** para cualquier plataforma\n- **Planificar calendarios** y programaciones\n- **Analizar métricas** y competencia\n- **Gestionar comunidad** y engagement\n- **Construir marca** identidad y voz\n- **Gestionar ads**, SEO, campañas de email\n- **Generar reportes** e insights\n\n¿Cómo quieres empezar?',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ])
   const [input, setInput] = useState('')
   const [activeMode, setActiveMode] = useState('B')
-  const [selectedClient, setSelectedClient] = useState('Moda & Style')
   const [isLoading, setIsLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!user) return
+    supabase
+      .from('cm_clients')
+      .select('*')
+      .eq('user_id', user.id)
+      .then(({ data }) => setClients(data ?? []))
+  }, [user])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -97,7 +104,7 @@ export default function ChatPage() {
         ...newMessages,
         {
           role: 'assistant',
-          content: 'Connection error. Please check your API configuration.',
+          content: 'Error de conexión. Verifica la configuración de tu API.',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ])
@@ -105,6 +112,8 @@ export default function ChatPage() {
       setIsLoading(false)
     }
   }
+
+  const modeLabel = activeMode === 'A' ? 'A (Conversacional)' : activeMode === 'B' ? 'B (Aprobación)' : 'C (Autónomo)'
 
   return (
     <div className="flex flex-col h-screen">
@@ -137,9 +146,10 @@ export default function ChatPage() {
           onChange={(e) => setSelectedClient(e.target.value)}
           className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500"
         >
+          <option value="Todos los Clientes">Todos los Clientes</option>
           {clients.map((client) => (
-            <option key={client} value={client}>
-              {client}
+            <option key={client.id} value={client.name}>
+              {client.name}
             </option>
           ))}
         </select>
@@ -175,7 +185,7 @@ export default function ChatPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-            placeholder={`Message ComunityAgent about ${selectedClient}...`}
+            placeholder={`Mensaje para ComunityAgent sobre ${selectedClient}...`}
             disabled={isLoading}
             className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500 transition-colors disabled:opacity-50"
           />
@@ -184,11 +194,11 @@ export default function ChatPage() {
             disabled={isLoading || !input.trim()}
             className="bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 disabled:opacity-50 text-white rounded-xl px-5 py-3 text-sm font-medium transition-colors"
           >
-            {isLoading ? '...' : 'Send'}
+            {isLoading ? '...' : 'Enviar'}
           </button>
         </div>
         <p className="text-center text-xs text-slate-600 mt-2 max-w-3xl mx-auto">
-          Mode {activeMode === 'A' ? 'A (Conversational)' : activeMode === 'B' ? 'B (Approval)' : 'C (Autonomous)'} | {selectedClient} | Powered by Claude
+          Modo {modeLabel} | {selectedClient} | Impulsado por Claude
         </p>
       </div>
     </div>

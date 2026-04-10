@@ -1,7 +1,6 @@
 import type { Metadata } from 'next'
 import './globals.css'
-import AuthProvider from '@/components/AuthProvider'
-import AppShell from '@/components/AppShell'
+import Sidebar from '@/components/Sidebar'
 
 export const metadata: Metadata = {
   title: 'ComunityAgent - Community Manager Platform',
@@ -16,11 +15,12 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className="bg-slate-950 text-slate-100 antialiased">
-        <AuthProvider>
-          <AppShell>
+        <div className="flex min-h-screen">
+          <Sidebar />
+          <main className="flex-1 ml-60">
             {children}
-          </AppShell>
-        </AuthProvider>
+          </main>
+        </div>
       </body>
     </html>
   )

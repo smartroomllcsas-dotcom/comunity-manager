@@ -1,31 +1,70 @@
-const stats = [
-  { label: 'Active Clients', value: '12', change: '+2 this month', color: 'text-violet-400' },
-  { label: 'Skills Loaded', value: '47', change: '5 categories', color: 'text-emerald-400' },
-  { label: 'Agents Online', value: '4/11', change: 'Phase 1 active', color: 'text-amber-400' },
-  { label: 'Tools Available', value: '23', change: 'All operational', color: 'text-sky-400' },
-]
+'use client'
 
-const quickActions = [
-  { label: 'Onboard Client', description: 'Set up a new client profile', href: '/clients', icon: UserPlusIcon },
-  { label: 'Create Content', description: 'Generate posts with AI', href: '/chat', icon: PenIcon },
-  { label: 'View Calendar', description: 'Check content schedule', href: '/calendar', icon: CalIcon },
-  { label: 'Generate Report', description: 'Analytics & performance', href: '#', icon: ChartIcon },
-]
-
-const recentActivity = [
-  { action: 'Content published for TechStart', time: '2 hours ago', status: 'success' },
-  { action: 'New client onboarded: FreshBites', time: '5 hours ago', status: 'success' },
-  { action: 'Weekly report generated for Bloom & Co', time: '1 day ago', status: 'success' },
-  { action: 'Calendar updated: 15 posts scheduled', time: '1 day ago', status: 'info' },
-  { action: 'Agent training completed: Content Writer', time: '2 days ago', status: 'info' },
-]
+import { useEffect, useState } from 'react'
+import { useAuth } from '@/components/AuthProvider'
+import { supabase } from '@/lib/supabase'
+import type { CMClient, CMAgent, CMActivityLog } from '@/types/database'
 
 export default function Dashboard() {
+  const { user } = useAuth()
+  const [clients, setClients] = useState<CMClient[]>([])
+  const [agents, setAgents] = useState<CMAgent[]>([])
+  const [activity, setActivity] = useState<CMActivityLog[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!user) return
+    Promise.all([
+      supabase.from('cm_clients').select('*').eq('user_id', user.id),
+      supabase.from('cm_agents').select('*'),
+      supabase.from('cm_activity_log').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5),
+    ]).then(([clientsRes, agentsRes, activityRes]) => {
+      setClients(clientsRes.data ?? [])
+      setAgents(agentsRes.data ?? [])
+      setActivity(activityRes.data ?? [])
+      setLoading(false)
+    })
+  }, [user])
+
+  const activeAgents = agents.filter(a => a.status === 'active').length
+  const totalSkills = agents.reduce((sum, a) => sum + a.skills, 0)
+
+  const stats = [
+    { label: 'Clientes Activos', value: String(clients.filter(c => c.status === 'active').length), change: `${clients.length} total`, color: 'text-violet-400' },
+    { label: 'Skills Cargados', value: String(totalSkills), change: `${agents.length} agentes`, color: 'text-emerald-400' },
+    { label: 'Agentes Online', value: `${activeAgents}/${agents.length}`, change: 'Fase 1 activa', color: 'text-amber-400' },
+    { label: 'Posts del Mes', value: String(clients.reduce((s, c) => s + c.posts_this_month, 0)), change: 'En todos los clientes', color: 'text-sky-400' },
+  ]
+
+  const quickActions = [
+    { label: 'Agregar Cliente', description: 'Configurar nuevo perfil', href: '/clients', icon: UserPlusIcon },
+    { label: 'Crear Contenido', description: 'Generar posts con IA', href: '/chat', icon: PenIcon },
+    { label: 'Ver Calendario', description: 'Revisar programación', href: '/calendar', icon: CalIcon },
+    { label: 'Generar Reporte', description: 'Analíticas y rendimiento', href: '#', icon: ChartIcon },
+  ]
+
+  function timeAgo(dateStr: string) {
+    const diff = Date.now() - new Date(dateStr).getTime()
+    const mins = Math.floor(diff / 60000)
+    if (mins < 60) return `${mins}m ago`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24) return `${hrs}h ago`
+    return `${Math.floor(hrs / 24)}d ago`
+  }
+
+  if (loading) {
+    return (
+      <div className="p-8 flex items-center justify-center min-h-[60vh]">
+        <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
   return (
     <div className="p-8">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-100">Welcome back</h1>
-        <p className="text-slate-400 mt-1">Here is what is happening across your managed communities.</p>
+        <h1 className="text-2xl font-bold text-slate-100">Bienvenido{user?.name ? `, ${user.name}` : ''}</h1>
+        <p className="text-slate-400 mt-1">Esto es lo que está pasando en tus comunidades gestionadas.</p>
       </div>
 
       {/* Stats Grid */}
@@ -44,7 +83,7 @@ export default function Dashboard() {
 
       {/* Quick Actions */}
       <div className="mb-8">
-        <h2 className="text-lg font-semibold text-slate-200 mb-4">Quick Actions</h2>
+        <h2 className="text-lg font-semibold text-slate-200 mb-4">Acciones Rápidas</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {quickActions.map((action) => {
             const Icon = action.icon
@@ -67,26 +106,32 @@ export default function Dashboard() {
 
       {/* Recent Activity */}
       <div>
-        <h2 className="text-lg font-semibold text-slate-200 mb-4">Recent Activity</h2>
+        <h2 className="text-lg font-semibold text-slate-200 mb-4">Actividad Reciente</h2>
         <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-          {recentActivity.map((item, i) => (
-            <div
-              key={i}
-              className={`flex items-center justify-between px-5 py-3.5 ${
-                i < recentActivity.length - 1 ? 'border-b border-slate-800' : ''
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <div
-                  className={`w-2 h-2 rounded-full ${
-                    item.status === 'success' ? 'bg-emerald-500' : 'bg-sky-500'
-                  }`}
-                />
-                <span className="text-sm text-slate-300">{item.action}</span>
-              </div>
-              <span className="text-xs text-slate-500">{item.time}</span>
+          {activity.length === 0 ? (
+            <div className="px-5 py-8 text-center text-sm text-slate-500">
+              Sin actividad aún. ¡Empieza agregando tu primer cliente!
             </div>
-          ))}
+          ) : (
+            activity.map((item, i) => (
+              <div
+                key={item.id}
+                className={`flex items-center justify-between px-5 py-3.5 ${
+                  i < activity.length - 1 ? 'border-b border-slate-800' : ''
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-2 h-2 rounded-full ${
+                      item.status === 'success' ? 'bg-emerald-500' : item.status === 'error' ? 'bg-red-500' : 'bg-sky-500'
+                    }`}
+                  />
+                  <span className="text-sm text-slate-300">{item.action}</span>
+                </div>
+                <span className="text-xs text-slate-500">{timeAgo(item.created_at)}</span>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>
