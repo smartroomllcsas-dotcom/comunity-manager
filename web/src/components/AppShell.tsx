@@ -6,7 +6,8 @@ import Sidebar from './Sidebar'
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
-  if (pathname === '/login') {
+  const publicRoutes = ['/login', '/privacy-policy', '/data-deletion', '/terms']
+  if (publicRoutes.includes(pathname)) {
     return <>{children}</>
   }
 
