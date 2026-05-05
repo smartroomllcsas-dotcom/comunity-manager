@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 import AuthProvider from '@/components/AuthProvider'
 import AppShell from '@/components/AppShell'
+import FacebookSDK from '@/components/FacebookSDK'
 
 export const metadata: Metadata = {
   title: 'ComunityAgent - Community Manager Platform',
@@ -16,6 +17,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className="bg-slate-950 text-slate-100 antialiased">
+        <FacebookSDK />
         <AuthProvider>
           <AppShell>
             {children}

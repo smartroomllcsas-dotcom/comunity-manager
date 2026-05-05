@@ -6,7 +6,7 @@ function getVerifyToken() {
   return process.env.META_WEBHOOK_VERIFY_TOKEN || DEFAULT_VERIFY_TOKEN
 }
 
-export function verifyMetaWebhook(request: NextRequest, channel: 'whatsapp' | 'messenger') {
+export function verifyMetaWebhook(request: NextRequest, channel: 'whatsapp' | 'messenger' | 'facebook') {
   const mode = request.nextUrl.searchParams.get('hub.mode')
   const token = request.nextUrl.searchParams.get('hub.verify_token')
   const challenge = request.nextUrl.searchParams.get('hub.challenge')
@@ -38,7 +38,7 @@ export function verifyMetaWebhook(request: NextRequest, channel: 'whatsapp' | 'm
   })
 }
 
-export async function receiveMetaWebhook(request: NextRequest, channel: 'whatsapp' | 'messenger') {
+export async function receiveMetaWebhook(request: NextRequest, channel: 'whatsapp' | 'messenger' | 'facebook') {
   let payload: unknown = null
 
   try {

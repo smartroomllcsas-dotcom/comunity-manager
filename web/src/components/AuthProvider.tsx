@@ -17,26 +17,41 @@ export function useAuth() {
   return useContext(AuthContext)
 }
 
+const PUBLIC_ROUTES = ['/login', '/privacy-policy', '/data-deletion', '/terms', '/test-fb-login']
+
 export default function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<CMUser | null>(null)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
   const pathname = usePathname()
+  const isPublic = PUBLIC_ROUTES.includes(pathname)
 
   useEffect(() => {
+    if (isPublic) {
+      setLoading(false)
+      return
+    }
     getCurrentUser().then((u) => {
       setUser(u)
       setLoading(false)
-      if (!u && pathname !== '/login') {
+      if (!u) {
         router.push('/login')
       }
     })
-  }, [pathname, router])
+  }, [pathname, router, isPublic])
 
   const logout = () => {
     doLogout()
     setUser(null)
     router.push('/login')
+  }
+
+  if (isPublic) {
+    return (
+      <AuthContext.Provider value={{ user, loading: false, logout }}>
+        {children}
+      </AuthContext.Provider>
+    )
   }
 
   if (loading) {
@@ -50,7 +65,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     )
   }
 
-  if (!user && pathname !== '/login') {
+  if (!user) {
     return null
   }
 
