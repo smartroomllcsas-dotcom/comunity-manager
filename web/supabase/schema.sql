@@ -88,6 +88,48 @@ CREATE TABLE IF NOT EXISTS cm_chat_history (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Meta OAuth states used during Facebook/Instagram/Ads login
+CREATE TABLE IF NOT EXISTS cm_oauth_states (
+  state TEXT PRIMARY KEY,
+  client_id UUID NOT NULL REFERENCES cm_clients(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Connected Meta business assets per client
+CREATE TABLE IF NOT EXISTS cm_social_accounts (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  client_id UUID NOT NULL REFERENCES cm_clients(id) ON DELETE CASCADE,
+  meta_user_id TEXT NOT NULL,
+  access_token TEXT NOT NULL,
+  page_id TEXT,
+  page_name TEXT,
+  page_access_token TEXT,
+  instagram_id TEXT,
+  instagram_username TEXT,
+  ad_account_id TEXT,
+  ad_account_name TEXT,
+  business_id TEXT,
+  scopes TEXT[] DEFAULT '{}',
+  token_expires_at TIMESTAMPTZ,
+  connected_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Connected WhatsApp Cloud API assets per client
+CREATE TABLE IF NOT EXISTS cm_whatsapp_accounts (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  client_id UUID REFERENCES cm_clients(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES cm_users(id) ON DELETE CASCADE,
+  waba_id TEXT NOT NULL,
+  phone_number_id TEXT NOT NULL,
+  access_token TEXT NOT NULL,
+  display_phone_number TEXT,
+  verified_name TEXT,
+  connected_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (waba_id, phone_number_id)
+);
+
 -- RLS Policies
 ALTER TABLE cm_users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cm_clients ENABLE ROW LEVEL SECURITY;
@@ -96,6 +138,9 @@ ALTER TABLE cm_scheduled_posts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cm_agents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cm_activity_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cm_chat_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cm_oauth_states ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cm_social_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cm_whatsapp_accounts ENABLE ROW LEVEL SECURITY;
 
 -- Agents are readable by all authenticated
 CREATE POLICY "cm_agents_read" ON cm_agents FOR SELECT USING (true);
@@ -118,6 +163,11 @@ CREATE POLICY "cm_activity_own" ON cm_activity_log FOR ALL USING (true);
 -- Chat belongs to user
 CREATE POLICY "cm_chat_own" ON cm_chat_history FOR ALL USING (true);
 
+-- Meta OAuth states and connected assets
+CREATE POLICY "cm_oauth_states_own" ON cm_oauth_states FOR ALL USING (true);
+CREATE POLICY "cm_social_accounts_own" ON cm_social_accounts FOR ALL USING (true);
+CREATE POLICY "cm_whatsapp_accounts_own" ON cm_whatsapp_accounts FOR ALL USING (true);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_cm_clients_user ON cm_clients(user_id);
 CREATE INDEX IF NOT EXISTS idx_cm_posts_client ON cm_scheduled_posts(client_id);
@@ -125,6 +175,9 @@ CREATE INDEX IF NOT EXISTS idx_cm_posts_user ON cm_scheduled_posts(user_id);
 CREATE INDEX IF NOT EXISTS idx_cm_activity_user ON cm_activity_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_cm_chat_user ON cm_chat_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_cm_pillars_client ON cm_content_pillars(client_id);
+CREATE INDEX IF NOT EXISTS idx_cm_social_client ON cm_social_accounts(client_id);
+CREATE INDEX IF NOT EXISTS idx_cm_whatsapp_client ON cm_whatsapp_accounts(client_id);
+CREATE INDEX IF NOT EXISTS idx_cm_whatsapp_user ON cm_whatsapp_accounts(user_id);
 
 -- Seed default agents
 INSERT INTO cm_agents (name, role, description, skills, phase, status) VALUES

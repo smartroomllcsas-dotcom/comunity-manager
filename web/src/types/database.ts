@@ -68,6 +68,44 @@ export interface CMActivityLog {
   created_at: string
 }
 
+export interface CMOAuthState {
+  state: string
+  client_id: string
+  created_at: string
+}
+
+export interface CMSocialAccount {
+  id: string
+  client_id: string
+  meta_user_id: string
+  access_token: string
+  page_id: string | null
+  page_name: string | null
+  page_access_token: string | null
+  instagram_id: string | null
+  instagram_username: string | null
+  ad_account_id: string | null
+  ad_account_name: string | null
+  business_id: string | null
+  scopes: string[]
+  token_expires_at: string | null
+  connected_at: string
+  updated_at: string
+}
+
+export interface CMWhatsAppAccount {
+  id: string
+  client_id: string | null
+  user_id: string | null
+  waba_id: string
+  phone_number_id: string
+  access_token: string
+  display_phone_number: string | null
+  verified_name: string | null
+  connected_at: string
+  updated_at: string
+}
+
 export interface CMChatMessage {
   id: string
   user_id: string

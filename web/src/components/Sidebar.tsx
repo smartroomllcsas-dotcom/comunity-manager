@@ -19,10 +19,19 @@ export default function Sidebar() {
   return (
     <aside className="fixed left-0 top-0 h-screen w-60 bg-slate-950 border-r border-slate-800 flex flex-col z-50">
       <div className="p-6 border-b border-slate-800">
-        <h1 className="text-xl font-bold text-slate-100 tracking-tight">
-          <span className="text-violet-500">Comunity</span>Agent
-        </h1>
-        <p className="text-xs text-slate-500 mt-1">Plataforma de Gestión</p>
+        <div className="flex items-center gap-3">
+          <img
+            src="/community-manager-logo.png"
+            alt="Community Manager"
+            className="h-11 w-11 rounded-2xl border border-white/10 object-cover shadow-lg shadow-cyan-500/10"
+          />
+          <div>
+            <h1 className="text-xl font-bold text-slate-100 tracking-tight">
+              <span className="text-violet-500">Comunity</span>Agent
+            </h1>
+            <p className="text-xs text-slate-500 mt-1">Plataforma de Gestión</p>
+          </div>
+        </div>
       </div>
 
       <nav className="flex-1 py-4 px-3 space-y-1">

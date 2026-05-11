@@ -9,15 +9,15 @@ export default function AgentsPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    supabase
-      .from('cm_agents')
-      .select('*')
-      .order('phase', { ascending: true })
-      .order('name', { ascending: true })
-      .then(({ data }) => {
-        setAgents(data ?? [])
-        setLoading(false)
-      })
+    ;(async () => {
+      const result: { data: CMAgent[] | null } = await supabase
+        .from('cm_agents')
+        .select('*')
+        .order('phase', { ascending: true })
+        .order('name', { ascending: true })
+      setAgents(result.data ?? [])
+      setLoading(false)
+    })()
   }, [])
 
   const activeCount = agents.filter((a) => a.status === 'active').length

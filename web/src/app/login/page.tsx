@@ -36,6 +36,13 @@ export default function LoginPage() {
     <div className="min-h-screen bg-slate-950 flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
+          <div className="mx-auto mb-4 h-20 w-20 overflow-hidden rounded-3xl border border-white/10 bg-white/5 shadow-lg shadow-cyan-500/10">
+            <img
+              src="/community-manager-logo.png"
+              alt="Community Manager"
+              className="h-full w-full object-cover"
+            />
+          </div>
           <h1 className="text-3xl font-bold text-slate-100 tracking-tight">
             <span className="text-violet-500">Comunity</span>Agent
           </h1>

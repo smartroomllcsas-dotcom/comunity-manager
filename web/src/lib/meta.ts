@@ -2,7 +2,8 @@
 // Meta Graph API - OAuth & Content Publishing (Instagram + Facebook)
 // =============================================================================
 
-const META_GRAPH_URL = 'https://graph.facebook.com/v21.0'
+const META_GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v21.0'
+const META_GRAPH_URL = `https://graph.facebook.com/${META_GRAPH_VERSION}`
 
 // Transient error codes that should be retried
 const TRANSIENT_ERROR_CODES = [1, 2, 4, 17]
@@ -71,11 +72,11 @@ async function metaFetch(url: string, options: RequestInit = {}, maxRetries = 3)
 
 export function getOAuthUrl(redirectUri: string, state: string): string {
   const scopes = [
-    'pages_manage_posts',
+    'business_management',
     'pages_read_engagement',
     'pages_show_list',
-    'instagram_basic',
-    'instagram_content_publish',
+    'ads_read',
+    'ads_management',
   ].join(',')
 
   const params = new URLSearchParams({
@@ -122,6 +123,31 @@ export async function getUserPages(accessToken: string) {
 
 export async function getUserProfile(accessToken: string) {
   return metaFetch(`${META_GRAPH_URL}/me?fields=id,name,email&access_token=${accessToken}`)
+}
+
+export async function getUserAdAccounts(accessToken: string) {
+  const data = await metaFetch(
+    `${META_GRAPH_URL}/me/adaccounts?fields=id,account_id,name,business,account_status&access_token=${accessToken}`
+  )
+  return data.data || []
+}
+
+export async function getAdCampaigns(adAccountId: string, accessToken: string) {
+  return metaFetch(
+    `${META_GRAPH_URL}/act_${adAccountId}/campaigns?fields=id,name,status,objective,updated_time&access_token=${accessToken}`
+  )
+}
+
+export async function getAdInsights(adAccountId: string, accessToken: string) {
+  return metaFetch(
+    `${META_GRAPH_URL}/act_${adAccountId}/insights?date_preset=last_7d&fields=spend,impressions,clicks,ctr,cpc&access_token=${accessToken}`
+  )
+}
+
+export async function getPageInsights(pageId: string, pageToken: string) {
+  return metaFetch(
+    `${META_GRAPH_URL}/${pageId}/insights?metric=page_impressions,page_engaged_users,page_post_engagements&access_token=${pageToken}`
+  )
 }
 
 // -----------------------------------------------------------------------------
@@ -193,7 +219,7 @@ export async function publishToInstagram(igUserId: string, pageToken: string, op
     throw new Error('Se requiere imageUrl o videoUrl para publicar en Instagram')
   }
 
-  const container = await metaFetch(`https://graph.instagram.com/v21.0/${igUserId}/media`, {
+  const container = await metaFetch(`${META_GRAPH_URL}/${igUserId}/media`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(containerParams),
@@ -205,7 +231,7 @@ export async function publishToInstagram(igUserId: string, pageToken: string, op
     for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 2000))
       const status = await metaFetch(
-        `https://graph.instagram.com/v21.0/${container.id}?fields=status_code&access_token=${pageToken}`
+        `${META_GRAPH_URL}/${container.id}?fields=status_code&access_token=${pageToken}`
       )
       if (status.status_code === 'FINISHED') { ready = true; break }
       if (status.status_code === 'ERROR') throw new Error('Error procesando video en Instagram')
@@ -214,7 +240,7 @@ export async function publishToInstagram(igUserId: string, pageToken: string, op
   }
 
   // Step 3: Publish container
-  return metaFetch(`https://graph.instagram.com/v21.0/${igUserId}/media_publish`, {
+  return metaFetch(`${META_GRAPH_URL}/${igUserId}/media_publish`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({

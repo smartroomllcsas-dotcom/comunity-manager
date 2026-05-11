@@ -6,6 +6,7 @@ import {
   getLongLivedToken,
   getUserPages,
   getUserProfile,
+  getUserAdAccounts,
 } from '@/lib/meta'
 import { supabase } from '@/lib/supabase'
 
@@ -57,6 +58,7 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
     const longToken = await getLongLivedToken(shortToken.access_token)
     const profile = await getUserProfile(longToken.access_token)
     const pages = await getUserPages(longToken.access_token)
+    const adAccounts = await getUserAdAccounts(longToken.access_token)
 
     if (pages.length === 0) {
       return NextResponse.redirect(`${appUrl}/clients?meta_error=No+se+encontraron+paginas+de+Facebook`)
@@ -64,6 +66,7 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
 
     const page = pages[0]
     const igAccount = page.instagram_business_account
+    const adAccount = adAccounts[0]
     const tokenExpires = new Date()
     tokenExpires.setSeconds(tokenExpires.getSeconds() + (longToken.expires_in || 5184000))
 
@@ -77,18 +80,28 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
       client_id: clientId,
       page_id: page.id,
       page_name: page.name,
+      access_token: longToken.access_token,
       page_access_token: page.access_token,
       instagram_id: igAccount?.id || null,
       instagram_username: igAccount?.username || null,
+      ad_account_id: adAccount?.account_id || adAccount?.id?.replace('act_', '') || null,
+      ad_account_name: adAccount?.name || null,
+      business_id: adAccount?.business?.id || adAccount?.business || null,
       meta_user_id: profile.id,
       connected_at: new Date().toISOString(),
       token_expires_at: tokenExpires.toISOString(),
     }
 
     if (existing) {
-      await supabase.from('cm_social_accounts').update(socialData).eq('id', existing.id)
+      const { error: updateError } = await supabase.from('cm_social_accounts').update(socialData).eq('id', existing.id)
+      if (updateError) {
+        throw updateError
+      }
     } else {
-      await supabase.from('cm_social_accounts').insert(socialData)
+      const { error: insertError } = await supabase.from('cm_social_accounts').insert(socialData)
+      if (insertError) {
+        throw insertError
+      }
     }
 
     const { data: client } = await supabase
@@ -99,13 +112,22 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
     if (client) {
       await supabase.from('cm_activity_log').insert({
         user_id: client.user_id,
-        action: `Redes conectadas: ${page.name}${igAccount ? ` + @${igAccount.username}` : ''} para ${client.name}`,
+        action: `Redes conectadas: ${page.name}${igAccount ? ` + @${igAccount.username}` : ''}${adAccount?.name ? ` + Ads: ${adAccount.name}` : ''} para ${client.name}`,
         status: 'success',
       })
     }
 
-    const successMsg = `Conectado: ${page.name}${igAccount ? ` + @${igAccount.username}` : ''}`
-    return NextResponse.redirect(`${appUrl}/clients?meta_success=${encodeURIComponent(successMsg)}`)
+    const successMsg = `Conectado: ${page.name}${igAccount ? ` + @${igAccount.username}` : ''}${adAccount?.name ? ` + Ads: ${adAccount.name}` : ''}`
+    const traceParams = new URLSearchParams({
+      meta_success: successMsg,
+      meta_client_id: clientId,
+      meta_flow: 'facebook_instagram_ads',
+      meta_page: page.name,
+      meta_page_id: page.id,
+      meta_instagram: igAccount?.username || '',
+      meta_ad_account: adAccount?.name || '',
+    })
+    return NextResponse.redirect(`${appUrl}/clients?${traceParams.toString()}`)
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error desconocido'
     console.error('Meta OAuth error:', msg)

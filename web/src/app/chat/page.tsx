@@ -37,11 +37,13 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!user) return
-    supabase
-      .from('cm_clients')
-      .select('*')
-      .eq('user_id', user.id)
-      .then(({ data }) => setClients(data ?? []))
+    ;(async () => {
+      const result: { data: CMClient[] | null } = await supabase
+        .from('cm_clients')
+        .select('*')
+        .eq('user_id', user.id)
+      setClients(result.data ?? [])
+    })()
   }, [user])
 
   useEffect(() => {

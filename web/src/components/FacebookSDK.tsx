@@ -3,7 +3,7 @@
 import Script from 'next/script'
 
 export default function FacebookSDK() {
-  const appId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID
+  const appId = process.env.NEXT_PUBLIC_META_APP_ID || process.env.NEXT_PUBLIC_FACEBOOK_APP_ID
   if (!appId) return null
 
   return (

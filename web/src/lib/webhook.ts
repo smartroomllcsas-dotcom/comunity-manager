@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-const DEFAULT_VERIFY_TOKEN = 'smarttalk_wh_verify_8k2m9x'
+import { randomUUID } from 'crypto'
+import { supabase } from '@/lib/supabase'
 
 function getVerifyToken() {
-  return process.env.META_WEBHOOK_VERIFY_TOKEN || DEFAULT_VERIFY_TOKEN
+  return process.env.META_WEBHOOK_VERIFY_TOKEN || ''
 }
 
 export function verifyMetaWebhook(request: NextRequest, channel: 'whatsapp' | 'messenger' | 'facebook') {
@@ -52,8 +52,162 @@ export async function receiveMetaWebhook(request: NextRequest, channel: 'whatsap
 
   console.log(`[meta-webhook:${channel}]`, JSON.stringify(payload))
 
+  if (channel === 'whatsapp') {
+    await persistWhatsAppWebhook(payload)
+  }
+
   return NextResponse.json({
     received: true,
     channel,
   })
+}
+
+type WhatsAppWebhookValue = {
+  metadata?: {
+    phone_number_id?: string
+    display_phone_number?: string
+  }
+  messages?: Array<{
+    id?: string
+    from?: string
+    timestamp?: string
+    type?: string
+    text?: { body?: string }
+    button?: { text?: string }
+    interactive?: {
+      type?: string
+      button_reply?: { id?: string; title?: string }
+      list_reply?: { id?: string; title?: string; description?: string }
+    }
+    image?: { caption?: string }
+    video?: { caption?: string }
+    audio?: unknown
+    document?: { caption?: string; filename?: string }
+  }>
+  statuses?: Array<{
+    id?: string
+    status?: string
+    timestamp?: string
+    recipient_id?: string
+    conversation?: { id?: string; origin?: { type?: string } }
+    pricing?: { billable?: boolean; category?: string }
+  }>
+}
+
+function safeJson(value: unknown) {
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return '{}'
+  }
+}
+
+function extractMessageText(message: NonNullable<WhatsAppWebhookValue['messages']>[number]) {
+  if (message.text?.body) return message.text.body
+  if (message.button?.text) return message.button.text
+  if (message.interactive?.button_reply?.title) return message.interactive.button_reply.title
+  if (message.interactive?.list_reply?.title) return message.interactive.list_reply.title
+  if (message.image?.caption) return message.image.caption
+  if (message.video?.caption) return message.video.caption
+  if (message.document?.caption) return message.document.caption
+  if (message.document?.filename) return message.document.filename
+  return message.type || 'Mensaje de WhatsApp'
+}
+
+async function persistWhatsAppWebhook(payload: unknown) {
+  const entries = Array.isArray((payload as { entry?: unknown[] })?.entry)
+    ? ((payload as { entry?: WhatsAppWebhookEntry[] }).entry as WhatsAppWebhookEntry[])
+    : []
+
+  for (const entry of entries) {
+    for (const change of entry.changes || []) {
+      const value = change.value || {}
+      const phoneNumberId =
+        value.metadata?.phone_number_id ||
+        (entry.id && typeof entry.id === 'string' ? entry.id : null)
+
+      if (!phoneNumberId) continue
+
+      const { data: account } = await supabase
+        .from('cm_whatsapp_accounts')
+        .select('client_id,user_id,waba_id,phone_number_id,display_phone_number')
+        .eq(value.metadata?.phone_number_id ? 'phone_number_id' : 'waba_id', phoneNumberId)
+        .maybeSingle()
+
+      if (!account) {
+        console.warn(`[meta-webhook:whatsapp] cuenta no encontrada para ${phoneNumberId}`)
+        continue
+      }
+
+      const clientContext = `whatsapp:${account.client_id}`
+      let ownerUserId = account.user_id
+
+      if (!ownerUserId && account.client_id) {
+        const { data: client } = await supabase
+          .from('cm_clients')
+          .select('user_id')
+          .eq('id', account.client_id)
+          .maybeSingle()
+        ownerUserId = client?.user_id ?? null
+      }
+
+      if (!ownerUserId) {
+        console.warn(`[meta-webhook:whatsapp] cuenta ${account.phone_number_id} sin user_id para guardar historial`)
+        continue
+      }
+
+      const messages = Array.isArray(value.messages) ? value.messages : []
+      for (const message of messages) {
+        const content = extractMessageText(message)
+        const direction = 'inbound'
+        const from = message.from || 'WhatsApp'
+        const { error: chatError } = await supabase.from('cm_chat_history').insert({
+          id: randomUUID(),
+          user_id: ownerUserId,
+          client_context: clientContext,
+          mode: 'B',
+          role: 'user',
+          content: `${from}: ${content}`,
+        })
+
+        if (chatError) {
+          console.error('[meta-webhook:whatsapp] error guardando mensaje', chatError.message)
+          continue
+        }
+
+        const { error: activityError } = await supabase.from('cm_activity_log').insert({
+          id: randomUUID(),
+          user_id: ownerUserId,
+          action: `WhatsApp ${direction}: ${content}`,
+          status: 'info',
+        })
+
+        if (activityError) {
+          console.error('[meta-webhook:whatsapp] error guardando actividad', activityError.message)
+        }
+      }
+
+      const statuses = Array.isArray(value.statuses) ? value.statuses : []
+      for (const status of statuses) {
+        const { error: statusError } = await supabase.from('cm_activity_log').insert({
+          id: randomUUID(),
+          user_id: ownerUserId,
+          action: `WhatsApp status ${status.status || 'desconocido'} para ${status.recipient_id || phoneNumberId}`,
+          status: status.status === 'failed' ? 'error' : 'info',
+        })
+
+        if (statusError) {
+          console.error('[meta-webhook:whatsapp] error guardando estado', statusError.message)
+        }
+      }
+    }
+  }
+}
+
+type WhatsAppWebhookEntry = {
+  id?: string
+  changes?: Array<{
+    field?: string
+    value?: WhatsAppWebhookValue
+  }>
 }

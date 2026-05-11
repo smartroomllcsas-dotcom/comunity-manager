@@ -7,6 +7,11 @@ import FacebookSDK from '@/components/FacebookSDK'
 export const metadata: Metadata = {
   title: 'ComunityAgent - Community Manager Platform',
   description: 'AI-powered community management platform',
+  icons: {
+    icon: '/community-manager-logo.png',
+    shortcut: '/community-manager-logo.png',
+    apple: '/community-manager-logo.png',
+  },
 }
 
 export default function RootLayout({

@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { PostgrestClient } from '@supabase/postgrest-js'
 import { readFileSync } from 'fs'
 
 const env = readFileSync(new URL('../.env.local', import.meta.url), 'utf8')
@@ -10,14 +11,25 @@ const env = readFileSync(new URL('../.env.local', import.meta.url), 'utf8')
     return acc
   }, {})
 
-const url = env.NEXT_PUBLIC_SUPABASE_URL
-const key = env.SUPABASE_SERVICE_ROLE_KEY
-if (!url || !key) {
-  console.error('Missing SUPABASE env vars')
+const provider = (env.NEXT_PUBLIC_DB_PROVIDER || env.DB_PROVIDER || 'supabase').toLowerCase()
+const isPostgrest = provider === 'postgrest'
+const url = env.NEXT_PUBLIC_SUPABASE_URL || env.NEXT_PUBLIC_POSTGREST_URL
+const key = env.SUPABASE_SERVICE_ROLE_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY || env.NEXT_PUBLIC_POSTGREST_API_KEY
+if (!url) {
+  console.error('Missing database URL env var')
   process.exit(1)
 }
 
-const supabase = createClient(url, key, { auth: { persistSession: false } })
+const supabase = isPostgrest
+  ? new PostgrestClient(url, {
+      headers: key
+        ? {
+            apikey: key,
+            Authorization: `Bearer ${key}`,
+          }
+        : undefined,
+    })
+  : createClient(url, key, { auth: { persistSession: false } })
 
 const email = 'dev@comunitymanager.io'
 const password = 'Dev2026Admin!'

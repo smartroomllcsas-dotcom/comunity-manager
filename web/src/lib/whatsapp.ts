@@ -49,3 +49,66 @@ export async function getPhoneNumberDetails(
   }
   return { id: phoneNumberId, ...data }
 }
+
+export async function subscribeWabaToWebhook(wabaId: string, accessToken: string) {
+  const res = await fetch(`${META_GRAPH_URL}/${wabaId}/subscribed_apps`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  })
+  const data = await res.json()
+  if (!res.ok || data.error) {
+    throw new Error(`WA subscribe webhook: ${data.error?.message || 'Error desconocido'}`)
+  }
+  return data
+}
+
+export async function registerWhatsAppNumber(phoneNumberId: string, accessToken: string, pin: string) {
+  const res = await fetch(`${META_GRAPH_URL}/${phoneNumberId}/register`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      pin,
+    }),
+  })
+  const data = await res.json()
+  if (!res.ok || data.error) {
+    throw new Error(`WA register number: ${data.error?.message || 'Error desconocido'}`)
+  }
+  return data
+}
+
+export async function sendWhatsAppTextMessage(
+  phoneNumberId: string,
+  accessToken: string,
+  to: string,
+  body: string
+) {
+  const res = await fetch(`${META_GRAPH_URL}/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'text',
+      text: {
+        preview_url: false,
+        body,
+      },
+    }),
+  })
+  const data = await res.json()
+  if (!res.ok || data.error) {
+    throw new Error(`WA test message: ${data.error?.message || 'Error desconocido'}`)
+  }
+  return data
+}

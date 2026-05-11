@@ -34,24 +34,26 @@ export default function CalendarPage() {
 
   useEffect(() => {
     if (!user) return
-    supabase
-      .from('cm_clients')
-      .select('*')
-      .eq('user_id', user.id)
-      .then(({ data }) => {
-        setClients(data ?? [])
-        if (data && data.length > 0) setSelectedClientId(data[0].id)
-        setLoading(false)
-      })
+    ;(async () => {
+      const result: { data: CMClient[] | null } = await supabase
+        .from('cm_clients')
+        .select('*')
+        .eq('user_id', user.id)
+      setClients(result.data ?? [])
+      if (result.data && result.data.length > 0) setSelectedClientId(result.data[0].id)
+      setLoading(false)
+    })()
   }, [user])
 
   useEffect(() => {
     if (!selectedClientId) return
-    supabase
-      .from('cm_scheduled_posts')
-      .select('*')
-      .eq('client_id', selectedClientId)
-      .then(({ data }) => setPosts(data ?? []))
+    ;(async () => {
+      const result: { data: CMScheduledPost[] | null } = await supabase
+        .from('cm_scheduled_posts')
+        .select('*')
+        .eq('client_id', selectedClientId)
+      setPosts(result.data ?? [])
+    })()
   }, [selectedClientId])
 
   const selectedClient = clients.find(c => c.id === selectedClientId)
