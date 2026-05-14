@@ -1,3 +1,6 @@
+// SmartTalk inbox WhatsApp webhook (persiste en schema smarttalk).
+// Verifica HMAC SHA-256 con WHATSAPP_APP_SECRET. URL pública canónica para nuevos canales.
+// El webhook legacy de Community Manager vive en /webhooks/whatsapp.
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac } from "crypto";
 import type { WebhookPayload } from "@/lib/whatsapp/types";

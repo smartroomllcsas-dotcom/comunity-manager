@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { getCurrentUser, logout as doLogout } from '@/lib/auth'
+import { createClient as createSupabaseBrowser } from '@/lib/supabase/client'
 import type { CMUser } from '@/types/database'
 
 interface AuthContextType {
@@ -69,8 +70,14 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     })
   }, [pathname, router, isPublic, smarttalk])
 
-  const logout = () => {
+  const logout = async () => {
     doLogout()
+    try {
+      await createSupabaseBrowser().auth.signOut()
+    } catch {
+      // ignore if no supabase session
+    }
+    document.cookie = 'cm_user_id=; Path=/; Max-Age=0'
     setUser(null)
     router.push('/login')
   }

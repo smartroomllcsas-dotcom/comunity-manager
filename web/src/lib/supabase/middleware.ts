@@ -33,6 +33,7 @@ export async function updateSession(request: NextRequest) {
   const p = request.nextUrl.pathname;
   if (
     !user &&
+    !p.startsWith("/login") &&
     !p.startsWith("/st/login") &&
     !p.startsWith("/register") &&
     !p.startsWith("/invite") &&
@@ -40,7 +41,7 @@ export async function updateSession(request: NextRequest) {
     !p.startsWith("/api/cron")
   ) {
     const url = request.nextUrl.clone();
-    url.pathname = "/st/login";
+    url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 

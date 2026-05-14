@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { login, register } from '@/lib/auth'
+import { register } from '@/lib/auth'
+import { loginAction } from './actions'
 
 export default function LoginPage() {
   const [isRegister, setIsRegister] = useState(false)
@@ -10,26 +11,31 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
   const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [pending, startTransition] = useTransition()
   const router = useRouter()
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError('')
-    setLoading(true)
 
-    const result = isRegister
-      ? await register(email, password, name)
-      : await login(email, password)
-
-    setLoading(false)
-
-    if (result.error) {
-      setError(result.error)
+    if (isRegister) {
+      const result = await register(email, password, name)
+      if (result.error) {
+        setError(result.error)
+        return
+      }
+      router.push('/')
       return
     }
 
-    router.push('/')
+    const formData = new FormData()
+    formData.set('email', email)
+    formData.set('password', password)
+
+    startTransition(async () => {
+      const result = await loginAction(formData)
+      if (result?.error) setError(result.error)
+    })
   }
 
   return (
@@ -46,7 +52,7 @@ export default function LoginPage() {
           <h1 className="text-3xl font-bold text-slate-100 tracking-tight">
             <span className="text-violet-500">Comunity</span>Agent
           </h1>
-          <p className="text-sm text-slate-500 mt-2">Gestión de Comunidades con IA</p>
+          <p className="text-sm text-slate-500 mt-2">Gestión de Comunidades con IA · Inbox multicanal</p>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
@@ -105,10 +111,10 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={pending}
               className="w-full bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 disabled:opacity-50 text-white rounded-lg py-2.5 text-sm font-medium transition-colors"
             >
-              {loading ? 'Cargando...' : isRegister ? 'Crear Cuenta' : 'Iniciar Sesión'}
+              {pending ? 'Cargando...' : isRegister ? 'Crear Cuenta' : 'Iniciar Sesión'}
             </button>
           </form>
 
@@ -120,10 +126,7 @@ export default function LoginPage() {
               {isRegister ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes cuenta? Regístrate'}
             </button>
             <p className="text-xs text-slate-500">
-              Inbox multicanal (WhatsApp, Respond.io):{' '}
-              <a href="/st/login" className="text-cyan-400 hover:underline">acceso SmartTalk</a>
-              {' · '}
-              <a href="/register" className="text-cyan-400 hover:underline">registro organización</a>
+              Login unificado: tu cuenta da acceso al panel de Community y al Inbox SmartTalk.
             </p>
           </div>
         </div>
