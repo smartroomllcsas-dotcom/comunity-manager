@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import { supabase } from '@/lib/supabase'
-import { sendWhatsAppTextMessage } from '@/lib/whatsapp'
+import { sendWhatsAppTextMessage } from '@/lib/whatsapp-cm'
 
 export async function POST(request: NextRequest) {
   const { clientId, to, text } = await request.json()

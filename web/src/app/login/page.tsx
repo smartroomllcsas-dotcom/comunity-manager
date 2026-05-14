@@ -112,13 +112,19 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-5 text-center">
+          <div className="mt-5 text-center space-y-2">
             <button
               onClick={() => { setIsRegister(!isRegister); setError('') }}
               className="text-xs text-violet-400 hover:text-violet-300 transition-colors"
             >
               {isRegister ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes cuenta? Regístrate'}
             </button>
+            <p className="text-xs text-slate-500">
+              Inbox multicanal (WhatsApp, Respond.io):{' '}
+              <a href="/st/login" className="text-cyan-400 hover:underline">acceso SmartTalk</a>
+              {' · '}
+              <a href="/register" className="text-cyan-400 hover:underline">registro organización</a>
+            </p>
           </div>
         </div>
       </div>

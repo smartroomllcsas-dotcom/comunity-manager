@@ -1,7 +1,6 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import AuthProvider from '@/components/AuthProvider'
-import AppShell from '@/components/AppShell'
 import FacebookSDK from '@/components/FacebookSDK'
 
 export const metadata: Metadata = {
@@ -20,14 +19,10 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="dark">
-      <body className="bg-slate-950 text-slate-100 antialiased">
+    <html lang="es" className="dark">
+      <body className="bg-background text-foreground antialiased">
         <FacebookSDK />
-        <AuthProvider>
-          <AppShell>
-            {children}
-          </AppShell>
-        </AuthProvider>
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   )

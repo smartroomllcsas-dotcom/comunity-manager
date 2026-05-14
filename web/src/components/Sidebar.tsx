@@ -10,11 +10,14 @@ const navItems = [
   { href: '/clients', label: 'Clientes', icon: UsersIcon },
   { href: '/calendar', label: 'Calendario', icon: CalendarIcon },
   { href: '/agents', label: 'Agentes', icon: CpuIcon },
+  { href: '/inbox', label: 'Inbox (canales)', icon: InboxIcon },
 ]
 
 export default function Sidebar() {
   const pathname = usePathname()
   const { user, logout } = useAuth()
+
+  const isActive = (href: string) => pathname === href || (href !== '/' && pathname.startsWith(href))
 
   return (
     <aside className="fixed left-0 top-0 h-screen w-60 bg-slate-950 border-r border-slate-800 flex flex-col z-50">
@@ -36,14 +39,14 @@ export default function Sidebar() {
 
       <nav className="flex-1 py-4 px-3 space-y-1">
         {navItems.map((item) => {
-          const isActive = pathname === item.href
+          const active = isActive(item.href)
           const Icon = item.icon
           return (
             <Link
               key={item.href}
               href={item.href}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive
+                active
                   ? 'bg-violet-600/20 text-violet-400 border border-violet-500/30'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
               }`}
@@ -132,6 +135,15 @@ function CpuIcon({ className }: { className?: string }) {
       <line x1="20" y1="14" x2="23" y2="14" />
       <line x1="1" y1="9" x2="4" y2="9" />
       <line x1="1" y1="14" x2="4" y2="14" />
+    </svg>
+  )
+}
+
+function InboxIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path d="M22 12h-6l-2 3h-4l-2-3H2" />
+      <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z" />
     </svg>
   )
 }

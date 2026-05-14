@@ -17,17 +17,46 @@ export function useAuth() {
   return useContext(AuthContext)
 }
 
-const PUBLIC_ROUTES = ['/login', '/privacy-policy', '/data-deletion', '/terms', '/test-fb-login']
+const PUBLIC_ROUTES = new Set([
+  '/login',
+  '/st/login',
+  '/privacy-policy',
+  '/data-deletion',
+  '/terms',
+  '/test-fb-login',
+])
+
+const SMARTTALK_PREFIXES = [
+  '/inbox',
+  '/contacts',
+  '/broadcasts',
+  '/chatbot',
+  '/settings',
+  '/dashboard',
+  '/reports',
+  '/admin',
+]
+
+function isSmarttalkArea(pathname: string) {
+  if (pathname.startsWith('/register') || pathname.startsWith('/invite')) return true
+  return SMARTTALK_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+}
+
+function isPublicRoute(pathname: string) {
+  if (PUBLIC_ROUTES.has(pathname)) return true
+  return false
+}
 
 export default function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<CMUser | null>(null)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
   const pathname = usePathname()
-  const isPublic = PUBLIC_ROUTES.includes(pathname)
+  const isPublic = isPublicRoute(pathname)
+  const smarttalk = isSmarttalkArea(pathname)
 
   useEffect(() => {
-    if (isPublic) {
+    if (isPublic || smarttalk) {
       setLoading(false)
       return
     }
@@ -38,7 +67,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         router.push('/login')
       }
     })
-  }, [pathname, router, isPublic])
+  }, [pathname, router, isPublic, smarttalk])
 
   const logout = () => {
     doLogout()
@@ -46,9 +75,9 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     router.push('/login')
   }
 
-  if (isPublic) {
+  if (isPublic || smarttalk) {
     return (
-      <AuthContext.Provider value={{ user, loading: false, logout }}>
+      <AuthContext.Provider value={{ user: null, loading: false, logout }}>
         {children}
       </AuthContext.Provider>
     )

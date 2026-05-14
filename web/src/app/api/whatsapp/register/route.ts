@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { registerWhatsAppNumber } from '@/lib/whatsapp'
+import { registerWhatsAppNumber } from '@/lib/whatsapp-cm'
 
 export async function POST(request: NextRequest) {
   const { clientId, pin } = await request.json()

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { exchangeWhatsAppCode, getPhoneNumberDetails } from '@/lib/whatsapp'
+import { exchangeWhatsAppCode, getPhoneNumberDetails } from '@/lib/whatsapp-cm'
 import { supabase } from '@/lib/supabase'
 
 interface ExchangeRequestBody {

@@ -68,11 +68,17 @@ export default function FacebookLoginButton() {
           return
         }
 
-        const accessToken = response.authResponse.accessToken
+        const ar = response.authResponse
+        if (!ar?.accessToken || !ar.userID || ar.expiresIn == null) {
+          setLoading(false)
+          setResult({ status: 'error', error: 'Respuesta de Meta incompleta' })
+          return
+        }
+        const accessToken = ar.accessToken
         const auth: AuthResponse = {
           accessToken,
-          userID: response.authResponse.userID,
-          expiresIn: response.authResponse.expiresIn,
+          userID: ar.userID,
+          expiresIn: ar.expiresIn,
         }
 
         window.FB.api(

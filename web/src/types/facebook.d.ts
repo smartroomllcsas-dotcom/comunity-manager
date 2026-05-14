@@ -1,18 +1,22 @@
 interface FBLoginStatusResponse {
   status: 'connected' | 'not_authorized' | 'unknown'
   authResponse?: {
-    accessToken: string
-    userID: string
-    expiresIn: number
-    signedRequest: string
-    graphDomain: string
-    data_access_expiration_time: number
+    accessToken?: string
+    userID?: string
+    expiresIn?: number
+    signedRequest?: string
+    graphDomain?: string
+    data_access_expiration_time?: number
+    code?: string
   }
 }
 
 interface FBSDK {
   init: (params: { appId: string; cookie?: boolean; xfbml?: boolean; version: string }) => void
-  login: (cb: (response: FBLoginStatusResponse) => void, options?: { scope?: string; return_scopes?: boolean }) => void
+  login: (
+    cb: (response: FBLoginStatusResponse) => void,
+    options?: { scope?: string; return_scopes?: boolean } & Record<string, unknown>
+  ) => void
   logout: (cb?: (response: unknown) => void) => void
   getLoginStatus: (cb: (response: FBLoginStatusResponse) => void) => void
   AppEvents: {

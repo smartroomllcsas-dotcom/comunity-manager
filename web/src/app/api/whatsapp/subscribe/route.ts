@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { subscribeWabaToWebhook } from '@/lib/whatsapp'
+import { subscribeWabaToWebhook } from '@/lib/whatsapp-cm'
 
 export async function POST(request: NextRequest) {
   const { clientId } = await request.json()

@@ -1,10 +1,63 @@
-import { NextRequest } from 'next/server'
-import { receiveMetaWebhook, verifyMetaWebhook } from '@/lib/webhook'
+import { NextRequest, NextResponse } from "next/server";
+import { createHmac } from "crypto";
+import type { WebhookPayload } from "@/lib/whatsapp/types";
+import { processIncomingMessage, processStatusUpdate } from "@/lib/whatsapp/webhook";
 
 export async function GET(request: NextRequest) {
-  return verifyMetaWebhook(request, 'whatsapp')
+  const searchParams = request.nextUrl.searchParams;
+  const mode = searchParams.get("hub.mode");
+  const token = searchParams.get("hub.verify_token");
+  const challenge = searchParams.get("hub.challenge");
+
+  if (mode === "subscribe" && token === process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN) {
+    return new NextResponse(challenge, { status: 200 });
+  }
+  return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 }
 
 export async function POST(request: NextRequest) {
-  return receiveMetaWebhook(request, 'whatsapp')
+  const appSecret = process.env.WHATSAPP_APP_SECRET;
+  if (!appSecret) {
+    console.error("WHATSAPP_APP_SECRET is not set — webhook security not configured");
+    return NextResponse.json({ error: "Webhook security not configured" }, { status: 500 });
+  }
+
+  const signature = request.headers.get("x-hub-signature-256");
+  const body = await request.text();
+
+  if (!signature) {
+    console.warn("Webhook request missing x-hub-signature-256 header");
+    return NextResponse.json({ error: "Missing signature" }, { status: 401 });
+  }
+
+  const expectedSignature = "sha256=" + createHmac("sha256", appSecret).update(body).digest("hex");
+  if (signature !== expectedSignature) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
+  const payload: WebhookPayload = JSON.parse(body);
+
+  for (const entry of payload.entry) {
+    for (const change of entry.changes) {
+      if (change.field !== "messages") continue;
+      const { value } = change;
+      const phoneNumberId = value.metadata.phone_number_id;
+
+      if (value.messages && value.contacts) {
+        for (let i = 0; i < value.messages.length; i++) {
+          const message = value.messages[i];
+          const contact = value.contacts[i] || value.contacts[0];
+          await processIncomingMessage(message, contact, phoneNumberId);
+        }
+      }
+
+      if (value.statuses) {
+        for (const status of value.statuses) {
+          await processStatusUpdate(status);
+        }
+      }
+    }
+  }
+
+  return NextResponse.json({ status: "ok" });
 }
