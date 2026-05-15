@@ -54,9 +54,9 @@ export default function WhatsAppDetailPage() {
 
     async function load(silent = false) {
       if (!silent) setLoading(true)
-      const [clientRes, waRes, chatRes] = await Promise.all([
+      const [clientRes, waResponse, chatRes] = await Promise.all([
         supabase.from('cm_clients').select('id,name,industry,user_id').eq('id', clientId).maybeSingle(),
-        supabase.from('cm_whatsapp_accounts').select('client_id,waba_id,phone_number_id,display_phone_number,verified_name').eq('client_id', clientId).maybeSingle(),
+        fetch(`/api/whatsapp/accounts?clientId=${encodeURIComponent(clientId)}`),
         supabase
           .from('cm_chat_history')
           .select('id,role,content,client_context,created_at')
@@ -64,6 +64,7 @@ export default function WhatsAppDetailPage() {
           .order('created_at', { ascending: false })
           .limit(12),
       ])
+      const waPayload = waResponse.ok ? await waResponse.json() : { accounts: [] }
 
       if (!mounted) return
       if (!clientRes.data || !user || clientRes.data.user_id !== user.id) {
@@ -76,7 +77,7 @@ export default function WhatsAppDetailPage() {
         name: clientRes.data.name,
         industry: clientRes.data.industry,
       })
-      setWhatsApp(waRes.data ?? null)
+      setWhatsApp(waPayload.accounts?.[0] ?? null)
       const chatRows = (chatRes.data ?? []) as ChatHistoryRow[]
       setWebhookEvents(
         chatRows.map(row => ({

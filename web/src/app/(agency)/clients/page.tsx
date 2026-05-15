@@ -144,11 +144,14 @@ export default function ClientsPage() {
   }, [user, loading, clients, socials, campaignsByClient, insightsByClient])
 
   async function loadData() {
-    const [clientsRes, socialsRes, whatsappsRes] = await Promise.all([
+    const [clientsRes, socialsRes, whatsappsResponse] = await Promise.all([
       supabase.from('cm_clients').select('*').eq('user_id', user!.id).order('created_at', { ascending: false }),
       supabase.from('cm_social_accounts').select('*'),
-      supabase.from('cm_whatsapp_accounts').select('*'),
+      fetch('/api/whatsapp/accounts'),
     ])
+    const whatsappsPayload = whatsappsResponse.ok
+      ? await whatsappsResponse.json()
+      : { accounts: [] }
     setClients(clientsRes.data ?? [])
     const socialMap: Record<string, SocialAccount> = {}
     for (const s of (socialsRes.data ?? [])) {
@@ -156,7 +159,7 @@ export default function ClientsPage() {
     }
     setSocials(socialMap)
     const whatsappMap: Record<string, WhatsAppAccount> = {}
-    for (const account of (whatsappsRes.data ?? [])) {
+    for (const account of (whatsappsPayload.accounts ?? [])) {
       if (account.client_id) whatsappMap[account.client_id] = account
     }
     setWhatsapps(whatsappMap)
