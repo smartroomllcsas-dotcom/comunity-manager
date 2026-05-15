@@ -1,73 +1,54 @@
-import { supabase } from './supabase'
 import type { CMUser } from '@/types/database'
 
 const SESSION_KEY = 'cm_user_id'
 
-function getDbErrorMessage(error: { message?: string } | null, fallback: string) {
-  if (!error?.message) return fallback
-  return error.message
-}
-
 export async function login(email: string, password: string): Promise<{ user: CMUser | null; error: string | null }> {
-  const { data, error } = await supabase
-    .from('cm_users')
-    .select('*')
-    .eq('email', email.toLowerCase().trim())
-    .single()
+  const res = await fetch('/api/auth/local', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'login',
+      email,
+      password,
+    }),
+  })
 
-  if (error || !data) {
-    if (error) {
-      return { user: null, error: getDbErrorMessage(error, 'Invalid email or password') }
-    }
-    return { user: null, error: 'Invalid email or password' }
-  }
+  const payload = await res.json()
 
-  // Simple password check (stored as plain text for basic auth - upgrade to bcrypt for production)
-  if (data.password_hash !== password) {
-    return { user: null, error: 'Invalid email or password' }
+  if (!res.ok) {
+    return { user: null, error: payload?.error || 'Invalid email or password' }
   }
 
   if (typeof window !== 'undefined') {
-    localStorage.setItem(SESSION_KEY, data.id)
+    localStorage.setItem(SESSION_KEY, payload.user.id)
   }
 
-  return { user: data as CMUser, error: null }
+  return { user: payload.user as CMUser, error: null }
 }
 
 export async function register(email: string, password: string, name: string): Promise<{ user: CMUser | null; error: string | null }> {
-  const { data: existing, error: existingError } = await supabase
-    .from('cm_users')
-    .select('id')
-    .eq('email', email.toLowerCase().trim())
-    .single()
-
-  if (existingError && existingError.code !== 'PGRST116') {
-    return { user: null, error: getDbErrorMessage(existingError, 'Unable to check existing users') }
-  }
-
-  if (existing) {
-    return { user: null, error: 'Email already registered' }
-  }
-
-  const { data, error } = await supabase
-    .from('cm_users')
-    .insert({
-      email: email.toLowerCase().trim(),
-      password_hash: password,
+  const res = await fetch('/api/auth/local', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'register',
+      email,
+      password,
       name,
-    })
-    .select()
-    .single()
+    }),
+  })
 
-  if (error) {
-    return { user: null, error: error.message }
+  const payload = await res.json()
+
+  if (!res.ok) {
+    return { user: null, error: payload?.error || 'Unable to register user' }
   }
 
   if (typeof window !== 'undefined') {
-    localStorage.setItem(SESSION_KEY, data.id)
+    localStorage.setItem(SESSION_KEY, payload.user.id)
   }
 
-  return { user: data as CMUser, error: null }
+  return { user: payload.user as CMUser, error: null }
 }
 
 export function getCurrentUserId(): string | null {
@@ -79,15 +60,20 @@ export async function getCurrentUser(): Promise<CMUser | null> {
   const userId = getCurrentUserId()
   if (!userId) return null
 
-  const { data, error } = await supabase
-    .from('cm_users')
-    .select('*')
-    .eq('id', userId)
-    .single()
+  const res = await fetch('/api/auth/local', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'getCurrentUser',
+      userId,
+    }),
+  })
 
-  if (error || !data) return null
+  const payload = await res.json()
 
-  return data as CMUser | null
+  if (!res.ok || !payload?.user) return null
+
+  return payload.user as CMUser | null
 }
 
 export function logout() {
