@@ -18,6 +18,7 @@ const supabaseAnonKey =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   process.env.NEXT_PUBLIC_POSTGREST_API_KEY ||
   'placeholder-anon-key'
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 export const supabase: any = isPostgrest
   ? new PostgrestClient(supabaseUrl, {
@@ -31,3 +32,14 @@ export const supabase: any = isPostgrest
     : isMysql
     ? localQueryClient
     : createClient(supabaseUrl, supabaseAnonKey)
+
+export const supabaseAdmin: any = createClient(
+  supabaseUrl,
+  supabaseServiceRoleKey || supabaseAnonKey,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  }
+)

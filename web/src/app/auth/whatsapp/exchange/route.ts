@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { exchangeWhatsAppCode, getPhoneNumberDetails } from '@/lib/whatsapp-cm'
-import { supabase } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabase'
 
 interface ExchangeRequestBody {
   code?: string
@@ -57,17 +57,28 @@ export async function POST(request: NextRequest) {
       updated_at: new Date().toISOString(),
     }
 
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabaseAdmin
       .from('cm_whatsapp_accounts')
       .select('id')
       .eq('waba_id', waba_id)
       .eq('phone_number_id', phone_number_id)
       .maybeSingle()
 
+    if (existingError) {
+      throw new Error(`No se pudo consultar WhatsApp en Supabase: ${existingError.message}`)
+    }
+
+    let saveError: { message?: string } | null = null
     if (existing) {
-      await supabase.from('cm_whatsapp_accounts').update(record).eq('id', existing.id)
+      const { error } = await supabaseAdmin.from('cm_whatsapp_accounts').update(record).eq('id', existing.id)
+      saveError = error
     } else {
-      await supabase.from('cm_whatsapp_accounts').insert(record)
+      const { error } = await supabaseAdmin.from('cm_whatsapp_accounts').insert(record)
+      saveError = error
+    }
+
+    if (saveError) {
+      throw new Error(`No se pudo guardar WhatsApp en Supabase: ${saveError.message || 'error desconocido'}`)
     }
 
     return NextResponse.json({

@@ -1,26 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
-import { supabase } from '@/lib/supabase'
 import { sendWhatsAppTextMessage } from '@/lib/whatsapp-cm'
+import { supabaseAdmin } from '@/lib/supabase'
 
 export async function POST(request: NextRequest) {
   const { clientId, to, text } = await request.json()
   if (!clientId) return NextResponse.json({ error: 'clientId requerido' }, { status: 400 })
   if (!to) return NextResponse.json({ error: 'destino requerido' }, { status: 400 })
 
-  const { data: account } = await supabase
+  const { data: account, error } = await supabaseAdmin
     .from('cm_whatsapp_accounts')
     .select('*')
     .eq('client_id', clientId)
     .maybeSingle()
 
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   if (!account) return NextResponse.json({ error: 'WhatsApp no conectado' }, { status: 400 })
 
   try {
     let ownerUserId = account.user_id
 
     if (!ownerUserId && account.client_id) {
-      const { data: client } = await supabase
+      const { data: client } = await supabaseAdmin
         .from('cm_clients')
         .select('user_id')
         .eq('id', account.client_id)
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
       to,
       text || 'Mensaje de prueba desde Community Manager'
     )
-    const { error: chatError } = await supabase.from('cm_chat_history').insert({
+    const { error: chatError } = await supabaseAdmin.from('cm_chat_history').insert({
       id: randomUUID(),
       user_id: ownerUserId,
       client_context: `whatsapp:${clientId}`,
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
       throw new Error(chatError.message || 'No se pudo guardar el mensaje enviado')
     }
 
-    const { error: activityError } = await supabase.from('cm_activity_log').insert({
+    const { error: activityError } = await supabaseAdmin.from('cm_activity_log').insert({
       id: randomUUID(),
       user_id: ownerUserId,
       action: `WhatsApp test message sent to ${to}`,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
 import { registerWhatsAppNumber } from '@/lib/whatsapp-cm'
+import { supabaseAdmin } from '@/lib/supabase'
 
 export async function POST(request: NextRequest) {
   const { clientId, pin } = await request.json()
@@ -9,12 +9,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'PIN de 6 digitos requerido' }, { status: 400 })
   }
 
-  const { data: account } = await supabase
+  const { data: account, error } = await supabaseAdmin
     .from('cm_whatsapp_accounts')
     .select('*')
     .eq('client_id', clientId)
     .maybeSingle()
 
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   if (!account) return NextResponse.json({ error: 'WhatsApp no conectado' }, { status: 400 })
 
   try {

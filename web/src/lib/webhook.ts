@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
-import { supabase } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabase'
 
 function getVerifyToken() {
   return process.env.META_WEBHOOK_VERIFY_TOKEN || ''
@@ -128,11 +128,16 @@ async function persistWhatsAppWebhook(payload: unknown) {
 
       if (!phoneNumberId) continue
 
-      const { data: account } = await supabase
+      const { data: account, error: accountError } = await supabaseAdmin
         .from('cm_whatsapp_accounts')
         .select('client_id,user_id,waba_id,phone_number_id,display_phone_number')
         .eq(value.metadata?.phone_number_id ? 'phone_number_id' : 'waba_id', phoneNumberId)
         .maybeSingle()
+
+      if (accountError) {
+        console.error('[meta-webhook:whatsapp] error consultando cuenta', accountError.message)
+        continue
+      }
 
       if (!account) {
         console.warn(`[meta-webhook:whatsapp] cuenta no encontrada para ${phoneNumberId}`)
@@ -143,7 +148,7 @@ async function persistWhatsAppWebhook(payload: unknown) {
       let ownerUserId = account.user_id
 
       if (!ownerUserId && account.client_id) {
-        const { data: client } = await supabase
+        const { data: client } = await supabaseAdmin
           .from('cm_clients')
           .select('user_id')
           .eq('id', account.client_id)
@@ -161,7 +166,7 @@ async function persistWhatsAppWebhook(payload: unknown) {
         const content = extractMessageText(message)
         const direction = 'inbound'
         const from = message.from || 'WhatsApp'
-        const { error: chatError } = await supabase.from('cm_chat_history').insert({
+        const { error: chatError } = await supabaseAdmin.from('cm_chat_history').insert({
           id: randomUUID(),
           user_id: ownerUserId,
           client_context: clientContext,
@@ -175,7 +180,7 @@ async function persistWhatsAppWebhook(payload: unknown) {
           continue
         }
 
-        const { error: activityError } = await supabase.from('cm_activity_log').insert({
+        const { error: activityError } = await supabaseAdmin.from('cm_activity_log').insert({
           id: randomUUID(),
           user_id: ownerUserId,
           action: `WhatsApp ${direction}: ${content}`,
@@ -189,7 +194,7 @@ async function persistWhatsAppWebhook(payload: unknown) {
 
       const statuses = Array.isArray(value.statuses) ? value.statuses : []
       for (const status of statuses) {
-        const { error: statusError } = await supabase.from('cm_activity_log').insert({
+        const { error: statusError } = await supabaseAdmin.from('cm_activity_log').insert({
           id: randomUUID(),
           user_id: ownerUserId,
           action: `WhatsApp status ${status.status || 'desconocido'} para ${status.recipient_id || phoneNumberId}`,
