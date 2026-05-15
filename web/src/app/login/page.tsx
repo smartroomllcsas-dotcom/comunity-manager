@@ -1,9 +1,8 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { register } from '@/lib/auth'
-import { loginAction } from './actions'
+import { login, register } from '@/lib/auth'
 
 export default function LoginPage() {
   const [isRegister, setIsRegister] = useState(false)
@@ -11,31 +10,29 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
   const [error, setError] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError('')
 
-    if (isRegister) {
-      const result = await register(email, password, name)
+    setPending(true)
+
+    try {
+      const result = isRegister
+        ? await register(email, password, name)
+        : await login(email, password)
+
       if (result.error) {
         setError(result.error)
         return
       }
+
       router.push('/')
-      return
+    } finally {
+      setPending(false)
     }
-
-    const formData = new FormData()
-    formData.set('email', email)
-    formData.set('password', password)
-
-    startTransition(async () => {
-      const result = await loginAction(formData)
-      if (result?.error) setError(result.error)
-    })
   }
 
   return (
