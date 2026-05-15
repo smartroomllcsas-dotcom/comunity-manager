@@ -2,6 +2,8 @@ import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import type { CMUser } from '@/types/database'
 
+const SESSION_KEY = 'cm_user_id'
+
 function getAdminClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -15,11 +17,36 @@ function getAdminClient() {
   })
 }
 
+async function readPayload(request: NextRequest) {
+  const contentType = request.headers.get('content-type') || ''
+
+  if (contentType.includes('application/json')) {
+    return request.json()
+  }
+
+  if (
+    contentType.includes('application/x-www-form-urlencoded') ||
+    contentType.includes('multipart/form-data')
+  ) {
+    const form = await request.formData()
+    return Object.fromEntries(form.entries())
+  }
+
+  return request.json()
+}
+
+function buildSessionCookie(userId: string) {
+  return `${SESSION_KEY}=${encodeURIComponent(userId)}; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax`
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
+    const body = await readPayload(request)
     const action = body?.action
     const supabase = getAdminClient()
+    const wantsHtmlRedirect =
+      !request.headers.get('content-type')?.includes('application/json') &&
+      request.headers.get('accept')?.includes('text/html')
 
     if (action === 'login') {
       const email = String(body?.email || '').toLowerCase().trim()
@@ -37,6 +64,12 @@ export async function POST(request: NextRequest) {
 
       if (!data || data.password_hash !== password) {
         return NextResponse.json({ user: null, error: 'Invalid email or password' }, { status: 401 })
+      }
+
+      if (wantsHtmlRedirect) {
+        const response = NextResponse.redirect(new URL('/', request.url), { status: 303 })
+        response.headers.set('Set-Cookie', buildSessionCookie(data.id))
+        return response
       }
 
       return NextResponse.json({ user: data as CMUser, error: null })
@@ -76,6 +109,12 @@ export async function POST(request: NextRequest) {
 
       if (error) {
         return NextResponse.json({ user: null, error: error.message }, { status: 500 })
+      }
+
+      if (wantsHtmlRedirect) {
+        const response = NextResponse.redirect(new URL('/', request.url), { status: 303 })
+        response.headers.set('Set-Cookie', buildSessionCookie(data.id))
+        return response
       }
 
       return NextResponse.json({ user: data as CMUser, error: null })

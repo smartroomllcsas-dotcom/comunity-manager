@@ -54,12 +54,14 @@ export default function LoginPage() {
             {isRegister ? 'Crear Cuenta' : 'Iniciar Sesión'}
           </h2>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form action="/api/auth/local" method="post" onSubmit={handleSubmit} className="space-y-4">
+            <input type="hidden" name="action" value={isRegister ? 'register' : 'login'} />
             {isRegister && (
               <div>
                 <label className="text-xs text-slate-400 block mb-1.5">Nombre</label>
                 <input
                   type="text"
+                  name="name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required={isRegister}
@@ -73,6 +75,7 @@ export default function LoginPage() {
               <label className="text-xs text-slate-400 block mb-1.5">Email</label>
               <input
                 type="email"
+                name="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -85,6 +88,7 @@ export default function LoginPage() {
               <label className="text-xs text-slate-400 block mb-1.5">Contraseña</label>
               <input
                 type="password"
+                name="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required

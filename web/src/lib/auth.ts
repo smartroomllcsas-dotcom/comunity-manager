@@ -2,6 +2,16 @@ import type { CMUser } from '@/types/database'
 
 const SESSION_KEY = 'cm_user_id'
 
+function setSessionCookie(userId: string) {
+  if (typeof document === 'undefined') return
+  document.cookie = `${SESSION_KEY}=${encodeURIComponent(userId)}; path=/; max-age=${60 * 60 * 24 * 30}; samesite=lax`
+}
+
+function clearSessionCookie() {
+  if (typeof document === 'undefined') return
+  document.cookie = `${SESSION_KEY}=; path=/; max-age=0; samesite=lax`
+}
+
 export async function login(email: string, password: string): Promise<{ user: CMUser | null; error: string | null }> {
   const res = await fetch('/api/auth/local', {
     method: 'POST',
@@ -21,6 +31,7 @@ export async function login(email: string, password: string): Promise<{ user: CM
 
   if (typeof window !== 'undefined') {
     localStorage.setItem(SESSION_KEY, payload.user.id)
+    setSessionCookie(payload.user.id)
   }
 
   return { user: payload.user as CMUser, error: null }
@@ -46,6 +57,7 @@ export async function register(email: string, password: string, name: string): P
 
   if (typeof window !== 'undefined') {
     localStorage.setItem(SESSION_KEY, payload.user.id)
+    setSessionCookie(payload.user.id)
   }
 
   return { user: payload.user as CMUser, error: null }
@@ -53,7 +65,11 @@ export async function register(email: string, password: string, name: string): P
 
 export function getCurrentUserId(): string | null {
   if (typeof window === 'undefined') return null
-  return localStorage.getItem(SESSION_KEY)
+  const localId = localStorage.getItem(SESSION_KEY)
+  if (localId) return localId
+
+  const cookieMatch = document.cookie.match(new RegExp(`(?:^|; )${SESSION_KEY}=([^;]*)`))
+  return cookieMatch ? decodeURIComponent(cookieMatch[1]) : null
 }
 
 export async function getCurrentUser(): Promise<CMUser | null> {
@@ -79,5 +95,6 @@ export async function getCurrentUser(): Promise<CMUser | null> {
 export function logout() {
   if (typeof window !== 'undefined') {
     localStorage.removeItem(SESSION_KEY)
+    clearSessionCookie()
   }
 }
