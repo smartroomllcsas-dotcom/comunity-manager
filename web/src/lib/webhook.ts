@@ -114,7 +114,7 @@ function extractMessageText(message: NonNullable<WhatsAppWebhookValue['messages'
   return message.type || 'Mensaje de WhatsApp'
 }
 
-async function persistWhatsAppWebhook(payload: unknown) {
+export async function persistWhatsAppWebhook(payload: unknown) {
   const entries = Array.isArray((payload as { entry?: unknown[] })?.entry)
     ? ((payload as { entry?: WhatsAppWebhookEntry[] }).entry as WhatsAppWebhookEntry[])
     : []
