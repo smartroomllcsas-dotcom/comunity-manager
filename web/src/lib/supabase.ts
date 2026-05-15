@@ -3,11 +3,12 @@ import { PostgrestClient } from '@supabase/postgrest-js'
 import { localQueryClient } from './local-query-client'
 
 const dbProvider = (process.env.NEXT_PUBLIC_DB_PROVIDER || process.env.DB_PROVIDER || 'supabase').toLowerCase()
+const isProduction = process.env.NODE_ENV === 'production'
 
 // Production: Supabase client.
 // Local: PostgREST client against a standalone REST endpoint.
-const isPostgrest = dbProvider === 'postgrest'
-const isMysql = dbProvider === 'mysql'
+const isPostgrest = !isProduction && dbProvider === 'postgrest'
+const isMysql = !isProduction && dbProvider === 'mysql'
 
 const supabaseUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL ||
@@ -27,6 +28,6 @@ export const supabase: any = isPostgrest
           }
         : undefined,
     })
-  : isMysql
+    : isMysql
     ? localQueryClient
     : createClient(supabaseUrl, supabaseAnonKey)

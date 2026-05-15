@@ -168,6 +168,14 @@ CREATE POLICY "cm_oauth_states_own" ON cm_oauth_states FOR ALL USING (true);
 CREATE POLICY "cm_social_accounts_own" ON cm_social_accounts FOR ALL USING (true);
 CREATE POLICY "cm_whatsapp_accounts_own" ON cm_whatsapp_accounts FOR ALL USING (true);
 
+-- Public grants for the browser client.
+-- The app reads and writes through the anon key, so table privileges are required
+-- in addition to the RLS policies above.
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO anon, authenticated;
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_cm_clients_user ON cm_clients(user_id);
 CREATE INDEX IF NOT EXISTS idx_cm_posts_client ON cm_scheduled_posts(client_id);
