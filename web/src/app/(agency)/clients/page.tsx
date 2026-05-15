@@ -417,55 +417,57 @@ export default function ClientsPage() {
                 </div>
 
                 {/* Social Connection Status */}
-                {metaConnected ? (
-                  <div className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3">
-                    <div className="flex items-center gap-2 mb-1">
-                      <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                      <span className="text-[11px] font-medium text-emerald-400">
-                        {social ? 'Redes Conectadas' : 'Conexión Meta en proceso'}
-                      </span>
+                {(((client.platforms || []).includes('Instagram') || (client.platforms || []).includes('Facebook')) || metaConnected) ? (
+                  metaConnected ? (
+                    <div className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3">
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <span className="text-[11px] font-medium text-emerald-400">
+                          {social ? 'Redes Conectadas' : 'Conexión Meta en proceso'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        {social ? (
+                          <>
+                            {social.page_name && <span className="text-blue-400">FB: {social.page_name}</span>}
+                            {social.instagram_username && (
+                              <span className="text-pink-400 ml-2">IG: @{social.instagram_username}</span>
+                            )}
+                            {social.ad_account_name && (
+                              <span className="text-amber-400 ml-2">Ads: {social.ad_account_name}</span>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            {metaTrace?.page && <span className="text-blue-400">FB: {metaTrace.page}</span>}
+                            {metaTrace?.instagram && (
+                              <span className="text-pink-400 ml-2">IG: @{metaTrace.instagram}</span>
+                            )}
+                            {metaTrace?.adAccount && (
+                              <span className="text-amber-400 ml-2">Ads: {metaTrace.adAccount}</span>
+                            )}
+                          </>
+                        )}
+                      </p>
+                      <a
+                        href={`/clients/${client.id}/meta`}
+                        className="mt-3 inline-flex w-full items-center justify-center rounded-md border border-white/10 bg-slate-800 px-3 py-2 text-[11px] text-slate-100 transition hover:bg-slate-700"
+                      >
+                        Ver Meta
+                      </a>
                     </div>
-                    <p className="text-[11px] text-slate-400">
-                      {social ? (
-                        <>
-                          {social.page_name && <span className="text-blue-400">FB: {social.page_name}</span>}
-                          {social.instagram_username && (
-                            <span className="text-pink-400 ml-2">IG: @{social.instagram_username}</span>
-                          )}
-                          {social.ad_account_name && (
-                            <span className="text-amber-400 ml-2">Ads: {social.ad_account_name}</span>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          {metaTrace?.page && <span className="text-blue-400">FB: {metaTrace.page}</span>}
-                          {metaTrace?.instagram && (
-                            <span className="text-pink-400 ml-2">IG: @{metaTrace.instagram}</span>
-                          )}
-                          {metaTrace?.adAccount && (
-                            <span className="text-amber-400 ml-2">Ads: {metaTrace.adAccount}</span>
-                          )}
-                        </>
-                      )}
-                    </p>
-                    <a
-                      href={`/clients/${client.id}/meta`}
-                      className="mt-3 inline-flex w-full items-center justify-center rounded-md border border-white/10 bg-slate-800 px-3 py-2 text-[11px] text-slate-100 transition hover:bg-slate-700"
+                  ) : (
+                    <button
+                      onClick={() => connectMeta(client.id)}
+                      className="w-full bg-blue-600/20 border border-blue-500/30 text-blue-400 rounded-lg px-3 py-2.5 text-xs font-medium hover:bg-blue-600/30 transition-colors mb-3 flex items-center justify-center gap-2"
                     >
-                      Ver Meta
-                    </a>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => connectMeta(client.id)}
-                    className="w-full bg-blue-600/20 border border-blue-500/30 text-blue-400 rounded-lg px-3 py-2.5 text-xs font-medium hover:bg-blue-600/30 transition-colors mb-3 flex items-center justify-center gap-2"
-                  >
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/>
-                    </svg>
-                    Conectar Facebook + Instagram + Ads
-                  </button>
-                )}
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/>
+                      </svg>
+                      Conectar Facebook + Instagram + Ads
+                    </button>
+                  )
+                ) : null}
 
                 {whatsapp ? (
                   <div className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3">
