@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { sendText, sendMedia, getOrgWhatsAppCredentials } from "@/lib/whatsapp/api";
+import { sendText, sendMedia, sendTemplate, getOrgWhatsAppCredentials } from "@/lib/whatsapp/api";
 import { sendMetaTextMessage, sendMetaAttachment } from "@/lib/meta";
 import {
   sendRespondIoText,
@@ -124,6 +124,40 @@ export async function POST(request: NextRequest) {
 
       let waResponse: { messages: { id: string }[] };
       switch (content.type) {
+        case "template": {
+          let templateQuery = admin
+            .from("message_templates")
+            .select("id, name, language, components, status, channel_id")
+            .eq("organization_id", agent.organization_id)
+            .eq("name", content.template_name)
+            .eq("language", content.language)
+            .eq("status", "approved");
+
+          if (conversation.channel_id) {
+            templateQuery = templateQuery.or(`channel_id.is.null,channel_id.eq.${conversation.channel_id}`);
+          } else {
+            templateQuery = templateQuery.is("channel_id", null);
+          }
+
+          const { data: template } = await templateQuery.limit(1).maybeSingle();
+
+          if (!template) {
+            return NextResponse.json(
+              { error: "Plantilla aprobada no encontrada para este canal de WhatsApp" },
+              { status: 400 }
+            );
+          }
+
+          waResponse = await sendTemplate({
+            to: conversation.contact.wa_id,
+            templateName: template.name,
+            language: template.language,
+            components: content.components || [],
+            phoneNumberId,
+            accessToken,
+          });
+          break;
+        }
         case "text":
           waResponse = await sendText({
             to: conversation.contact.wa_id, text: content.text, phoneNumberId, accessToken,

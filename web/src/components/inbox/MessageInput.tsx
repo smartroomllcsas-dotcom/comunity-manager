@@ -1,9 +1,10 @@
 "use client";
-import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Paperclip, Smile, Sticker, X, Image as ImageIcon, FileText, Music2, Video, Mic, Square } from "lucide-react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { Send, Paperclip, Smile, Sticker, X, Image as ImageIcon, FileText, Music2, Video, Mic, Square, FileCheck2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AIAssistPreview, AIAssistButton } from "./AIAssist";
-import type { Message } from "@/types/database";
+import { useTemplates } from "@/hooks/useTemplates";
+import type { Message, MessageTemplate } from "@/types/database";
 
 type AttachmentKind = "image" | "video" | "audio" | "document" | "sticker";
 
@@ -36,16 +37,47 @@ interface MessageInputProps {
   onSend: (payload: {
     text?: string;
     attachment?: ComposerAttachment;
+    template?: { name: string; language: string; components?: unknown[] };
   }) => Promise<void>;
   disabled?: boolean;
   conversationId?: string;
   messages?: Message[];
+  channelId?: string | null;
+  channelType?: string | null;
+  whatsappWindowExpired?: boolean;
 }
 
-export function MessageInput({ onSend, disabled, conversationId, messages }: MessageInputProps) {
+type InboxTemplate = MessageTemplate & {
+  channel_id?: string | null;
+};
+
+function getTemplateBodyPreview(template: InboxTemplate) {
+  const components = Array.isArray(template.components) ? template.components : [];
+  const body = components.find((component) => {
+    if (!component || typeof component !== "object") return false;
+    return String((component as { type?: unknown }).type || "").toUpperCase() === "BODY";
+  }) as { text?: string } | undefined;
+
+  return body?.text || "Plantilla aprobada de WhatsApp";
+}
+
+function templateHasVariables(template: InboxTemplate) {
+  return /\{\{\s*\d+\s*\}\}/.test(getTemplateBodyPreview(template));
+}
+
+export function MessageInput({
+  onSend,
+  disabled,
+  conversationId,
+  messages,
+  channelId,
+  channelType,
+  whatsappWindowExpired,
+}: MessageInputProps) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [attachment, setAttachment] = useState<ComposerAttachment | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [uploading, setUploading] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -64,6 +96,16 @@ export function MessageInput({ onSend, disabled, conversationId, messages }: Mes
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiVisible, setAiVisible] = useState(false);
+  const { data: templates, isLoading: templatesLoading } = useTemplates();
+
+  const isWhatsApp = !!channelType?.includes("whatsapp");
+  const requiresTemplate = Boolean(isWhatsApp && whatsappWindowExpired);
+  const availableTemplates = useMemo(() => {
+    return ((templates || []) as InboxTemplate[]).filter((template) => {
+      return !template.channel_id || !channelId || template.channel_id === channelId;
+    });
+  }, [channelId, templates]);
+  const selectedTemplate = availableTemplates.find((template) => template.id === selectedTemplateId);
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -277,6 +319,29 @@ export function MessageInput({ onSend, disabled, conversationId, messages }: Mes
 
   async function handleSend() {
     const trimmed = text.trim();
+    if (requiresTemplate) {
+      if (!selectedTemplate) return;
+      if (templateHasVariables(selectedTemplate)) {
+        console.warn("Template requires variables and cannot be sent from the simple picker yet.");
+        return;
+      }
+      setSending(true);
+      try {
+        await onSend({
+          template: {
+            name: selectedTemplate.name,
+            language: selectedTemplate.language,
+            components: [],
+          },
+        });
+        setSelectedTemplateId("");
+      } finally {
+        setSending(false);
+        textareaRef.current?.focus();
+      }
+      return;
+    }
+
     if (!trimmed && !attachment) return;
     if (sending || uploading) return;
     setSending(true);
@@ -344,6 +409,7 @@ export function MessageInput({ onSend, disabled, conversationId, messages }: Mes
   }
 
   const hasAI = !!conversationId && !!messages && messages.length > 0;
+  const composerDisabled = disabled || sending || uploading || requiresTemplate;
 
   return (
     <div className="border-t border-[#2d333b] bg-[#161b22]">
@@ -359,12 +425,70 @@ export function MessageInput({ onSend, disabled, conversationId, messages }: Mes
       )}
 
       <div className="px-4 py-3">
+        {requiresTemplate && (
+          <div className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/15 text-amber-300">
+                <FileCheck2 className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-amber-100">Ventana de WhatsApp cerrada</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-amber-100/70">
+                  Han pasado mas de 24 horas desde el ultimo mensaje del cliente. Para retomar, envia una plantilla aprobada.
+                </p>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <select
+                    value={selectedTemplateId}
+                    onChange={(event) => setSelectedTemplateId(event.target.value)}
+                    disabled={sending || templatesLoading || availableTemplates.length === 0}
+                    className="min-h-[38px] flex-1 rounded-lg border border-[#2d333b] bg-[#0d1117] px-3 text-sm text-white outline-none focus:border-amber-400/70"
+                  >
+                    <option value="">
+                      {templatesLoading
+                        ? "Cargando plantillas..."
+                        : availableTemplates.length === 0
+                          ? "No hay plantillas aprobadas"
+                          : "Selecciona una plantilla"}
+                    </option>
+                    {availableTemplates.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.name} · {template.language}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={handleSend}
+                    disabled={!selectedTemplate || sending || templateHasVariables(selectedTemplate)}
+                    className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-lg bg-amber-500 px-4 text-sm font-semibold text-[#0d1117] transition-colors hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
+                    type="button"
+                  >
+                    <Send className="h-4 w-4" />
+                    Enviar plantilla
+                  </button>
+                </div>
+                {selectedTemplate && (
+                  <div className="mt-2 rounded-lg border border-[#2d333b] bg-[#0d1117]/80 p-2">
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-[#8b949e]">Vista previa</p>
+                    <p className="mt-1 text-xs leading-relaxed text-[#c9d1d9]">
+                      {getTemplateBodyPreview(selectedTemplate)}
+                    </p>
+                    {templateHasVariables(selectedTemplate) && (
+                      <p className="mt-2 text-xs text-red-300">
+                        Esta plantilla tiene variables. Primero hay que configurar los campos dinamicos antes de enviarla desde el inbox.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
         <div className="flex items-end gap-2">
           {/* Attachment button */}
           <button
             onClick={handlePaperclipClick}
             className="p-2 rounded-md text-[#484f58] hover:text-[#8b949e] hover:bg-[#1a1f2e] transition-colors shrink-0 mb-0.5"
-            disabled={disabled || sending || uploading}
+            disabled={composerDisabled}
             title="Adjuntar archivo"
             type="button"
           >
@@ -374,7 +498,7 @@ export function MessageInput({ onSend, disabled, conversationId, messages }: Mes
           <button
             onClick={handleAudioClick}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-[#1f6feb]/40 bg-[#0d1117] text-[#7dd3fc] hover:text-white hover:bg-[#1a1f2e] hover:border-[#388bfd] transition-colors shrink-0 mb-0.5"
-            disabled={disabled || sending || uploading}
+            disabled={composerDisabled}
             title="Adjuntar audio"
             type="button"
           >
@@ -390,7 +514,7 @@ export function MessageInput({ onSend, disabled, conversationId, messages }: Mes
                 ? "border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/15"
                 : "border-[#1f6feb]/40 bg-[#0d1117] text-[#7dd3fc] hover:text-white hover:bg-[#1a1f2e] hover:border-[#388bfd]",
             )}
-            disabled={disabled || sending || uploading}
+            disabled={composerDisabled}
             title={recording ? "Detener grabación" : "Grabar audio"}
             type="button"
           >
@@ -404,7 +528,7 @@ export function MessageInput({ onSend, disabled, conversationId, messages }: Mes
               setStickerPickerOpen(false);
             }}
             className="p-2 rounded-md text-[#f9c74f] hover:text-white hover:bg-[#1a1f2e] transition-colors shrink-0 mb-0.5"
-            disabled={disabled || sending || uploading}
+            disabled={composerDisabled}
             title="Emojis"
             type="button"
           >
@@ -417,7 +541,7 @@ export function MessageInput({ onSend, disabled, conversationId, messages }: Mes
               setEmojiPickerOpen(false);
             }}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-[#6e56cf]/40 bg-[#0d1117] text-[#a371f7] hover:text-white hover:bg-[#1a1f2e] hover:border-[#8b5cf6] transition-colors shrink-0 mb-0.5"
-            disabled={disabled || sending || uploading}
+            disabled={composerDisabled}
             title="Stickers"
             type="button"
           >
@@ -479,14 +603,14 @@ export function MessageInput({ onSend, disabled, conversationId, messages }: Mes
               placeholder="Escribe un mensaje..."
               className="w-full min-h-[36px] max-h-[120px] resize-none rounded-lg bg-[#0d1117] border border-[#2d333b] text-sm text-white placeholder:text-[#484f58] px-3 py-2 focus:outline-none focus:border-[#388bfd] focus:ring-1 focus:ring-[#388bfd]/30 transition-colors scrollbar-thin"
               rows={1}
-              disabled={disabled || sending || uploading}
+              disabled={composerDisabled}
             />
           </div>
 
           {/* Send button */}
           <button
             onClick={handleSend}
-            disabled={(!text.trim() && !attachment) || sending || uploading || disabled}
+            disabled={requiresTemplate || (!text.trim() && !attachment) || sending || uploading || disabled}
             className="p-2 rounded-lg bg-[#4f46e5] text-white hover:bg-[#6366f1] disabled:opacity-30 disabled:hover:bg-[#4f46e5] transition-colors shrink-0 mb-0.5"
           >
             <Send className="h-4 w-4" />

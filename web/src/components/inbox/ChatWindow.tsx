@@ -65,14 +65,26 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
     setActiveTab("messages");
   }, [conversation.id]);
 
-  async function handleSend(payload: { text?: string; attachment?: { kind: "image" | "video" | "audio" | "document" | "sticker"; url: string; filename: string; mimeType: string } }) {
+  async function handleSend(payload: {
+    text?: string;
+    attachment?: { kind: "image" | "video" | "audio" | "document" | "sticker"; url: string; filename: string; mimeType: string };
+    template?: { name: string; language: string; components?: unknown[] };
+  }) {
     const hasText = !!payload.text?.trim();
     const attachment = payload.attachment;
 
     let type: MessageContent["type"] = "text";
     let content: MessageContent;
 
-    if (attachment) {
+    if (payload.template) {
+      type = "template";
+      content = {
+        type: "template",
+        template_name: payload.template.name,
+        language: payload.template.language,
+        components: payload.template.components || [],
+      };
+    } else if (attachment) {
       type = attachment.kind;
       if (attachment.kind === "image" || attachment.kind === "sticker") {
         if (attachment.kind === "sticker") {
@@ -163,6 +175,16 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
   const assignedAgent = conversation.assigned_agent;
   const displayName = contact?.name || contact?.wa_id || "Desconocido";
   const isSnoozed = !!conversation.snoozed_until;
+  const channelType = conversation.channel?.type || "";
+  const isWhatsAppConversation = channelType.includes("whatsapp");
+  const lastInboundMessage = messages
+    ?.filter((message) => message.direction === "inbound")
+    .at(-1);
+  const whatsappWindowExpired = Boolean(
+    isWhatsAppConversation &&
+      lastInboundMessage?.created_at &&
+      Date.now() - new Date(lastInboundMessage.created_at).getTime() > 24 * 60 * 60 * 1000
+  );
 
   const statusColors: Record<string, string> = {
     open: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
@@ -323,6 +345,9 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
             disabled={!agent}
             conversationId={conversation.id}
             messages={messages || []}
+            channelId={conversation.channel_id}
+            channelType={conversation.channel?.type}
+            whatsappWindowExpired={whatsappWindowExpired}
           />
         </>
       ) : (

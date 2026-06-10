@@ -1,7 +1,7 @@
 "use client";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/types/database";
-import { Check, CheckCheck, Bot, Image as ImageIcon, FileText, MapPin, Music2, Sticker } from "lucide-react";
+import { Check, CheckCheck, Bot, Image as ImageIcon, FileText, MapPin, Music2, Sticker, FileCheck2 } from "lucide-react";
 import { format } from "date-fns";
 
 interface MessageBubbleProps {
@@ -134,6 +134,21 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             <span className="text-xs text-[#c9d1d9]">
               {content.name || `${content.latitude}, ${content.longitude}`}
             </span>
+          </div>
+        );
+      case "template":
+        return (
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 min-w-[220px]">
+            <div className="flex items-center gap-2 text-amber-200">
+              <FileCheck2 className="h-4 w-4 shrink-0" />
+              <span className="text-xs font-semibold">Plantilla enviada</span>
+            </div>
+            <p className="mt-1 text-[13px] leading-relaxed text-[#f8fafc]">
+              {content.template_name}
+            </p>
+            <p className="mt-0.5 text-[10px] text-amber-100/60">
+              Idioma: {content.language}
+            </p>
           </div>
         );
       default:
