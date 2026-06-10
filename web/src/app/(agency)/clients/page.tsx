@@ -144,15 +144,21 @@ export default function ClientsPage() {
   }, [user, loading, clients, socials, campaignsByClient, insightsByClient])
 
   async function loadData() {
-    const [clientsRes, socialsRes, whatsappsResponse] = await Promise.all([
+    const [clientsRes, whatsappsResponse] = await Promise.all([
       supabase.from('cm_clients').select('*').eq('user_id', user!.id).order('created_at', { ascending: false }),
-      supabase.from('cm_social_accounts').select('*'),
       fetch('/api/whatsapp/accounts'),
     ])
     const whatsappsPayload = whatsappsResponse.ok
       ? await whatsappsResponse.json()
       : { accounts: [] }
-    setClients(clientsRes.data ?? [])
+    const clientRows = clientsRes.data ?? []
+    setClients(clientRows)
+
+    const clientIds = clientRows.map((client: CMClient) => client.id)
+    const socialsRes = clientIds.length
+      ? await supabase.from('cm_social_accounts').select('*').in('client_id', clientIds)
+      : { data: [], error: null }
+
     const socialMap: Record<string, SocialAccount> = {}
     for (const s of (socialsRes.data ?? [])) {
       socialMap[s.client_id] = s
@@ -395,7 +401,11 @@ export default function ClientsPage() {
             const social = socials[client.id]
             const whatsapp = whatsapps[client.id]
             const traceMatchesClient = metaTrace?.clientId === client.id && Boolean(metaTrace.flow)
-            const metaConnected = Boolean(social || traceMatchesClient)
+            const facebookConnected = Boolean(
+              social?.page_id ||
+                social?.page_name ||
+                (metaTrace?.clientId === client.id && metaTrace?.page)
+            )
             const instagramConnected = Boolean(
               social?.instagram_id ||
                 social?.instagram_username ||
@@ -425,29 +435,23 @@ export default function ClientsPage() {
                 </div>
 
                 {/* Social Connection Status */}
-                {(((client.platforms || []).includes('Facebook')) || metaConnected) ? (
-                  metaConnected ? (
+                {(((client.platforms || []).includes('Facebook')) || facebookConnected) ? (
+                  facebookConnected ? (
                     <div className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3">
                       <div className="flex items-center gap-2 mb-1">
                         <div className="w-2 h-2 rounded-full bg-emerald-500" />
                         <span className="text-[11px] font-medium text-emerald-400">
-                          {social ? 'Meta conectado' : 'Conexión Meta en proceso'}
+                          {(social?.page_id || social?.page_name) ? 'Meta conectado' : 'Conexión Meta en proceso'}
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-400">
-                        {social ? (
+                        {(social?.page_id || social?.page_name) ? (
                           <>
                             {social.page_name && <span className="text-blue-400">FB: {social.page_name}</span>}
-                            {social.instagram_username && (
-                              <span className="block text-pink-400">IG: @{social.instagram_username}</span>
-                            )}
                           </>
                         ) : (
                           <>
                             {metaTrace?.page && <span className="text-blue-400">FB: {metaTrace.page}</span>}
-                            {metaTrace?.instagram && (
-                              <span className="block text-pink-400">IG: @{metaTrace.instagram}</span>
-                            )}
                           </>
                         )}
                       </p>
