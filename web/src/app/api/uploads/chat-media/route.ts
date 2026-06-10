@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { execFile } from "child_process";
-import { mkdtemp, readFile, rm, writeFile } from "fs/promises";
+import { constants } from "fs";
+import { access, chmod, mkdtemp, readFile, rm, writeFile } from "fs/promises";
 import { createRequire } from "module";
 import { tmpdir } from "os";
 import path from "path";
@@ -13,6 +14,51 @@ const MAX_FILE_SIZE = 25 * 1024 * 1024;
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const bundledFfmpegPath = require("ffmpeg-static") as string | null;
+
+function uniqueValues(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.filter(Boolean) as string[]));
+}
+
+async function canExecute(filePath: string) {
+  try {
+    await access(filePath, constants.X_OK);
+    return true;
+  } catch {
+    try {
+      await access(filePath, constants.F_OK);
+      await chmod(filePath, 0o755);
+      await access(filePath, constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+async function resolveFfmpegPath() {
+  let packageDir: string | undefined;
+  try {
+    packageDir = path.dirname(require.resolve("ffmpeg-static/package.json"));
+  } catch {
+    packageDir = undefined;
+  }
+
+  const candidates = uniqueValues([
+    bundledFfmpegPath,
+    packageDir ? path.join(packageDir, "ffmpeg") : undefined,
+    path.join(process.cwd(), "node_modules", "ffmpeg-static", "ffmpeg"),
+    path.join(process.cwd(), ".next", "standalone", "node_modules", "ffmpeg-static", "ffmpeg"),
+    "/var/task/node_modules/ffmpeg-static/ffmpeg",
+    "/var/task/.next/standalone/node_modules/ffmpeg-static/ffmpeg",
+  ]);
+
+  for (const candidate of candidates) {
+    if (await canExecute(candidate)) return candidate;
+  }
+
+  // Last fallback for environments where ffmpeg is available on PATH.
+  return "ffmpeg";
+}
 
 async function ensureBucketExists() {
   const admin = createAdminClient();
@@ -56,8 +102,9 @@ async function transcodeAudioToM4a(input: Buffer, originalFileName: string) {
   const outputPath = path.join(tempDir, `${sanitizeFileName(withoutExtension(originalFileName || "voice"))}.m4a`);
 
   try {
+    const ffmpegPath = await resolveFfmpegPath();
     await writeFile(inputPath, input);
-    await execFileAsync(bundledFfmpegPath || "ffmpeg", [
+    await execFileAsync(ffmpegPath, [
       "-y",
       "-i",
       inputPath,
