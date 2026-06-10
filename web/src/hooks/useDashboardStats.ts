@@ -3,6 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import { useCurrentAgent } from "./useCurrentAgent";
 
+type CreatedAtRow = { created_at: string };
+type ConversationStatRow = { created_at: string; status: string; assigned_agent_id: string | null };
+
 export function useDashboardStats() {
   const supabase = createClient();
   const { data: agent } = useCurrentAgent();
@@ -35,19 +38,19 @@ export function useDashboardStats() {
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
       const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7).toISOString();
 
-      const allContacts = contacts.data || [];
-      const allConversations = conversations.data || [];
-      const allMessages = messages.data || [];
+      const allContacts = (contacts.data || []) as CreatedAtRow[];
+      const allConversations = (conversations.data || []) as ConversationStatRow[];
+      const allMessages = (messages.data || []) as CreatedAtRow[];
 
-      const openConvos = allConversations.filter((c) => c.status === "open").length;
+      const openConvos = allConversations.filter((c: ConversationStatRow) => c.status === "open").length;
       const unassigned = allConversations.filter(
-        (c) => c.status === "open" && !c.assigned_agent_id
+        (c: ConversationStatRow) => c.status === "open" && !c.assigned_agent_id
       ).length;
       const newContactsToday = allContacts.filter(
-        (c) => c.created_at >= todayStart
+        (c: CreatedAtRow) => c.created_at >= todayStart
       ).length;
       const messagesToday = allMessages.filter(
-        (c) => c.created_at >= todayStart
+        (c: CreatedAtRow) => c.created_at >= todayStart
       ).length;
 
       // Build conversation chart data for last 14 days
@@ -57,7 +60,7 @@ export function useDashboardStats() {
         const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString();
         const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).toISOString();
         const count = allConversations.filter(
-          (c) => c.created_at >= dayStart && c.created_at < dayEnd
+          (c: ConversationStatRow) => c.created_at >= dayStart && c.created_at < dayEnd
         ).length;
         chartData.push({
           date: d.toLocaleDateString("es-ES", { day: "2-digit", month: "short" }),
@@ -70,25 +73,25 @@ export function useDashboardStats() {
       const yesterdayEnd = todayStart;
 
       const newContactsYesterday = allContacts.filter(
-        (c) => c.created_at >= yesterdayStart && c.created_at < yesterdayEnd
+        (c: CreatedAtRow) => c.created_at >= yesterdayStart && c.created_at < yesterdayEnd
       ).length;
       const messagesYesterday = allMessages.filter(
-        (c) => c.created_at >= yesterdayStart && c.created_at < yesterdayEnd
+        (c: CreatedAtRow) => c.created_at >= yesterdayStart && c.created_at < yesterdayEnd
       ).length;
 
       // Previous week contacts total (rough: contacts created before today)
       const prevWeekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 14).toISOString();
       const prevWeekEnd = weekStart;
       const contactsPrevWeek = allContacts.filter(
-        (c) => c.created_at >= prevWeekStart && c.created_at < prevWeekEnd
+        (c: CreatedAtRow) => c.created_at >= prevWeekStart && c.created_at < prevWeekEnd
       ).length;
       const contactsThisWeek = allContacts.filter(
-        (c) => c.created_at >= weekStart && c.created_at < todayStart
+        (c: CreatedAtRow) => c.created_at >= weekStart && c.created_at < todayStart
       ).length;
 
       // Conversations this week vs last week
       const convosPrevWeek = allConversations.filter(
-        (c) => c.created_at >= prevWeekStart && c.created_at < prevWeekEnd && c.status === "open"
+        (c: ConversationStatRow) => c.created_at >= prevWeekStart && c.created_at < prevWeekEnd && c.status === "open"
       ).length;
 
       function calcTrend(current: number, previous: number): { direction: "up" | "down" | "neutral"; percentage: string } {

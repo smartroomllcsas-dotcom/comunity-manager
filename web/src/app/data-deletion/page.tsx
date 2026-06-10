@@ -26,9 +26,9 @@ export default function DataDeletionPage() {
             <h2 className="text-xl font-semibold text-slate-100 mb-3">Opción 1 — Eliminación desde la plataforma</h2>
             <ol className="list-decimal list-inside space-y-1 ml-2">
               <li>Inicia sesión en <a className="text-violet-400" href="https://www.comunitymanager.io/login">comunitymanager.io</a>.</li>
-              <li>Ve a <strong>Configuración &gt; Cuenta</strong>.</li>
-              <li>Pulsa <strong>&quot;Eliminar mi cuenta&quot;</strong> y confirma.</li>
-              <li>Recibirás un correo de confirmación. La eliminación se completa en un máximo de 30 días.</li>
+              <li>Ve a <strong>Configuración &gt; Seguridad</strong>.</li>
+              <li>Escribe <strong>&quot;ELIMINAR&quot;</strong> y pulsa <strong>&quot;Eliminar mi cuenta&quot;</strong>.</li>
+              <li>Verás una confirmación en pantalla y la eliminación se completa en un máximo de 30 días.</li>
             </ol>
           </section>
 

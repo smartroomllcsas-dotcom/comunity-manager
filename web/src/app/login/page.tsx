@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { login, register } from '@/lib/auth'
+import LegalLinks from '@/components/LegalLinks'
 
 export default function LoginPage() {
   const [isRegister, setIsRegister] = useState(false)
@@ -123,9 +124,16 @@ export default function LoginPage() {
               {isRegister ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes cuenta? Regístrate'}
             </button>
             <p className="text-xs text-slate-500">
-              Login unificado: tu cuenta da acceso al panel de Community y al Inbox SmartTalk.
+              Login unificado: tu cuenta da acceso al panel de CommunityAgent y a la bandeja multicanal.
             </p>
           </div>
+        </div>
+
+        <div className="mt-5">
+          <LegalLinks
+            className="flex items-center justify-center gap-4 text-xs text-slate-500"
+            linkClassName="hover:text-slate-300 transition-colors"
+          />
         </div>
       </div>
     </div>

@@ -6,6 +6,7 @@ export interface CMUser {
   role: string
   plan: string
   avatar_url: string | null
+  cm_client_id?: string | null
   created_at: string
   updated_at: string
 }
@@ -588,4 +589,3 @@ export interface AIAgent {
   updated_at: string;
   knowledge_sources?: KnowledgeSource[];
 }
-

@@ -1,58 +1,67 @@
 "use client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createClient } from "@/lib/supabase/client";
 import { useCurrentAgent } from "./useCurrentAgent";
 import { useInboxStore } from "@/stores/inbox";
 import type { Conversation } from "@/types/database";
 import { useEffect } from "react";
+import { getConversationChannelKind } from "@/components/inbox/ChannelBadge";
 
-export function useConversations() {
-  const supabase = createClient();
+export function useConversations(initialData: Conversation[] = []) {
   const { data: agent } = useCurrentAgent();
   const filter = useInboxStore((s) => s.filter);
   const searchQuery = useInboxStore((s) => s.searchQuery);
   const statusFilter = useInboxStore((s) => s.statusFilter);
+  const channelFilter = useInboxStore((s) => s.channelFilter);
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (!agent) return;
-    const channel = supabase
-      .channel("conversations-changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "conversations", filter: `organization_id=eq.${agent.organization_id}` }, () => {
-        queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [agent, supabase, queryClient]);
+    const interval = window.setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    }, 5000);
+
+    return () => window.clearInterval(interval);
+  }, [queryClient]);
 
   return useQuery<Conversation[]>({
-    queryKey: ["conversations", filter, searchQuery, statusFilter],
+    queryKey: ["conversations", filter, searchQuery, statusFilter, channelFilter],
+    initialData,
     queryFn: async () => {
-      let query = supabase
-        .from("conversations")
-        .select("*, contact:contacts(*), assigned_agent:agents(*)")
-        .eq("organization_id", agent!.organization_id)
-        .order("updated_at", { ascending: false })
-        .limit(50);
+      const response = await fetch("/api/inbox/conversations", { cache: "no-store" });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || "No se pudieron cargar las conversaciones");
+      }
+
+      const { conversations } = (await response.json()) as { conversations: Conversation[] };
+      let filtered = conversations || [];
 
       switch (filter) {
-        case "mine": if (agent) query = query.eq("assigned_agent_id", agent.id); break;
-        case "unassigned": query = query.is("assigned_agent_id", null); break;
-        case "open": case "pending": case "resolved": case "closed":
-          query = query.eq("status", filter); break;
+        case "mine":
+          if (agent) filtered = filtered.filter((conversation) => conversation.assigned_agent_id === agent.id);
+          break;
+        case "unassigned":
+          filtered = filtered.filter((conversation) => !conversation.assigned_agent_id);
+          break;
+        case "open":
+        case "pending":
+        case "resolved":
+        case "closed":
+          filtered = filtered.filter((conversation) => conversation.status === filter);
+          break;
       }
 
-      // Apply status filter
       if (statusFilter === "snoozed") {
-        query = query.not("snoozed_until", "is", null);
+        filtered = filtered.filter((conversation) => !!conversation.snoozed_until);
       } else if (statusFilter && statusFilter !== "all") {
-        query = query.eq("status", statusFilter);
+        filtered = filtered.filter((conversation) => conversation.status === statusFilter);
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
-      return data || [];
+      if (channelFilter !== "all") {
+        return filtered.filter((conversation: Conversation) => getConversationChannelKind(conversation) === channelFilter);
+      }
+      return filtered;
     },
     enabled: !!agent,
+    refetchInterval: 5000,
   });
 }

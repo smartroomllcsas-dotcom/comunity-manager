@@ -46,8 +46,12 @@ export function Sidebar() {
       <aside className="w-[56px] bg-[#0d1117] flex flex-col h-screen shrink-0 border-r border-[#2d333b]">
         {/* Logo */}
         <div className="flex items-center justify-center h-[56px] border-b border-[#2d333b]">
-          <Link href="/inbox" className="flex items-center justify-center w-9 h-9 rounded-lg bg-[#3b82f6] text-white font-bold text-sm">
-            W
+          <Link href="/clients" className="flex items-center justify-center w-9 h-9 rounded-lg overflow-hidden border border-[#2d333b] bg-[#1a1f2e]">
+            <img
+              src="/community-manager-logo.png"
+              alt="CommunityAgent"
+              className="w-full h-full object-cover"
+            />
           </Link>
         </div>
 

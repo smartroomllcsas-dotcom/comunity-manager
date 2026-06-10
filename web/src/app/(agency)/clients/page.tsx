@@ -209,7 +209,11 @@ export default function ClientsPage() {
     }))
   }
 
-  function connectMeta(clientId: string) {
+  function connectFacebook(clientId: string) {
+    window.location.href = `/auth/facebook?clientId=${clientId}`
+  }
+
+  function connectInstagram(clientId: string) {
     window.location.href = `/api/auth/meta?clientId=${clientId}`
   }
 
@@ -298,7 +302,6 @@ export default function ClientsPage() {
             <div>Client: {metaTrace.clientId || 'n/a'}</div>
             <div>Page: {metaTrace.page || 'n/a'}</div>
             <div>Instagram: {metaTrace.instagram || 'n/a'}</div>
-            <div>Ads: {metaTrace.adAccount || 'n/a'}</div>
             <div>Updated: {metaTrace.updatedAt || 'n/a'}</div>
           </div>
         </div>
@@ -391,8 +394,13 @@ export default function ClientsPage() {
           {clients.map((client) => {
             const social = socials[client.id]
             const whatsapp = whatsapps[client.id]
-            const traceMatchesClient = metaTrace?.clientId === client.id && metaTrace.flow === 'facebook_instagram_ads'
+            const traceMatchesClient = metaTrace?.clientId === client.id && Boolean(metaTrace.flow)
             const metaConnected = Boolean(social || traceMatchesClient)
+            const instagramConnected = Boolean(
+              social?.instagram_id ||
+                social?.instagram_username ||
+                (metaTrace?.clientId === client.id && metaTrace?.instagram)
+            )
             return (
               <div
                 key={client.id}
@@ -417,13 +425,13 @@ export default function ClientsPage() {
                 </div>
 
                 {/* Social Connection Status */}
-                {(((client.platforms || []).includes('Instagram') || (client.platforms || []).includes('Facebook')) || metaConnected) ? (
+                {(((client.platforms || []).includes('Facebook')) || metaConnected) ? (
                   metaConnected ? (
                     <div className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3">
                       <div className="flex items-center gap-2 mb-1">
                         <div className="w-2 h-2 rounded-full bg-emerald-500" />
                         <span className="text-[11px] font-medium text-emerald-400">
-                          {social ? 'Redes Conectadas' : 'Conexión Meta en proceso'}
+                          {social ? 'Meta conectado' : 'Conexión Meta en proceso'}
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-400">
@@ -431,20 +439,14 @@ export default function ClientsPage() {
                           <>
                             {social.page_name && <span className="text-blue-400">FB: {social.page_name}</span>}
                             {social.instagram_username && (
-                              <span className="text-pink-400 ml-2">IG: @{social.instagram_username}</span>
-                            )}
-                            {social.ad_account_name && (
-                              <span className="text-amber-400 ml-2">Ads: {social.ad_account_name}</span>
+                              <span className="block text-pink-400">IG: @{social.instagram_username}</span>
                             )}
                           </>
                         ) : (
                           <>
                             {metaTrace?.page && <span className="text-blue-400">FB: {metaTrace.page}</span>}
                             {metaTrace?.instagram && (
-                              <span className="text-pink-400 ml-2">IG: @{metaTrace.instagram}</span>
-                            )}
-                            {metaTrace?.adAccount && (
-                              <span className="text-amber-400 ml-2">Ads: {metaTrace.adAccount}</span>
+                              <span className="block text-pink-400">IG: @{metaTrace.instagram}</span>
                             )}
                           </>
                         )}
@@ -455,46 +457,100 @@ export default function ClientsPage() {
                       >
                         Ver Meta
                       </a>
+                      <button
+                        type="button"
+                        onClick={() => connectFacebook(client.id)}
+                        className="mt-2 inline-flex w-full items-center justify-center rounded-md border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-[11px] text-cyan-200 transition hover:bg-cyan-500/20"
+                      >
+                        Reconectar Meta
+                      </button>
                     </div>
                   ) : (
                     <button
-                      onClick={() => connectMeta(client.id)}
+                      onClick={() => connectFacebook(client.id)}
                       className="w-full bg-blue-600/20 border border-blue-500/30 text-blue-400 rounded-lg px-3 py-2.5 text-xs font-medium hover:bg-blue-600/30 transition-colors mb-3 flex items-center justify-center gap-2"
                     >
                       <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/>
                       </svg>
-                      Conectar Facebook + Instagram + Ads
+                      Conectar Facebook
                     </button>
                   )
                 ) : null}
 
-                {whatsapp ? (
-                  <div className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                      <span className="text-[11px] font-medium text-emerald-400">WhatsApp Conectado</span>
+                {(client.platforms || []).includes('Instagram') ? (
+                  instagramConnected ? (
+                    <div className="mb-3 rounded-lg border border-pink-500/20 bg-pink-500/10 p-3">
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="w-2 h-2 rounded-full bg-pink-500" />
+                        <span className="text-[11px] font-medium text-pink-400">
+                          {social?.instagram_username || metaTrace?.instagram ? 'Instagram conectado' : 'Conexión Instagram en proceso'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        {social?.instagram_username ? (
+                          <span className="text-pink-400">IG: @{social.instagram_username}</span>
+                        ) : metaTrace?.instagram ? (
+                          <span className="text-pink-400">IG: @{metaTrace.instagram}</span>
+                        ) : (
+                          <span className="text-slate-500">Cuenta de Instagram lista para conectar</span>
+                        )}
+                      </p>
+                      <a
+                        href={`/clients/${client.id}/meta`}
+                        className="mt-3 inline-flex w-full items-center justify-center rounded-md border border-white/10 bg-slate-800 px-3 py-2 text-[11px] text-slate-100 transition hover:bg-slate-700"
+                      >
+                        Ver Instagram
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => connectInstagram(client.id)}
+                        className="mt-2 inline-flex w-full items-center justify-center rounded-md border border-pink-500/20 bg-pink-500/10 px-3 py-2 text-[11px] text-pink-200 transition hover:bg-pink-500/20"
+                      >
+                        Reconectar Instagram
+                      </button>
                     </div>
-                    <p className="text-[11px] text-slate-400">
-                      {whatsapp.verified_name || whatsapp.display_phone_number || whatsapp.phone_number_id}
-                    </p>
-                    <a
-                      href={`/clients/${client.id}/whatsapp`}
-                      className="mt-3 inline-flex w-full items-center justify-center rounded-md border border-white/10 bg-slate-800 px-3 py-2 text-[11px] text-slate-100 transition hover:bg-slate-700"
+                  ) : (
+                    <button
+                      onClick={() => connectInstagram(client.id)}
+                      className="w-full bg-pink-600/20 border border-pink-500/30 text-pink-300 rounded-lg px-3 py-2.5 text-xs font-medium hover:bg-pink-600/30 transition-colors mb-3 flex items-center justify-center gap-2"
                     >
-                      Ver WhatsApp
-                    </a>
-                  </div>
-                ) : (
-                  <div className="mb-3">
-                    <WhatsAppConnectButton
-                      clientId={client.id}
-                      userId={user?.id}
-                      onConnected={loadData}
-                      compact
-                    />
-                  </div>
-                )}
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M7 2h10a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5zm0 2a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3H7zm5 3.2A4.8 4.8 0 1 1 7.2 12 4.8 4.8 0 0 1 12 7.2zm0 2A2.8 2.8 0 1 0 14.8 12 2.8 2.8 0 0 0 12 9.2zM17.8 6.2a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
+                      </svg>
+                      Conectar Instagram
+                    </button>
+                  )
+                ) : null}
+
+                {(client.platforms || []).includes('WhatsApp') ? (
+                  whatsapp ? (
+                    <div className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <span className="text-[11px] font-medium text-emerald-400">WhatsApp Conectado</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        {whatsapp.verified_name || whatsapp.display_phone_number || whatsapp.phone_number_id}
+                      </p>
+                      <a
+                        href={`/clients/${client.id}/whatsapp`}
+                        className="mt-3 inline-flex w-full items-center justify-center rounded-md border border-white/10 bg-slate-800 px-3 py-2 text-[11px] text-slate-100 transition hover:bg-slate-700"
+                      >
+                        Ver WhatsApp
+                      </a>
+                    </div>
+                  ) : (
+                    <div className="mb-3">
+                      <WhatsAppConnectButton
+                        clientId={client.id}
+                        userId={user?.id}
+                        onConnected={loadData}
+                        compact
+                      />
+                    </div>
+                  )
+                ) : null}
 
                 <div className="flex items-center justify-between pt-3 border-t border-slate-800">
                   <span className="text-xs text-slate-500">

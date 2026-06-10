@@ -1,12 +1,16 @@
 "use client";
-import { useConversations } from "@/hooks/useConversations";
 import { useInboxStore } from "@/stores/inbox";
 import { ConversationFilters } from "./ConversationFilters";
 import { ConversationItem } from "./ConversationItem";
 import { Loader2, Inbox } from "lucide-react";
+import type { Conversation } from "@/types/database";
 
-export function ConversationList() {
-  const { data: conversations, isLoading } = useConversations();
+interface ConversationListProps {
+  conversations?: Conversation[];
+  isLoading?: boolean;
+}
+
+export function ConversationList({ conversations = [], isLoading = false }: ConversationListProps) {
   const selectedId = useInboxStore((s) => s.selectedConversationId);
   const setSelected = useInboxStore((s) => s.setSelectedConversation);
 
@@ -39,7 +43,7 @@ export function ConversationList() {
             <p className="text-xs">No hay conversaciones</p>
           </div>
         ) : (
-          conversations?.map((conv) => (
+          conversations.map((conv) => (
             <ConversationItem
               key={conv.id}
               conversation={conv}

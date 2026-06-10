@@ -4,6 +4,10 @@ import { X, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { ClosingCategory } from "@/types/database";
 
+type ClosingCategoriesResponse = {
+  data: ClosingCategory[] | null;
+};
+
 interface ClosingDialogProps {
   open: boolean;
   onClose: () => void;
@@ -33,7 +37,7 @@ export function ClosingDialog({ open, onClose, onConfirm, organizationId }: Clos
       .select("*")
       .eq("organization_id", organizationId)
       .order("name")
-      .then(({ data }) => {
+      .then(({ data }: ClosingCategoriesResponse) => {
         setCategories(data || []);
       });
   }, [open, organizationId, supabase]);

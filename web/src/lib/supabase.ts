@@ -33,13 +33,15 @@ export const supabase: any = isPostgrest
     ? localQueryClient
     : createClient(supabaseUrl, supabaseAnonKey)
 
-export const supabaseAdmin: any = createClient(
-  supabaseUrl,
-  supabaseServiceRoleKey || supabaseAnonKey,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  }
-)
+export const supabaseAdmin: any = isMysql
+  ? localQueryClient
+  : createClient(
+      supabaseUrl,
+      supabaseServiceRoleKey || supabaseAnonKey,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    )

@@ -29,6 +29,8 @@ import {
   Phone,
   Hash,
   Shield,
+  Send,
+  Music2,
 } from "lucide-react";
 import type { Channel, ChannelStatus } from "@/types/database";
 import Link from "next/link";
@@ -63,6 +65,24 @@ function channelIcon(type: string) {
     case "whatsapp_business_api":
     case "whatsapp_cloud_api":
       return <WhatsAppIcon className="h-10 w-10 text-green-500 fill-current" />;
+    case "facebook_messenger":
+      return (
+        <svg viewBox="0 0 24 24" className="h-10 w-10 text-[#58a6ff] fill-current">
+          <path d="M12 2C6.477 2 2 6.06 2 11.06c0 2.86 1.44 5.4 3.68 7.06V22l3.78-2.08c1 .28 2.07.44 3.16.44 5.523 0 10-4.06 10-9.06S17.523 2 12 2Zm1.08 12.52-2.7-2.88-5.3 2.88 5.83-6.18 2.77 2.88 5.23-2.88-5.83 6.18Z" />
+        </svg>
+      );
+    case "instagram":
+      return (
+        <svg viewBox="0 0 24 24" className="h-10 w-10 text-pink-400 fill-current">
+          <rect x="3.5" y="3.5" width="17" height="17" rx="5" fill="none" stroke="currentColor" strokeWidth="2" />
+          <circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
+          <circle cx="17.5" cy="6.5" r="1.3" />
+        </svg>
+      );
+    case "tiktok":
+      return <Music2 className="h-10 w-10 text-slate-300" />;
+    case "telegram":
+      return <Send className="h-10 w-10 text-sky-400" />;
     default:
       return <Wifi className="h-10 w-10 text-[#8b949e]" />;
   }

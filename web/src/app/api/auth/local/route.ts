@@ -1,7 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { randomUUID } from 'crypto'
+import { createServerClient } from '@supabase/ssr'
 import type { CMUser } from '@/types/database'
+import { mysqlQuery, quoteId } from '@/lib/mysql'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 const SESSION_KEY = 'cm_user_id'
+
+function getDbProvider() {
+  return (process.env.NEXT_PUBLIC_DB_PROVIDER || process.env.DB_PROVIDER || 'supabase').toLowerCase()
+}
+
+function isMysqlMode() {
+  return process.env.NODE_ENV !== 'production' && getDbProvider() === 'mysql'
+}
 
 function getSupabaseConfig() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -86,9 +98,253 @@ function buildSessionCookie(userId: string) {
   return `${SESSION_KEY}=${encodeURIComponent(userId)}; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax`
 }
 
+function nowSql() {
+  return new Date().toISOString().slice(0, 19).replace('T', ' ')
+}
+
+async function bridgeSmarttalkSession(
+  request: NextRequest,
+  response: NextResponse,
+  cmUser: CMUser,
+  email: string,
+  password: string
+) {
+  const publicAdmin = createAdminClient('public')
+  const smarttalkAdmin = createAdminClient('smarttalk')
+
+  const { data: authUsers, error: listErr } = await publicAdmin.auth.admin.listUsers()
+  if (listErr) {
+    return `No pude consultar usuarios de autenticación: ${listErr.message}`
+  }
+
+  const existingAuthUser = authUsers.users.find(
+    (authUser) => authUser.email?.toLowerCase() === email.toLowerCase()
+  )
+
+  if (existingAuthUser) {
+    const { error: updateErr } = await publicAdmin.auth.admin.updateUserById(existingAuthUser.id, {
+      password,
+      email_confirm: true,
+    })
+    if (updateErr) {
+      return `No pude sincronizar la contraseña con Supabase Auth: ${updateErr.message}`
+    }
+  } else {
+    const { data: created, error: createErr } = await publicAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: {
+        name: cmUser.name,
+        source: 'cm_bridge',
+      },
+    })
+    if (createErr || !created?.user) {
+      return `No pude crear el usuario de autenticación: ${createErr?.message || 'error desconocido'}`
+    }
+  }
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      db: { schema: 'smarttalk' },
+      cookies: {
+        getAll() {
+          return request.cookies.getAll()
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options)
+          })
+        },
+      },
+    }
+  )
+
+  const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  })
+
+  if (signInErr || !signInData?.user) {
+    return `No pude iniciar sesión en Supabase Auth: ${signInErr?.message || 'error desconocido'}`
+  }
+
+  const authUserId = signInData.user.id
+
+  const { data: agent } = await smarttalkAdmin
+    .from('agents')
+    .select('id, organization_id')
+    .eq('id', authUserId)
+    .maybeSingle()
+
+  if (!agent) {
+    let organizationId: string | null = null
+
+    if (cmUser.cm_client_id) {
+      const { data: bridged } = await publicAdmin
+        .from('cm_clients')
+        .select('smarttalk_organization_id')
+        .eq('id', cmUser.cm_client_id)
+        .maybeSingle()
+
+      organizationId = bridged?.smarttalk_organization_id ?? null
+    }
+
+    if (!organizationId) {
+      const orgName = cmUser.name ? `${cmUser.name} Workspace` : `${email} Workspace`
+      const { data: org, error: orgErr } = await smarttalkAdmin
+        .from('organizations')
+        .insert({ name: orgName, cm_client_id: cmUser.cm_client_id ?? null })
+        .select('id')
+        .single()
+
+      if (orgErr || !org) {
+        return `No pude crear la organización de SmartTalk: ${orgErr?.message || 'error desconocido'}`
+      }
+
+      organizationId = org.id
+
+      if (cmUser.cm_client_id) {
+        await publicAdmin
+          .from('cm_clients')
+          .update({ smarttalk_organization_id: organizationId })
+          .eq('id', cmUser.cm_client_id)
+      }
+    }
+
+    const role = cmUser.role === 'admin' ? 'admin' : 'agent'
+    const { error: agentErr } = await smarttalkAdmin.from('agents').insert({
+      id: authUserId,
+      organization_id: organizationId,
+      email,
+      name: cmUser.name ?? email,
+      role,
+      status: 'online',
+    })
+
+    if (agentErr) {
+      return `No pude crear el agente de SmartTalk: ${agentErr.message}`
+    }
+  }
+
+  response.cookies.set(SESSION_KEY, cmUser.id, {
+    httpOnly: false,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: 60 * 60 * 24 * 30,
+  })
+
+  return null
+}
+
+async function mysqlGetUserByEmail(email: string): Promise<CMUser | null> {
+  const rows = await mysqlQuery<CMUser[]>(
+    `SELECT * FROM ${quoteId('cm_users')} WHERE ${quoteId('email')} = ? LIMIT 1`,
+    [email]
+  )
+  return rows[0] ?? null
+}
+
+async function mysqlGetUserById(userId: string): Promise<CMUser | null> {
+  const rows = await mysqlQuery<CMUser[]>(
+    `SELECT * FROM ${quoteId('cm_users')} WHERE ${quoteId('id')} = ? LIMIT 1`,
+    [userId]
+  )
+  return rows[0] ?? null
+}
+
+async function handleMysqlAuth(request: NextRequest, body: any) {
+  const action = body?.action
+  const wantsHtmlRedirect =
+    !request.headers.get('content-type')?.includes('application/json') &&
+    request.headers.get('accept')?.includes('text/html')
+
+  if (action === 'login') {
+    const email = String(body?.email || '').toLowerCase().trim()
+    const password = String(body?.password || '')
+
+    const user = await mysqlGetUserByEmail(email)
+
+    if (!user || user.password_hash !== password) {
+      return NextResponse.json({ user: null, error: 'Invalid email or password' }, { status: 401 })
+    }
+
+    if (wantsHtmlRedirect) {
+      const response = NextResponse.redirect(new URL('/', request.url), { status: 303 })
+      response.headers.set('Set-Cookie', buildSessionCookie(user.id))
+      return response
+    }
+
+    return NextResponse.json({ user, error: null })
+  }
+
+  if (action === 'register') {
+    const email = String(body?.email || '').toLowerCase().trim()
+    const password = String(body?.password || '')
+    const name = String(body?.name || '').trim()
+
+    const existing = await mysqlGetUserByEmail(email)
+    if (existing) {
+      return NextResponse.json({ user: null, error: 'Email already registered' }, { status: 409 })
+    }
+
+    const userId = randomUUID()
+    const timestamp = nowSql()
+
+    await mysqlQuery(
+      `INSERT INTO ${quoteId('cm_users')} (
+        ${quoteId('id')},
+        ${quoteId('email')},
+        ${quoteId('password_hash')},
+        ${quoteId('name')},
+        ${quoteId('role')},
+        ${quoteId('plan')},
+        ${quoteId('avatar_url')},
+        ${quoteId('created_at')},
+        ${quoteId('updated_at')}
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [userId, email, password, name, 'user', 'free', null, timestamp, timestamp]
+    )
+
+    const user = await mysqlGetUserById(userId)
+
+    if (!user) {
+      return NextResponse.json({ user: null, error: 'Unable to create user' }, { status: 500 })
+    }
+
+    if (wantsHtmlRedirect) {
+      const response = NextResponse.redirect(new URL('/', request.url), { status: 303 })
+      response.headers.set('Set-Cookie', buildSessionCookie(user.id))
+      return response
+    }
+
+    return NextResponse.json({ user, error: null })
+  }
+
+  if (action === 'getCurrentUser') {
+    const userId = String(body?.userId || '').trim()
+    if (!userId) {
+      return NextResponse.json({ user: null, error: null })
+    }
+
+    const user = await mysqlGetUserById(userId)
+    return NextResponse.json({ user, error: null })
+  }
+
+  return NextResponse.json({ user: null, error: 'Unsupported action' }, { status: 400 })
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await readPayload(request)
+
+    if (isMysqlMode()) {
+      return await handleMysqlAuth(request, body)
+    }
+
     const action = body?.action
     const wantsHtmlRedirect =
       !request.headers.get('content-type')?.includes('application/json') &&
@@ -112,13 +368,16 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ user: null, error: 'Invalid email or password' }, { status: 401 })
       }
 
-      if (wantsHtmlRedirect) {
-        const response = NextResponse.redirect(new URL('/', request.url), { status: 303 })
-        response.headers.set('Set-Cookie', buildSessionCookie(user.id))
-        return response
+      const response = wantsHtmlRedirect
+        ? NextResponse.redirect(new URL('/', request.url), { status: 303 })
+        : NextResponse.json({ user, error: null })
+
+      const bridgeError = await bridgeSmarttalkSession(request, response, user, email, password)
+      if (bridgeError) {
+        return NextResponse.json({ user: null, error: bridgeError }, { status: 500 })
       }
 
-      return NextResponse.json({ user, error: null })
+      return response
     }
 
     if (action === 'register') {
@@ -163,13 +422,16 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ user: null, error: 'Unable to create user' }, { status: 500 })
       }
 
-      if (wantsHtmlRedirect) {
-        const response = NextResponse.redirect(new URL('/', request.url), { status: 303 })
-        response.headers.set('Set-Cookie', buildSessionCookie(user.id))
-        return response
+      const response = wantsHtmlRedirect
+        ? NextResponse.redirect(new URL('/', request.url), { status: 303 })
+        : NextResponse.json({ user, error: null })
+
+      const bridgeError = await bridgeSmarttalkSession(request, response, user, email, password)
+      if (bridgeError) {
+        return NextResponse.json({ user: null, error: bridgeError }, { status: 500 })
       }
 
-      return NextResponse.json({ user, error: null })
+      return response
     }
 
     if (action === 'getCurrentUser') {

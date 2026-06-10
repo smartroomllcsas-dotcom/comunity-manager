@@ -1,11 +1,42 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Paperclip, Smile } from "lucide-react";
+import { Send, Paperclip, Smile, Sticker, X, Image as ImageIcon, FileText, Music2, Video, Mic, Square } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { AIAssistPreview, AIAssistButton } from "./AIAssist";
 import type { Message } from "@/types/database";
 
+type AttachmentKind = "image" | "video" | "audio" | "document" | "sticker";
+
+type ComposerAttachment = {
+  kind: AttachmentKind;
+  url: string;
+  filename: string;
+  mimeType: string;
+};
+
+const EMOJI_PICKER = [
+  "😀", "😁", "😂", "🤣", "😊", "😍", "😘", "😎",
+  "🤝", "🙏", "👏", "🎉", "💪", "🔥", "💡", "✅",
+  "❤️", "💙", "💜", "🫶", "👍", "👀", "🥳", "😅",
+];
+
+const STICKER_PICKER = [
+  "😺", "🤖", "🌟", "🔥", "💥", "🎉", "❤️", "👍",
+];
+
+function emojiToTwemojiUrl(emoji: string) {
+  const codePoints = Array.from(emoji)
+    .map((char) => char.codePointAt(0)?.toString(16))
+    .filter(Boolean)
+    .join("-");
+  return `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/${codePoints}.png`;
+}
+
 interface MessageInputProps {
-  onSend: (text: string) => Promise<void>;
+  onSend: (payload: {
+    text?: string;
+    attachment?: ComposerAttachment;
+  }) => Promise<void>;
   disabled?: boolean;
   conversationId?: string;
   messages?: Message[];
@@ -14,7 +45,20 @@ interface MessageInputProps {
 export function MessageInput({ onSend, disabled, conversationId, messages }: MessageInputProps) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [attachment, setAttachment] = useState<ComposerAttachment | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
 
   // AI Assist state
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
@@ -34,13 +78,215 @@ export function MessageInput({ onSend, disabled, conversationId, messages }: Mes
     }
   }, [text]);
 
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) {
+        window.clearInterval(recordingTimerRef.current);
+      }
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  async function uploadAttachment(file: File): Promise<ComposerAttachment> {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch("/api/uploads/chat-media", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      throw new Error(error.error || "No se pudo subir el archivo");
+    }
+
+    const data = await res.json() as {
+      url: string;
+      fileName: string;
+      mimeType: string;
+    };
+
+    const kind: AttachmentKind = data.mimeType.startsWith("image/")
+      ? "image"
+      : data.mimeType.startsWith("video/")
+        ? "video"
+        : data.mimeType.startsWith("audio/")
+          ? "audio"
+          : "document";
+
+    return {
+      kind,
+      url: data.url,
+      filename: data.fileName,
+      mimeType: data.mimeType,
+    };
+  }
+
+  function handlePaperclipClick() {
+    setEmojiPickerOpen(false);
+    setStickerPickerOpen(false);
+    fileInputRef.current?.click();
+  }
+
+  function handleAudioClick() {
+    setEmojiPickerOpen(false);
+    setStickerPickerOpen(false);
+    audioInputRef.current?.click();
+  }
+
+  async function uploadRecordedAudio(blob: Blob, mimeType: string) {
+    const extension = mimeType.includes("ogg")
+      ? "ogg"
+      : mimeType.includes("wav")
+        ? "wav"
+        : mimeType.includes("mp4")
+          ? "mp4"
+          : "webm";
+    const file = new File(
+      [blob],
+      `voice-${Date.now()}.${extension}`,
+      { type: mimeType || "audio/webm" },
+    );
+    const uploaded = await uploadAttachment(file);
+    setAttachment(uploaded);
+  }
+
+  async function startVoiceRecording() {
+    if (disabled || sending || uploading || recording) return;
+    setEmojiPickerOpen(false);
+    setStickerPickerOpen(false);
+    setRecordingError(null);
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setRecordingError("Tu navegador no soporta grabación de audio.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      recorderRef.current = recorder;
+      recordingStreamRef.current = stream;
+      recordingChunksRef.current = [];
+      setRecordingSeconds(0);
+      setRecording(true);
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) recordingChunksRef.current.push(event.data);
+      };
+
+      recorder.onstop = async () => {
+        const mimeType = recorder.mimeType || "audio/webm";
+        const chunks = recordingChunksRef.current.slice();
+        recordingChunksRef.current = [];
+        recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+        recorderRef.current = null;
+        setRecording(false);
+        if (!chunks.length) return;
+        setUploading(true);
+        try {
+          const blob = new Blob(chunks, { type: mimeType });
+          await uploadRecordedAudio(blob, mimeType);
+        } catch (error) {
+          console.error(error);
+        } finally {
+          setUploading(false);
+        }
+      };
+
+      recorder.start();
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingSeconds((current) => current + 1);
+      }, 1000);
+    } catch (error) {
+      console.error(error);
+      setRecordingError("No se pudo acceder al micrófono.");
+      setRecording(false);
+      recordingStreamRef.current = null;
+      recorderRef.current = null;
+    }
+  }
+
+  function stopVoiceRecording() {
+    if (!recording) return;
+    if (recordingTimerRef.current) {
+      window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    recorderRef.current?.stop();
+  }
+
+  function toggleVoiceRecording() {
+    if (recording) {
+      stopVoiceRecording();
+      return;
+    }
+    void startVoiceRecording();
+  }
+
+  function insertEmoji(emoji: string) {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      setText((prev) => `${prev}${emoji}`);
+      return;
+    }
+
+    const start = textarea.selectionStart ?? text.length;
+    const end = textarea.selectionEnd ?? text.length;
+    const next = `${text.slice(0, start)}${emoji}${text.slice(end)}`;
+    setText(next);
+    setEmojiPickerOpen(false);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const cursor = start + emoji.length;
+      textarea.setSelectionRange(cursor, cursor);
+    });
+  }
+
+  function attachSticker(emoji: string) {
+    const url = emojiToTwemojiUrl(emoji);
+    setAttachment({
+      kind: "sticker",
+      url,
+      filename: `sticker-${Array.from(emoji)
+        .map((char) => char.codePointAt(0)?.toString(16))
+        .filter(Boolean)
+        .join("-")}.png`,
+      mimeType: "image/png",
+    });
+    setStickerPickerOpen(false);
+    setEmojiPickerOpen(false);
+  }
+
+  async function handleFileChange(file: File | null) {
+    if (!file || disabled || sending || uploading) return;
+    setUploading(true);
+    try {
+      const uploaded = await uploadAttachment(file);
+      setAttachment(uploaded);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (audioInputRef.current) audioInputRef.current.value = "";
+    }
+  }
+
   async function handleSend() {
     const trimmed = text.trim();
-    if (!trimmed || sending) return;
+    if (!trimmed && !attachment) return;
+    if (sending || uploading) return;
     setSending(true);
     try {
-      await onSend(trimmed);
+      await onSend({
+        ...(trimmed ? { text: trimmed } : {}),
+        ...(attachment ? { attachment } : {}),
+      });
       setText("");
+      setAttachment(null);
     } finally {
       setSending(false);
       textareaRef.current?.focus();
@@ -116,20 +362,86 @@ export function MessageInput({ onSend, disabled, conversationId, messages }: Mes
         <div className="flex items-end gap-2">
           {/* Attachment button */}
           <button
+            onClick={handlePaperclipClick}
             className="p-2 rounded-md text-[#484f58] hover:text-[#8b949e] hover:bg-[#1a1f2e] transition-colors shrink-0 mb-0.5"
-            disabled={disabled}
+            disabled={disabled || sending || uploading}
+            title="Adjuntar archivo"
+            type="button"
           >
             <Paperclip className="h-4.5 w-4.5" />
           </button>
 
-          {/* Emoji button */}
           <button
-            className="p-2 rounded-md text-[#484f58] hover:text-[#8b949e] hover:bg-[#1a1f2e] transition-colors shrink-0 mb-0.5"
-            disabled={disabled}
+            onClick={handleAudioClick}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-[#1f6feb]/40 bg-[#0d1117] text-[#7dd3fc] hover:text-white hover:bg-[#1a1f2e] hover:border-[#388bfd] transition-colors shrink-0 mb-0.5"
+            disabled={disabled || sending || uploading}
+            title="Adjuntar audio"
+            type="button"
+          >
+            <Music2 className="h-4.5 w-4.5" />
+            <span className="text-xs font-medium">Audio</span>
+          </button>
+
+          <button
+            onClick={toggleVoiceRecording}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-3 py-2 rounded-md border transition-colors shrink-0 mb-0.5",
+              recording
+                ? "border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/15"
+                : "border-[#1f6feb]/40 bg-[#0d1117] text-[#7dd3fc] hover:text-white hover:bg-[#1a1f2e] hover:border-[#388bfd]",
+            )}
+            disabled={disabled || sending || uploading}
+            title={recording ? "Detener grabación" : "Grabar audio"}
+            type="button"
+          >
+            {recording ? <Square className="h-4.5 w-4.5" /> : <Mic className="h-4.5 w-4.5" />}
+            <span className="text-xs font-medium">{recording ? `Grabando ${Math.floor(recordingSeconds / 60)}:${String(recordingSeconds % 60).padStart(2, "0")}` : "Grabar"}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setEmojiPickerOpen((open) => !open);
+              setStickerPickerOpen(false);
+            }}
+            className="p-2 rounded-md text-[#f9c74f] hover:text-white hover:bg-[#1a1f2e] transition-colors shrink-0 mb-0.5"
+            disabled={disabled || sending || uploading}
+            title="Emojis"
+            type="button"
           >
             <Smile className="h-4.5 w-4.5" />
           </button>
 
+          <button
+            onClick={() => {
+              setStickerPickerOpen((open) => !open);
+              setEmojiPickerOpen(false);
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-[#6e56cf]/40 bg-[#0d1117] text-[#a371f7] hover:text-white hover:bg-[#1a1f2e] hover:border-[#8b5cf6] transition-colors shrink-0 mb-0.5"
+            disabled={disabled || sending || uploading}
+            title="Stickers"
+            type="button"
+          >
+            <Sticker className="h-4.5 w-4.5" />
+            <span className="text-xs font-medium">Stickers</span>
+          </button>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"
+            onChange={(e) => handleFileChange(e.target.files?.[0] || null)}
+          />
+
+          <input
+            ref={audioInputRef}
+            type="file"
+            className="hidden"
+            accept="audio/*"
+            onChange={(e) => handleFileChange(e.target.files?.[0] || null)}
+          />
+
+          {/* Emoji button */}
           {/* AI Assist button */}
           {hasAI && (
             <AIAssistButton onClick={generateSuggestion} disabled={aiLoading} />
@@ -137,6 +449,28 @@ export function MessageInput({ onSend, disabled, conversationId, messages }: Mes
 
           {/* Text area */}
           <div className="flex-1 relative">
+            {attachment && (
+              <div className="mb-2 rounded-lg border border-[#2d333b] bg-[#0d1117] px-3 py-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  {attachment.kind === "image" && <ImageIcon className="h-4 w-4 text-[#58a6ff]" />}
+                  {attachment.kind === "video" && <Video className="h-4 w-4 text-[#58a6ff]" />}
+                  {attachment.kind === "audio" && <Music2 className="h-4 w-4 text-[#58a6ff]" />}
+                  {attachment.kind === "document" && <FileText className="h-4 w-4 text-[#58a6ff]" />}
+                  {attachment.kind === "sticker" && <Sticker className="h-4 w-4 text-[#a371f7]" />}
+                  <div className="min-w-0">
+                    <p className="text-xs text-[#c9d1d9] truncate">{attachment.filename}</p>
+                    <p className="text-[10px] text-[#484f58] truncate">{attachment.mimeType}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAttachment(null)}
+                  className="p-1 rounded-md text-[#8b949e] hover:text-white hover:bg-[#1a1f2e]"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
             <textarea
               ref={textareaRef}
               value={text}
@@ -145,24 +479,64 @@ export function MessageInput({ onSend, disabled, conversationId, messages }: Mes
               placeholder="Escribe un mensaje..."
               className="w-full min-h-[36px] max-h-[120px] resize-none rounded-lg bg-[#0d1117] border border-[#2d333b] text-sm text-white placeholder:text-[#484f58] px-3 py-2 focus:outline-none focus:border-[#388bfd] focus:ring-1 focus:ring-[#388bfd]/30 transition-colors scrollbar-thin"
               rows={1}
-              disabled={disabled || sending}
+              disabled={disabled || sending || uploading}
             />
           </div>
 
           {/* Send button */}
           <button
             onClick={handleSend}
-            disabled={!text.trim() || sending || disabled}
+            disabled={(!text.trim() && !attachment) || sending || uploading || disabled}
             className="p-2 rounded-lg bg-[#4f46e5] text-white hover:bg-[#6366f1] disabled:opacity-30 disabled:hover:bg-[#4f46e5] transition-colors shrink-0 mb-0.5"
           >
             <Send className="h-4 w-4" />
           </button>
         </div>
 
+        {emojiPickerOpen && (
+          <div className="mt-2 grid grid-cols-8 gap-1 rounded-lg border border-[#2d333b] bg-[#0d1117] p-2 max-w-[360px]">
+            {EMOJI_PICKER.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => insertEmoji(emoji)}
+                className="h-8 w-8 rounded-md hover:bg-[#1a1f2e] text-lg flex items-center justify-center"
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {stickerPickerOpen && (
+          <div className="mt-2 grid grid-cols-4 gap-2 rounded-lg border border-[#2d333b] bg-[#0d1117] p-2 max-w-[360px]">
+            {STICKER_PICKER.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => attachSticker(emoji)}
+                className="h-16 rounded-md bg-[#161b22] border border-[#2d333b] hover:border-[#388bfd] flex items-center justify-center p-2"
+                title="Enviar sticker"
+              >
+                <img
+                  src={emojiToTwemojiUrl(emoji)}
+                  alt={`Sticker ${emoji}`}
+                  className="h-10 w-10 object-contain"
+                  loading="lazy"
+                />
+              </button>
+            ))}
+          </div>
+        )}
+
+        {recordingError && (
+          <p className="mt-2 text-xs text-red-400 pl-1">{recordingError}</p>
+        )}
+
         {/* Quick reply hint */}
         {!disabled && (
           <p className="text-[10px] text-[#30363d] mt-1.5 pl-1">
-            Escribe / para respuestas rapidas &middot; Enter para enviar
+            Escribe / para respuestas rapidas &middot; Enter para enviar &middot; Usa Grabar para voz
           </p>
         )}
       </div>

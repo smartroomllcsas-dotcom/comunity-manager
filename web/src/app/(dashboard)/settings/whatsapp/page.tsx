@@ -8,6 +8,12 @@ import { Label } from "@/components/ui/label";
 import { Save, ArrowLeft, MessageSquare } from "lucide-react";
 import Link from "next/link";
 
+type WhatsAppOrganizationRow = {
+  whatsapp_phone_number_id: string | null;
+  whatsapp_business_account_id: string | null;
+  access_token: string | null;
+};
+
 const MASKED_TOKEN_PLACEHOLDER = "••••••••";
 
 function maskToken(token: string | null): string {
@@ -29,7 +35,7 @@ export default function WhatsAppSettingsPage() {
 
   useEffect(() => {
     if (!agent) return;
-    supabase.from("organizations").select("whatsapp_phone_number_id, whatsapp_business_account_id, access_token").eq("id", agent.organization_id).single().then(({ data }) => {
+    supabase.from("organizations").select("whatsapp_phone_number_id, whatsapp_business_account_id, access_token").eq("id", agent.organization_id).single().then(({ data }: { data: WhatsAppOrganizationRow | null }) => {
       if (data) {
         setPhoneNumberId(data.whatsapp_phone_number_id || "");
         setWabaId(data.whatsapp_business_account_id || "");

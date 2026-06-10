@@ -24,11 +24,15 @@ export default function RegisterPage() {
   return (
     <Card className="bg-[#1a1f2e] border-[#2d333b]">
       <CardHeader className="text-center">
-        <div className="mx-auto mb-3 flex items-center justify-center w-12 h-12 rounded-xl bg-[#3b82f6] text-white font-bold text-lg">
-          W
+        <div className="mx-auto mb-3 flex items-center justify-center w-12 h-12 rounded-xl bg-[#1a1f2e] border border-[#2d333b] overflow-hidden">
+          <img
+            src="/community-manager-logo.png"
+            alt="CommunityAgent"
+            className="w-full h-full object-cover"
+          />
         </div>
         <CardTitle className="text-xl text-[#e6edf3]">Crear Cuenta</CardTitle>
-        <p className="text-sm text-[#7d8590]">Configura tu plataforma WhatsApp CRM</p>
+        <p className="text-sm text-[#7d8590]">Configura tu plataforma CommunityAgent</p>
       </CardHeader>
       <CardContent>
         <form action={handleSubmit} className="space-y-4">

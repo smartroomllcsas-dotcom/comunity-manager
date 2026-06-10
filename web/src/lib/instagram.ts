@@ -5,6 +5,14 @@
 const IG_TOKEN_URL = 'https://api.instagram.com/oauth/access_token'
 const IG_GRAPH_URL = 'https://graph.instagram.com'
 
+function getInstagramAppId() {
+  return process.env.INSTAGRAM_APP_ID || process.env.META_IG_APP_ID || ""
+}
+
+function getInstagramAppSecret() {
+  return process.env.INSTAGRAM_APP_SECRET || process.env.META_IG_APP_SECRET || ""
+}
+
 export interface InstagramShortToken {
   access_token: string
   user_id: string | number
@@ -31,13 +39,16 @@ export async function exchangeInstagramCode(
   code: string,
   redirectUri: string
 ): Promise<InstagramShortToken> {
-  if (!process.env.INSTAGRAM_APP_ID || !process.env.INSTAGRAM_APP_SECRET) {
+  const appId = getInstagramAppId()
+  const appSecret = getInstagramAppSecret()
+
+  if (!appId || !appSecret) {
     throw new Error('INSTAGRAM_APP_ID o INSTAGRAM_APP_SECRET no configurados')
   }
 
   const body = new URLSearchParams({
-    client_id: process.env.INSTAGRAM_APP_ID,
-    client_secret: process.env.INSTAGRAM_APP_SECRET,
+    client_id: appId,
+    client_secret: appSecret,
     grant_type: 'authorization_code',
     redirect_uri: redirectUri,
     code,
@@ -58,12 +69,14 @@ export async function exchangeInstagramCode(
 }
 
 export async function getInstagramLongLivedToken(shortToken: string): Promise<InstagramLongToken> {
-  if (!process.env.INSTAGRAM_APP_SECRET) {
+  const appSecret = getInstagramAppSecret()
+
+  if (!appSecret) {
     throw new Error('INSTAGRAM_APP_SECRET no configurado')
   }
   const params = new URLSearchParams({
     grant_type: 'ig_exchange_token',
-    client_secret: process.env.INSTAGRAM_APP_SECRET,
+    client_secret: appSecret,
     access_token: shortToken,
   })
   const res = await fetch(`${IG_GRAPH_URL}/access_token?${params}`)

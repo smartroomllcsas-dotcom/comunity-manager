@@ -4,6 +4,7 @@
 
 const META_GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v21.0'
 const META_GRAPH_URL = `https://graph.facebook.com/${META_GRAPH_VERSION}`
+const INSTAGRAM_GRAPH_URL = 'https://graph.instagram.com'
 
 // Transient error codes that should be retried
 const TRANSIENT_ERROR_CODES = [1, 2, 4, 17]
@@ -70,19 +71,28 @@ async function metaFetch(url: string, options: RequestInit = {}, maxRetries = 3)
 // OAuth Flow
 // -----------------------------------------------------------------------------
 
-export function getOAuthUrl(redirectUri: string, state: string): string {
+export function getOAuthUrl(
+  redirectUri: string,
+  state: string,
+  options: { includeInstagramMessaging?: boolean } = {}
+): string {
   const scopes = [
     'business_management',
+    'pages_manage_metadata',
     'pages_read_engagement',
     'pages_show_list',
     'ads_read',
     'ads_management',
-  ].join(',')
+  ]
+
+  if (options.includeInstagramMessaging) {
+    scopes.push('instagram_basic', 'instagram_manage_messages')
+  }
 
   const params = new URLSearchParams({
     client_id: process.env.META_APP_ID!,
     redirect_uri: redirectUri,
-    scope: scopes,
+    scope: scopes.join(','),
     state,
     response_type: 'code',
   })
@@ -130,6 +140,39 @@ export async function getUserAdAccounts(accessToken: string) {
     `${META_GRAPH_URL}/me/adaccounts?fields=id,account_id,name,business,account_status&access_token=${accessToken}`
   )
   return data.data || []
+}
+
+export async function subscribePageToApp(pageId: string, pageAccessToken: string) {
+  const params = new URLSearchParams({
+    access_token: pageAccessToken,
+    subscribed_fields: [
+      'messages',
+      'messaging_postbacks',
+      'message_deliveries',
+      'message_reads',
+    ].join(','),
+  })
+
+  return metaFetch(`${META_GRAPH_URL}/${pageId}/subscribed_apps?${params}`, {
+    method: 'POST',
+  })
+}
+
+export async function subscribeInstagramAccountToApp(
+  instagramUserId: string,
+  accessToken: string
+) {
+  const params = new URLSearchParams({
+    access_token: accessToken,
+    subscribed_fields: [
+      'messages',
+      'messaging_postbacks',
+    ].join(','),
+  })
+
+  return metaFetch(`${INSTAGRAM_GRAPH_URL}/${instagramUserId}/subscribed_apps?${params}`, {
+    method: 'POST',
+  })
 }
 
 export async function getAdCampaigns(adAccountId: string, accessToken: string) {
@@ -248,4 +291,48 @@ export async function publishToInstagram(igUserId: string, pageToken: string, op
       access_token: pageToken,
     }),
   })
+}
+
+// -----------------------------------------------------------------------------
+// Messenger replies
+// -----------------------------------------------------------------------------
+
+export async function sendMetaTextMessage(
+  accessToken: string,
+  recipientId: string,
+  text: string,
+) {
+  return metaFetch(`${META_GRAPH_URL}/me/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      access_token: accessToken,
+      messaging_type: 'RESPONSE',
+      recipient: JSON.stringify({ id: recipientId }),
+      message: JSON.stringify({ text }),
+    }),
+  })
+}
+
+export async function sendMetaAttachment(
+  accessToken: string,
+  recipientId: string,
+  type: "image" | "video" | "audio" | "file",
+  url: string
+) {
+  return metaFetch(`${META_GRAPH_URL}/me/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      access_token: accessToken,
+      messaging_type: "RESPONSE",
+      recipient: JSON.stringify({ id: recipientId }),
+      message: JSON.stringify({
+        attachment: {
+          type,
+          payload: { url },
+        },
+      }),
+    }),
+  });
 }

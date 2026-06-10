@@ -68,7 +68,24 @@ export default function MetaDetailPage() {
         name: clientRes.data.name,
         industry: clientRes.data.industry,
       })
-      setSocial(socialRes.data ?? null)
+
+      const socialData = socialRes.data ?? null
+      setSocial(socialData)
+
+      if (!socialData?.ad_account_id) {
+        try {
+          const insightRes = await fetch(`/api/meta/insights?clientId=${clientId}`)
+          const insightData = await insightRes.json().catch(() => null)
+          if (!mounted) return
+          setCampaigns([])
+          setInsights(Array.isArray(insightData?.insights) ? insightData.insights : [])
+        } catch (fetchError) {
+          setError(fetchError instanceof Error ? fetchError.message : 'No se pudieron cargar los datos de Meta')
+        } finally {
+          if (mounted) setLoading(false)
+        }
+        return
+      }
 
       try {
         const [campaignRes, insightRes] = await Promise.all([
@@ -112,9 +129,16 @@ export default function MetaDetailPage() {
       >
         Volver a clientes
       </button>
+      <button
+        type="button"
+        onClick={() => router.push('/inbox')}
+        className="mb-5 ml-3 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-100 transition hover:bg-cyan-400/20"
+      >
+        Ir a bandeja de entrada
+      </button>
 
       <div className="mb-6 rounded-3xl border border-white/10 bg-slate-950/55 p-6">
-        <p className="text-xs uppercase tracking-[0.3em] text-cyan-300/70">Meta ready</p>
+        <p className="text-xs uppercase tracking-[0.3em] text-cyan-300/70">Facebook ready</p>
         <h1 className="mt-2 text-3xl font-semibold text-white">{client.name}</h1>
         <p className="mt-2 text-sm text-slate-400">{client.industry || 'Sin industria'}</p>
         <p className="mt-4 text-sm text-slate-300">
@@ -135,7 +159,7 @@ export default function MetaDetailPage() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Campañas</p>
-              <h2 className="mt-2 text-xl font-semibold text-white">Rendimiento de la cuenta</h2>
+              <h2 className="mt-2 text-xl font-semibold text-white">Rendimiento de Facebook</h2>
             </div>
             <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300">
               {campaigns.length} campañas
@@ -175,7 +199,7 @@ export default function MetaDetailPage() {
         <section className="rounded-3xl border border-white/10 bg-slate-950/55 p-5">
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Insights</p>
-            <h2 className="mt-2 text-xl font-semibold text-white">Métricas de la conexión</h2>
+            <h2 className="mt-2 text-xl font-semibold text-white">Métricas de la página</h2>
           </div>
 
           <div className="mt-5 space-y-3">
@@ -194,7 +218,7 @@ export default function MetaDetailPage() {
           </div>
 
           <div className="mt-5 rounded-2xl border border-cyan-400/20 bg-cyan-400/8 p-4 text-sm text-slate-200">
-            Esta vista consolida la conexión de Facebook, Instagram y Ads en una sola página para revisar campañas e insights.
+            Esta vista muestra la conexión de Facebook del cliente. Las campañas e insights aparecerán cuando se vincule Ads.
           </div>
         </section>
       </div>

@@ -2,7 +2,6 @@
 import { useState } from "react";
 import type { Conversation } from "@/types/database";
 import { useAgents } from "@/hooks/useAgents";
-import { createClient } from "@/lib/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useInboxStore } from "@/stores/inbox";
 import {
@@ -21,22 +20,10 @@ import {
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
+import { ContactAvatar } from "./ContactAvatar";
 
 interface ContactPanelProps {
   conversation: Conversation;
-}
-
-const avatarColors = [
-  "bg-blue-600", "bg-emerald-600", "bg-purple-600", "bg-amber-600",
-  "bg-rose-600", "bg-cyan-600", "bg-indigo-600", "bg-pink-600",
-];
-
-function getAvatarColor(name: string) {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return avatarColors[Math.abs(hash) % avatarColors.length];
 }
 
 function CollapsibleSection({
@@ -75,34 +62,31 @@ function CollapsibleSection({
 export function ContactPanel({ conversation }: ContactPanelProps) {
   const contact = conversation.contact;
   const { data: agents } = useAgents();
-  const supabase = createClient();
   const queryClient = useQueryClient();
   const setContactPanelOpen = useInboxStore((s) => s.setContactPanelOpen);
 
   async function handleAssign(agentId: string) {
     const value = agentId === "unassigned" ? null : agentId;
-    await supabase
-      .from("conversations")
-      .update({ assigned_agent_id: value })
-      .eq("id", conversation.id);
+    await fetch(`/api/inbox/conversations/${conversation.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "assign", assignedAgentId: value }),
+    });
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
   }
 
   async function handleStatusChange(status: string) {
-    await supabase
-      .from("conversations")
-      .update({
-        status,
-        resolved_at: status === "resolved" ? new Date().toISOString() : null,
-      })
-      .eq("id", conversation.id);
+    await fetch(`/api/inbox/conversations/${conversation.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "status", status }),
+    });
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
   }
 
   if (!contact) return null;
 
   const displayName = contact.name || contact.wa_id;
-  const initials = displayName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -123,14 +107,12 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         {/* Contact Header */}
         <div className="flex flex-col items-center text-center px-4 py-5 border-b border-[#2d333b]">
-          <div
-            className={cn(
-              "h-16 w-16 rounded-full flex items-center justify-center text-white text-lg font-semibold mb-3",
-              getAvatarColor(displayName)
-            )}
-          >
-            {initials}
-          </div>
+          <ContactAvatar
+            name={displayName}
+            photoUrl={contact.profile_picture_url}
+            className="h-16 w-16 rounded-full text-lg mb-3"
+            initialsClassName="text-lg"
+          />
           <h3 className="font-semibold text-white text-sm">
             {contact.name || "Sin nombre"}
           </h3>

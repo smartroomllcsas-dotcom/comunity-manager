@@ -7,8 +7,10 @@ import {
   getUserPages,
   getUserProfile,
   getUserAdAccounts,
+  subscribePageToApp,
+  subscribeInstagramAccountToApp,
 } from '@/lib/meta'
-import { supabase } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabase'
 
 export async function initiateMetaOAuth(request: NextRequest, callbackPath: string) {
   const clientId = request.nextUrl.searchParams.get('clientId')
@@ -20,11 +22,13 @@ export async function initiateMetaOAuth(request: NextRequest, callbackPath: stri
   }
 
   const state = `${clientId}:${crypto.randomBytes(16).toString('hex')}`
-  await supabase.from('cm_oauth_states').insert({ state, client_id: clientId })
+  await supabaseAdmin.from('cm_oauth_states').insert({ state, client_id: clientId })
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin
   const redirectUri = `${appUrl}${callbackPath}`
-  const authUrl = getOAuthUrl(redirectUri, state)
+  const authUrl = getOAuthUrl(redirectUri, state, {
+    includeInstagramMessaging: !callbackPath.includes('/auth/facebook/callback'),
+  })
   return NextResponse.redirect(authUrl)
 }
 
@@ -33,6 +37,7 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
   const state = request.nextUrl.searchParams.get('state')
   const error = request.nextUrl.searchParams.get('error')
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin
+  const flow = callbackPath.includes('/auth/facebook/callback') ? 'facebook' : 'facebook_instagram_ads'
 
   if (error) {
     return NextResponse.redirect(`${appUrl}/clients?meta_error=Autorizacion+cancelada`)
@@ -41,7 +46,7 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
     return NextResponse.redirect(`${appUrl}/clients?meta_error=Parametros+invalidos`)
   }
 
-  const { data: oauthState } = await supabase
+  const { data: oauthState } = await supabaseAdmin
     .from('cm_oauth_states')
     .select('*')
     .eq('state', state)
@@ -50,7 +55,7 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
     return NextResponse.redirect(`${appUrl}/clients?meta_error=Estado+invalido`)
   }
   const clientId = oauthState.client_id
-  await supabase.from('cm_oauth_states').delete().eq('state', state)
+  await supabaseAdmin.from('cm_oauth_states').delete().eq('state', state)
 
   try {
     const redirectUri = `${appUrl}${callbackPath}`
@@ -58,23 +63,27 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
     const longToken = await getLongLivedToken(shortToken.access_token)
     const profile = await getUserProfile(longToken.access_token)
     const pages = await getUserPages(longToken.access_token)
-    const adAccounts = await getUserAdAccounts(longToken.access_token)
 
     if (pages.length === 0) {
       return NextResponse.redirect(`${appUrl}/clients?meta_error=No+se+encontraron+paginas+de+Facebook`)
     }
 
     const page = pages[0]
-    const igAccount = page.instagram_business_account
+    const igAccount = flow === 'facebook' ? null : page.instagram_business_account
+    const adAccounts = flow === 'facebook' ? [] : await getUserAdAccounts(longToken.access_token)
     const adAccount = adAccounts[0]
     const tokenExpires = new Date()
     tokenExpires.setSeconds(tokenExpires.getSeconds() + (longToken.expires_in || 5184000))
 
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabaseAdmin
       .from('cm_social_accounts')
       .select('id')
       .eq('client_id', clientId)
-      .single()
+      .maybeSingle()
+
+    if (existingError) {
+      throw existingError
+    }
 
     const socialData = {
       client_id: clientId,
@@ -93,35 +102,57 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
     }
 
     if (existing) {
-      const { error: updateError } = await supabase.from('cm_social_accounts').update(socialData).eq('id', existing.id)
+      const { error: updateError } = await supabaseAdmin.from('cm_social_accounts').update(socialData).eq('id', existing.id)
       if (updateError) {
         throw updateError
       }
     } else {
-      const { error: insertError } = await supabase.from('cm_social_accounts').insert(socialData)
+      const { error: insertError } = await supabaseAdmin.from('cm_social_accounts').insert(socialData)
       if (insertError) {
         throw insertError
       }
     }
 
-    const { data: client } = await supabase
+    if (page.id && page.access_token) {
+      try {
+        await subscribePageToApp(page.id, page.access_token)
+      } catch (subscriptionError) {
+        console.warn('[meta-oauth] page subscription failed', subscriptionError)
+      }
+    }
+
+    if (igAccount?.id && longToken.access_token) {
+      try {
+        await subscribeInstagramAccountToApp(igAccount.id, longToken.access_token)
+      } catch (subscriptionError) {
+        console.warn('[meta-oauth] instagram subscription failed', subscriptionError)
+      }
+    }
+
+    const { data: client } = await supabaseAdmin
       .from('cm_clients')
       .select('user_id, name')
       .eq('id', clientId)
       .single()
     if (client) {
-      await supabase.from('cm_activity_log').insert({
+      await supabaseAdmin.from('cm_activity_log').insert({
         user_id: client.user_id,
-        action: `Redes conectadas: ${page.name}${igAccount ? ` + @${igAccount.username}` : ''}${adAccount?.name ? ` + Ads: ${adAccount.name}` : ''} para ${client.name}`,
+        action:
+          flow === 'facebook'
+            ? `Facebook conectado: ${page.name} para ${client.name}`
+            : `Redes conectadas: ${page.name}${igAccount ? ` + @${igAccount.username}` : ''}${adAccount?.name ? ` + Ads: ${adAccount.name}` : ''} para ${client.name}`,
         status: 'success',
       })
     }
 
-    const successMsg = `Conectado: ${page.name}${igAccount ? ` + @${igAccount.username}` : ''}${adAccount?.name ? ` + Ads: ${adAccount.name}` : ''}`
+    const successMsg =
+      flow === 'facebook'
+        ? `Facebook conectado: ${page.name}`
+        : `Conectado: ${page.name}${igAccount ? ` + @${igAccount.username}` : ''}${adAccount?.name ? ` + Ads: ${adAccount.name}` : ''}`
     const traceParams = new URLSearchParams({
       meta_success: successMsg,
       meta_client_id: clientId,
-      meta_flow: 'facebook_instagram_ads',
+      meta_flow: flow,
       meta_page: page.name,
       meta_page_id: page.id,
       meta_instagram: igAccount?.username || '',
@@ -129,7 +160,12 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
     })
     return NextResponse.redirect(`${appUrl}/clients?${traceParams.toString()}`)
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Error desconocido'
+    const msg =
+      err instanceof Error
+        ? err.message
+        : typeof err === 'object' && err !== null && 'message' in err
+          ? String((err as { message?: unknown }).message || 'Error desconocido')
+          : 'Error desconocido'
     console.error('Meta OAuth error:', msg)
     return NextResponse.redirect(`${appUrl}/clients?meta_error=${encodeURIComponent(msg)}`)
   }

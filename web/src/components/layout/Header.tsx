@@ -47,7 +47,7 @@ export function Header() {
 
   async function handleLogout() {
     await supabase.auth.signOut();
-    router.push("/st/login");
+    router.push("/login");
   }
 
   return (

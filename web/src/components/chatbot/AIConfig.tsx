@@ -11,6 +11,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Save, Plus, Trash2 } from "lucide-react";
 import type { AIConfig as AIConfigType } from "@/types/database";
 
+type AIConfigQueryResponse = {
+  data: AIConfigType | null;
+};
+
 export function AIConfig() {
   const supabase = createClient();
   const { data: agent } = useCurrentAgent();
@@ -25,7 +29,14 @@ export function AIConfig() {
 
   useEffect(() => {
     if (!agent) return;
-    supabase.from("ai_config").select("*").eq("organization_id", agent.organization_id).single().then(({ data }) => { if (data) setConfig(data); });
+    supabase
+      .from("ai_config")
+      .select("*")
+      .eq("organization_id", agent.organization_id)
+      .single()
+      .then(({ data }: AIConfigQueryResponse) => {
+        if (data) setConfig(data);
+      });
   }, [agent, supabase]);
 
   async function handleSave() {

@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from './AuthProvider'
+import LegalLinks from './LegalLinks'
 
 const navItems = [
   { href: '/', label: 'Panel', icon: LayoutIcon },
@@ -10,7 +11,7 @@ const navItems = [
   { href: '/clients', label: 'Clientes', icon: UsersIcon },
   { href: '/calendar', label: 'Calendario', icon: CalendarIcon },
   { href: '/agents', label: 'Agentes', icon: CpuIcon },
-  { href: '/inbox', label: 'Inbox (canales)', icon: InboxIcon },
+  { href: '/inbox', label: 'Inbox', icon: InboxIcon },
 ]
 
 export default function Sidebar() {
@@ -76,6 +77,10 @@ export default function Sidebar() {
         >
           Cerrar sesión
         </button>
+        <LegalLinks
+          className="mt-4 flex flex-wrap gap-x-3 gap-y-2 px-2 text-[11px] text-slate-500"
+          linkClassName="hover:text-slate-300 transition-colors"
+        />
       </div>
     </aside>
   )

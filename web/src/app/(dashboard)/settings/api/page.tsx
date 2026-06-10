@@ -22,6 +22,11 @@ import {
 import Link from "next/link";
 import type { Organization } from "@/types/database";
 
+type AIPipelineRow = {
+  provider: string;
+  is_active: boolean;
+};
+
 export const dynamic = "force-dynamic";
 
 export default function ApiSettingsPage() {
@@ -53,8 +58,8 @@ export default function ApiSettingsPage() {
       if (orgRes.data) setOrg(orgRes.data as Organization);
       if (aiRes.data) {
         setIntegrations({
-          openai: aiRes.data.some((c) => c.provider === "openai" && c.is_active),
-          anthropic: aiRes.data.some((c) => c.provider === "anthropic" && c.is_active),
+          openai: aiRes.data.some((c: AIPipelineRow) => c.provider === "openai" && c.is_active),
+          anthropic: aiRes.data.some((c: AIPipelineRow) => c.provider === "anthropic" && c.is_active),
         });
       }
       setLoading(false);

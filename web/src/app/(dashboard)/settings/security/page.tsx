@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useCurrentAgent } from "@/hooks/useCurrentAgent";
 import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +18,8 @@ import {
   Loader2,
   Copy,
   Check,
+  AlertTriangle,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import type { Organization } from "@/types/database";
@@ -26,6 +29,7 @@ export const dynamic = "force-dynamic";
 export default function SecuritySettingsPage() {
   const { data: currentAgent } = useCurrentAgent();
   const supabase = createClient();
+  const router = useRouter();
 
   const [org, setOrg] = useState<Organization | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,6 +47,9 @@ export default function SecuritySettingsPage() {
   // Verify token
   const [showToken, setShowToken] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     if (!currentAgent?.organization_id) return;
@@ -97,6 +104,39 @@ export default function SecuritySettingsPage() {
   const maskedToken = org?.webhook_verify_token
     ? org.webhook_verify_token.slice(0, 4) + "****" + org.webhook_verify_token.slice(-4)
     : "••••••••";
+
+  async function handleDeleteAccount() {
+    setDeleteError("");
+    if (deleteConfirm !== "ELIMINAR") {
+      setDeleteError("Escribe ELIMINAR para confirmar la eliminación.");
+      return;
+    }
+
+    setDeleteLoading(true);
+    try {
+      const res = await fetch("/api/account/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmText: deleteConfirm }),
+      });
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setDeleteError(payload?.error || "No se pudo eliminar la cuenta");
+        return;
+      }
+
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // ignore
+      }
+
+      router.push("/login");
+    } finally {
+      setDeleteLoading(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -264,6 +304,43 @@ export default function SecuritySettingsPage() {
             <p className="text-xs text-[#8b949e]">
               Este token se usa para verificar las solicitudes del webhook de WhatsApp.
             </p>
+          </div>
+        </div>
+
+        <div className="bg-[#1a1f2e] border border-red-500/30 rounded-lg p-5">
+          <h2 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-red-400" />
+            Eliminación de cuenta y datos
+          </h2>
+          <div className="space-y-3 max-w-xl">
+            <p className="text-xs text-[#8b949e] leading-relaxed">
+              Esta acción elimina tu organización, agentes, contactos, conversaciones, canales y credenciales asociadas. No se puede deshacer.
+            </p>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-[#8b949e]">Escribe ELIMINAR para confirmar</Label>
+              <Input
+                value={deleteConfirm}
+                onChange={(e) => setDeleteConfirm(e.target.value.toUpperCase())}
+                className="bg-[#0d1117] border-[#2d333b] text-white h-9 font-mono"
+                placeholder="ELIMINAR"
+              />
+            </div>
+            {deleteError && <p className="text-xs text-red-400">{deleteError}</p>}
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={handleDeleteAccount}
+                disabled={deleteLoading || deleteConfirm !== "ELIMINAR"}
+                size="sm"
+                variant="destructive"
+                className="bg-red-600 hover:bg-red-700 text-white"
+              >
+                {deleteLoading ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
+                {deleteLoading ? "Eliminando..." : "Eliminar mi cuenta"}
+              </Button>
+              <Link href="/data-deletion" className="text-xs text-violet-400 hover:text-violet-300 transition-colors">
+                Ver política de eliminación de datos
+              </Link>
+            </div>
           </div>
         </div>
       </div>

@@ -1,7 +1,7 @@
 "use client";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/types/database";
-import { Check, CheckCheck, Bot, Image as ImageIcon, FileText, MapPin } from "lucide-react";
+import { Check, CheckCheck, Bot, Image as ImageIcon, FileText, MapPin, Music2, Sticker } from "lucide-react";
 import { format } from "date-fns";
 
 interface MessageBubbleProps {
@@ -15,6 +15,15 @@ const statusIcons: Record<string, React.ReactNode> = {
   read: <CheckCheck className="h-3 w-3 text-[#58a6ff]" />,
   failed: <span className="text-red-400 text-[10px] font-medium">Error</span>,
 };
+
+function looksLikeAudio(value: string | null | undefined) {
+  if (!value) return false;
+  const normalized = value.toLowerCase();
+  return (
+    normalized.includes("audio") ||
+    /\.(aac|aif|aiff|amr|m4a|mp3|oga|ogg|opus|wav|weba|webm)(\?|#|$)/.test(normalized)
+  );
+}
 
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isOutbound = message.direction === "outbound";
@@ -43,12 +52,80 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             )}
           </div>
         );
-      case "document":
+      case "video":
         return (
-          <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2">
-            <FileText className="h-4 w-4 text-[#58a6ff] shrink-0" />
-            <span className="text-xs text-[#c9d1d9] truncate">{content.filename}</span>
+          <div>
+            <div className="rounded-md overflow-hidden bg-[#0d1117] border border-[#2d333b] mb-1">
+              {content.url ? (
+                <video src={content.url} controls className="max-w-[260px] max-h-[220px] bg-black" />
+              ) : (
+                <div className="flex items-center justify-center gap-2 p-6 text-[#484f58]">
+                  <ImageIcon className="h-5 w-5" />
+                  <span className="text-xs">Video</span>
+                </div>
+              )}
+            </div>
+            {content.caption && (
+              <p className="text-[13px] leading-relaxed mt-1">{content.caption}</p>
+            )}
           </div>
+        );
+      case "audio":
+        return (
+          <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2 min-w-[220px]">
+            <Music2 className="h-4 w-4 text-[#58a6ff] shrink-0" />
+            {content.url ? (
+              <audio controls className="w-full h-8">
+                <source src={content.url} />
+              </audio>
+            ) : (
+              <span className="text-xs text-[#c9d1d9]">Audio</span>
+            )}
+          </div>
+        );
+      case "document":
+        if (looksLikeAudio(content.url) || looksLikeAudio(content.filename)) {
+          return (
+            <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2 min-w-[220px]">
+              <Music2 className="h-4 w-4 text-[#58a6ff] shrink-0" />
+              {content.url ? (
+                <audio controls className="w-full h-8">
+                  <source src={content.url} />
+                </audio>
+              ) : (
+                <span className="text-xs text-[#c9d1d9]">Audio</span>
+              )}
+            </div>
+          );
+        }
+
+        return (
+          <div>
+            <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2">
+              <FileText className="h-4 w-4 text-[#58a6ff] shrink-0" />
+              <span className="text-xs text-[#c9d1d9] truncate">{content.filename}</span>
+            </div>
+            {content.caption && (
+              <p className="text-[13px] leading-relaxed mt-1">{content.caption}</p>
+            )}
+          </div>
+        );
+      case "sticker":
+        return (
+          typeof content.url === "string" && /^https?:\/\//.test(content.url) ? (
+            <div className="rounded-md overflow-hidden bg-[#0d1117] border border-[#2d333b]">
+              <img
+                src={content.url}
+                alt="Sticker"
+                className="max-w-[180px] max-h-[180px] object-contain bg-transparent"
+              />
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2">
+              <Sticker className="h-4 w-4 text-[#a371f7] shrink-0" />
+              <span className="text-xs text-[#c9d1d9] truncate">Sticker</span>
+            </div>
+          )
         );
       case "location":
         return (

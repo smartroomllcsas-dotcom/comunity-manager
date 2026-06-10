@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendText, sendMedia, getOrgWhatsAppCredentials } from "@/lib/whatsapp/api";
+import { sendMetaTextMessage, sendMetaAttachment } from "@/lib/meta";
 import {
   sendRespondIoText,
   sendRespondIoAttachment,
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest) {
 
   const { data: conversation } = await supabase
     .from("conversations")
-    .select("*, contact:contacts(*), channel:channels(id, type)")
+    .select("*, contact:contacts(*), channel:channels(id, type, access_token, whatsapp_phone_number_id, whatsapp_business_account_id, meta_business_id)")
     .eq("id", conversationId)
     .eq("organization_id", agent.organization_id)
     .single();
@@ -57,12 +58,15 @@ export async function POST(request: NextRequest) {
             text: content.text,
           });
           break;
-        case "image": case "video": case "audio":
+        case "image":
+        case "video":
+        case "audio":
+        case "sticker":
           resp = await sendRespondIoAttachment({
             apiToken: creds.apiToken,
             contactIdentifier,
             channelId: creds.respondChannelId,
-            type: content.type,
+            type: content.type === "sticker" ? "image" : content.type,
             url: content.url,
             description: "caption" in content ? content.caption : undefined,
           });
@@ -81,6 +85,37 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: `Unsupported message type: ${type}` }, { status: 400 });
       }
       providerMessageId = typeof resp.messageId === "string" ? resp.messageId : undefined;
+    } else if (channelType === "facebook_messenger" || channelType === "instagram") {
+      if (!conversation.channel?.access_token) {
+        return NextResponse.json({ error: "Channel not configured with access token" }, { status: 400 });
+      }
+      const recipientId = conversation.contact.wa_id;
+      if (!recipientId) {
+        return NextResponse.json({ error: "Conversation contact is missing Meta recipient id" }, { status: 400 });
+      }
+      if (content.type === "text") {
+        const resp = await sendMetaTextMessage(conversation.channel.access_token, recipientId, content.text);
+        providerMessageId = typeof resp?.message_id === "string" ? resp.message_id : undefined;
+      } else if (
+        content.type === "image" ||
+        content.type === "video" ||
+        content.type === "audio" ||
+        content.type === "document" ||
+        content.type === "sticker"
+      ) {
+        const resp = await sendMetaAttachment(
+          conversation.channel.access_token,
+          recipientId,
+          content.type === "document" || content.type === "sticker" ? "image" : content.type,
+          content.url
+        );
+        providerMessageId = typeof resp?.message_id === "string" ? resp.message_id : undefined;
+      } else {
+        return NextResponse.json(
+          { error: "Messenger/Instagram no soporta sticker de salida todavía" },
+          { status: 400 }
+        );
+      }
     } else {
       const { phoneNumberId, accessToken } = await getOrgWhatsAppCredentials(
         agent.organization_id,
@@ -94,10 +129,14 @@ export async function POST(request: NextRequest) {
             to: conversation.contact.wa_id, text: content.text, phoneNumberId, accessToken,
           });
           break;
-        case "image": case "video": case "audio": case "document":
+        case "image":
+        case "video":
+        case "audio":
+        case "document":
+        case "sticker":
           waResponse = await sendMedia({
             to: conversation.contact.wa_id,
-            type: content.type,
+            type: content.type === "sticker" ? "image" : content.type,
             mediaUrl: content.url,
             caption: "caption" in content ? content.caption : undefined,
             filename: "filename" in content ? content.filename : undefined,
@@ -116,21 +155,47 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (providerMessageId) {
+    const { data: existingMessage } = await admin
+      .from("messages")
+      .select("*, agent:agents(id, name)")
+      .eq("conversation_id", conversationId)
+      .eq("wa_message_id", providerMessageId)
+      .maybeSingle();
+
+    if (existingMessage) {
+      const preview = content.type === "text" ? content.text.slice(0, 100) : `[${type}]`;
+      await admin
+        .from("conversations")
+        .update({ last_message_preview: preview, unread_count: 0 })
+        .eq("id", conversationId);
+
+      return NextResponse.json({ message: existingMessage });
+    }
+  }
+
   const { data: message } = await admin
     .from("messages")
     .insert({
       conversation_id: conversationId,
+      contact_id: conversation.contact.id,
       agent_id: agent.id,
       direction: "outbound",
       type,
       content,
       wa_message_id: providerMessageId,
       status: "sent",
-      channel: channelType === "respond_io" ? "respond_io" : "whatsapp",
-      channel_id: conversation.channel_id,
+      is_bot: false,
     })
-    .select()
+    .select("*, agent:agents(id, name)")
     .single();
+
+  if (!message) {
+    return NextResponse.json(
+      { error: "No se pudo guardar el mensaje enviado en la bandeja" },
+      { status: 500 }
+    );
+  }
 
   const preview = content.type === "text" ? content.text.slice(0, 100) : `[${type}]`;
   await admin

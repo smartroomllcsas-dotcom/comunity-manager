@@ -4,6 +4,10 @@ import { createClient } from "@/lib/supabase/client";
 import type { InternalNote } from "@/types/database";
 import { useEffect } from "react";
 
+type SupabaseNoteChangePayload = {
+  new: InternalNote;
+};
+
 export function useInternalNotes(conversationId: string | null) {
   const supabase = createClient();
   const queryClient = useQueryClient();
@@ -18,7 +22,7 @@ export function useInternalNotes(conversationId: string | null) {
         schema: "public",
         table: "internal_notes",
         filter: `conversation_id=eq.${conversationId}`,
-      }, (payload) => {
+      }, (payload: SupabaseNoteChangePayload) => {
         queryClient.setQueryData<InternalNote[]>(
           ["internal-notes", conversationId],
           (old) => {

@@ -7,9 +7,10 @@ import { MessageInput } from "./MessageInput";
 import { InternalNotes } from "./InternalNotes";
 import { SnoozeDropdown } from "./SnoozeDropdown";
 import { ClosingDialog } from "./ClosingDialog";
+import { ChannelBadge } from "./ChannelBadge";
 import { useState, useEffect, useRef } from "react";
-import { createClient } from "@/lib/supabase/client";
 import type { Conversation } from "@/types/database";
+import type { MessageContent } from "@/types/database";
 import {
   UserPlus,
   CheckCircle2,
@@ -25,6 +26,7 @@ import {
 import { useAgents } from "@/hooks/useAgents";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { ContactAvatar } from "./ContactAvatar";
 
 interface ChatWindowProps {
   conversation: Conversation;
@@ -39,7 +41,6 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
   const contactPanelOpen = useInboxStore((s) => s.contactPanelOpen);
   const toggleContactPanel = useInboxStore((s) => s.toggleContactPanel);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const supabase = createClient();
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<ChatTab>("messages");
@@ -51,40 +52,76 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
 
   useEffect(() => {
     if (conversation.unread_count > 0) {
-      supabase
-        .from("conversations")
-        .update({ unread_count: 0 })
-        .eq("id", conversation.id)
-        .then();
+      void fetch(`/api/inbox/conversations/${conversation.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "read" }),
+      });
     }
-  }, [conversation.id, conversation.unread_count, supabase]);
+  }, [conversation.id, conversation.unread_count]);
 
   // Reset tab when conversation changes
   useEffect(() => {
     setActiveTab("messages");
   }, [conversation.id]);
 
-  async function handleSend(text: string) {
+  async function handleSend(payload: { text?: string; attachment?: { kind: "image" | "video" | "audio" | "document" | "sticker"; url: string; filename: string; mimeType: string } }) {
+    const hasText = !!payload.text?.trim();
+    const attachment = payload.attachment;
+
+    let type: MessageContent["type"] = "text";
+    let content: MessageContent;
+
+    if (attachment) {
+      type = attachment.kind;
+      if (attachment.kind === "image" || attachment.kind === "sticker") {
+        if (attachment.kind === "sticker") {
+          content = { type: "sticker", url: attachment.url };
+        } else {
+          content = { type: "image", url: attachment.url, caption: hasText ? payload.text!.trim() : undefined };
+        }
+      } else if (attachment.kind === "video") {
+        content = { type: "video", url: attachment.url, caption: hasText ? payload.text!.trim() : undefined };
+      } else if (attachment.kind === "audio") {
+        content = { type: "audio", url: attachment.url };
+      } else {
+        content = { type: "document", url: attachment.url, filename: attachment.filename, caption: hasText ? payload.text!.trim() : undefined };
+      }
+    } else {
+      type = "text";
+      content = { type: "text", text: payload.text?.trim() || "" };
+    }
+
     const response = await fetch("/api/messages/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         conversationId: conversation.id,
-        type: "text",
-        content: { type: "text", text },
+        type,
+        content,
       }),
     });
     if (!response.ok) {
-      const error = await response.json();
+      const errorText = await response.text();
+      let error: unknown = { error: errorText || `HTTP ${response.status}` };
+      try {
+        error = errorText ? JSON.parse(errorText) : error;
+      } catch {
+        error = { error: errorText || `HTTP ${response.status}` };
+      }
       console.error("Failed to send:", error);
+      return;
     }
+    queryClient.invalidateQueries({ queryKey: ["messages", conversation.id] });
+    queryClient.invalidateQueries({ queryKey: ["conversations"] });
   }
 
   async function handleResolve() {
-    await supabase
-      .from("conversations")
-      .update({ status: "resolved", resolved_at: new Date().toISOString() })
-      .eq("id", conversation.id);
+    await fetch(`/api/inbox/conversations/${conversation.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "status", status: "resolved" }),
+    });
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
   }
 
@@ -93,15 +130,11 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
   }
 
   async function handleCloseConfirm(category: string | null, notes: string | null) {
-    await supabase
-      .from("conversations")
-      .update({
-        status: "closed",
-        closing_category: category,
-        closing_notes: notes,
-        closed_by: agent?.id || null,
-      })
-      .eq("id", conversation.id);
+    await fetch(`/api/inbox/conversations/${conversation.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "close", category, notes }),
+    });
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
     setClosingDialogOpen(false);
   }
@@ -150,9 +183,16 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
       {/* Top Bar */}
       <div className="h-14 min-h-[56px] border-b border-[#2d333b] bg-[#161b22] flex items-center justify-between px-4">
         <div className="flex items-center gap-3 min-w-0">
+          <ContactAvatar
+            name={displayName}
+            photoUrl={contact?.profile_picture_url}
+            className="h-9 w-9 rounded-full text-xs shrink-0"
+            initialsClassName="text-[11px]"
+          />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <p className="font-semibold text-sm text-white truncate">{displayName}</p>
+              <ChannelBadge conversation={conversation} compact />
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${statusColors[conversation.status] || statusColors.open}`}>
                 {statusLabels[conversation.status] || conversation.status}
               </span>
