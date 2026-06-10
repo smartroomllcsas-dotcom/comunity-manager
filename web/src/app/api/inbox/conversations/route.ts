@@ -67,5 +67,10 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ conversations: data ?? [] });
+  const conversations = (data ?? []).filter((conversation) => {
+    const metadata = conversation.metadata as Record<string, unknown> | null;
+    return !metadata?.merged_into;
+  });
+
+  return NextResponse.json({ conversations });
 }

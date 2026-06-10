@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { findReusableConversation } from "@/lib/smarttalk/conversation-dedupe";
 import type { MessageContent, MessageType } from "@/types/database";
 
 type SmarttalkChannel = {
@@ -278,32 +279,19 @@ async function upsertInstagramConversation(
   updatedAt: string
 ) {
   const admin = createAdminClient("smarttalk");
-  const { data: existing } = await admin
-    .from("conversations")
-    .select("id,metadata")
-    .eq("organization_id", channel.organization_id)
-    .eq("contact_id", contactId)
-    .eq("channel_id", channel.id)
-    .in("status", ["open", "pending"])
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const reusableConversation = await findReusableConversation({
+    organizationId: channel.organization_id,
+    contactId,
+    channelId: channel.id,
+    updatedAt,
+    metadataPatch: {
+      source: "instagram",
+      channel: "instagram",
+      instagram_conversation_id: instagramConversationId,
+    },
+  });
 
-  if (existing?.id) {
-    await admin
-      .from("conversations")
-      .update({
-        metadata: {
-          ...(existing.metadata as Record<string, unknown> | null),
-          source: "instagram",
-          channel: "instagram",
-          instagram_conversation_id: instagramConversationId,
-        },
-        updated_at: updatedAt,
-      })
-      .eq("id", existing.id);
-    return existing.id as string;
-  }
+  if (reusableConversation?.id) return reusableConversation.id;
 
   const { data: inserted, error } = await admin
     .from("conversations")
@@ -324,7 +312,20 @@ async function upsertInstagramConversation(
     .single();
 
   if (error) throw error;
-  return inserted.id as string;
+
+  const mergedConversation = await findReusableConversation({
+    organizationId: channel.organization_id,
+    contactId,
+    channelId: channel.id,
+    updatedAt,
+    metadataPatch: {
+      source: "instagram",
+      channel: "instagram",
+      instagram_conversation_id: instagramConversationId,
+    },
+  });
+
+  return (mergedConversation?.id || inserted.id) as string;
 }
 
 export async function syncInstagramInboxForOrganization(organizationId: string): Promise<SyncResult> {

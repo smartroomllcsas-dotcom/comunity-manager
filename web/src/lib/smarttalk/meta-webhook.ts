@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { findReusableConversation } from "@/lib/smarttalk/conversation-dedupe";
 import type { MessageContent, MessageType } from "@/types/database";
 
 type MetaChannelKind = "facebook" | "messenger" | "instagram";
@@ -394,19 +395,19 @@ async function upsertContactAndConversation(
     throw new Error("Could not upsert Meta contact");
   }
 
-  const { data: existingConversation } = await admin
-    .from("conversations")
-    .select("id, unread_count")
-    .eq("organization_id", channel.organization_id)
-    .eq("contact_id", dbContactId)
-    .eq("channel_id", channel.id)
-    .in("status", ["open", "pending"])
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const reusableConversation = await findReusableConversation({
+    organizationId: channel.organization_id,
+    contactId: dbContactId,
+    channelId: channel.id,
+    metadataPatch: {
+      channel: channel.type,
+      channel_id: channel.id,
+      source: channel.type,
+    },
+  });
 
-  let conversationId = existingConversation?.id as string | undefined;
-  let unreadCount = existingConversation?.unread_count ?? 0;
+  let conversationId = reusableConversation?.id;
+  let unreadCount = reusableConversation?.unreadCount ?? 0;
 
   if (!conversationId) {
     const { data: inserted, error } = await admin
@@ -427,6 +428,20 @@ async function upsertContactAndConversation(
     if (error) throw error;
     conversationId = inserted?.id as string | undefined;
     unreadCount = inserted?.unread_count ?? 0;
+
+    const mergedConversation = await findReusableConversation({
+      organizationId: channel.organization_id,
+      contactId: dbContactId,
+      channelId: channel.id,
+      metadataPatch: {
+        channel: channel.type,
+        channel_id: channel.id,
+        source: channel.type,
+      },
+    });
+
+    conversationId = mergedConversation?.id || conversationId;
+    unreadCount = mergedConversation?.unreadCount ?? unreadCount;
   }
 
   if (!conversationId) {
