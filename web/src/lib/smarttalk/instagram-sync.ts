@@ -129,7 +129,7 @@ function looksLikeAudio(value: string | null | undefined) {
   );
 }
 
-function parseInstagramMessage(message: InstagramMessage): { type: MessageType; content: MessageContent } {
+function parseInstagramMessage(message: InstagramMessage): { type: MessageType; content: MessageContent } | null {
   if (message.message) {
     return {
       type: "text",
@@ -195,14 +195,7 @@ function parseInstagramMessage(message: InstagramMessage): { type: MessageType; 
     };
   }
 
-  return {
-    type: "document",
-    content: {
-      type: "document",
-      url: "",
-      filename: "mensaje-instagram",
-    },
-  };
+  return null;
 }
 
 async function getLegacySocialAccount(channel: SmarttalkChannel) {
@@ -407,6 +400,7 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
           })
           .map((message) => {
             const parsed = parseInstagramMessage(message);
+            if (!parsed) return null;
             const createdAt = message.created_time
               ? new Date(message.created_time).toISOString()
               : new Date().toISOString();
@@ -423,7 +417,8 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
               is_bot: false,
               created_at: createdAt,
             };
-          });
+          })
+          .filter((message): message is NonNullable<typeof message> => Boolean(message));
 
         if (inserts.length > 0) {
           const { error: insertError } = await admin.from("messages").insert(inserts);
@@ -435,6 +430,7 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
         const latest = messageRows[0];
         if (latest) {
           const latestParsed = parseInstagramMessage(latest);
+          if (!latestParsed) continue;
           const preview = latestParsed.content.type === "text"
             ? latestParsed.content.text.slice(0, 100)
             : `[${latestParsed.type}]`;
