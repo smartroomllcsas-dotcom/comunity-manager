@@ -183,9 +183,11 @@ export async function POST(request: NextRequest) {
       providerMessageId = waResponse.messages[0]?.id;
     }
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Send failed";
+    const status = message.startsWith("Meta API:") || message.includes("Token expirado") ? 400 : 500;
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Send failed" },
-      { status: 500 },
+      { error: message },
+      { status },
     );
   }
 

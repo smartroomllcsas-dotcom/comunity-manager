@@ -170,7 +170,7 @@ export async function POST(_request: NextRequest) {
         whatsapp_phone_number_id: null,
         whatsapp_business_account_id: null,
         whatsapp_phone_number: null,
-        access_token: account.access_token || account.page_access_token || null,
+        access_token: account.page_access_token || account.access_token || null,
         facebook_app_id: null,
         meta_business_id: account.business_id || null,
         config: {
