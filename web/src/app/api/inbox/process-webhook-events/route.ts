@@ -1,6 +1,6 @@
 // Cron endpoint: procesa eventos webhook pendientes o failed con retries < 3.
-// Diseñado para ser llamado por Vercel Cron (o cron externo) cada 1-2 minutos.
-// Seguridad: header X-Cron-Secret = process.env.CRON_SECRET.
+// Diseñado para ser llamado por Vercel Cron (GET con Authorization: Bearer)
+// o cron externo (POST con X-Cron-Secret).
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { processWebhookEventRow } from "@/lib/smarttalk/meta-webhook";
@@ -9,16 +9,16 @@ import type { MetaWebhookPayload } from "@/lib/smarttalk/meta-parser";
 const MAX_ATTEMPTS = 3;
 const BATCH_SIZE = 20;
 
-export async function POST(request: NextRequest) {
+function isAuthorized(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
-  if (!secret) {
-    return NextResponse.json({ error: "CRON_SECRET no configurada" }, { status: 500 });
-  }
-  const provided = request.headers.get("x-cron-secret");
-  if (provided !== secret) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!secret) return false;
+  const bearer = request.headers.get("authorization");
+  if (bearer === `Bearer ${secret}`) return true;
+  const custom = request.headers.get("x-cron-secret");
+  return custom === secret;
+}
 
+async function processBatch() {
   const admin = createAdminClient("smarttalk");
 
   // Elegimos pending (nunca procesados) y failed con attempts < MAX.
@@ -58,4 +58,24 @@ export async function POST(request: NextRequest) {
     failed,
     errors,
   });
+}
+
+export async function GET(request: NextRequest) {
+  if (!process.env.CRON_SECRET) {
+    return NextResponse.json({ error: "CRON_SECRET no configurada" }, { status: 500 });
+  }
+  if (!isAuthorized(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  return processBatch();
+}
+
+export async function POST(request: NextRequest) {
+  if (!process.env.CRON_SECRET) {
+    return NextResponse.json({ error: "CRON_SECRET no configurada" }, { status: 500 });
+  }
+  if (!isAuthorized(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  return processBatch();
 }
