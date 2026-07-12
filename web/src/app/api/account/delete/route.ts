@@ -19,7 +19,7 @@ export async function POST(req: Request) {
 
   const { data: agent, error: agentError } = await admin
     .from('agents')
-    .select('organization_id')
+    .select('organization_id, role')
     .eq('id', user.id)
     .maybeSingle()
 
@@ -28,6 +28,15 @@ export async function POST(req: Request) {
   }
 
   if (agent?.organization_id) {
+    // Solo admins pueden borrar toda la organización. Un agente/supervisor
+    // solo borra su propia cuenta más abajo (auth.admin.deleteUser).
+    if (agent.role !== 'admin') {
+      return NextResponse.json(
+        { error: 'Solo un administrador puede eliminar la organización.' },
+        { status: 403 }
+      )
+    }
+
     const { error: orgError } = await admin.from('organizations').delete().eq('id', agent.organization_id)
     if (orgError) {
       return NextResponse.json({ error: orgError.message }, { status: 500 })

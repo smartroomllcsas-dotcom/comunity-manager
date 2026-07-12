@@ -1,60 +1,24 @@
-import { NextRequest, NextResponse } from "next/server";
-import { randomUUID } from "crypto";
+import { NextRequest, NextResponse, after } from "next/server";
+import { createHmac, randomUUID, timingSafeEqual } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findReusableConversation } from "@/lib/smarttalk/conversation-dedupe";
-import type { MessageContent, MessageType } from "@/types/database";
-
-type MetaChannelKind = "facebook" | "messenger" | "instagram";
-
-type MetaWebhookEntry = {
-  id?: string;
-  time?: number;
-  messaging?: MetaMessagingEvent[];
-  changes?: Array<{
-    field?: string;
-    value?: MetaWebhookChangeValue;
-  }>;
-};
-
-type MetaWebhookPayload = {
-  object?: string;
-  entry?: MetaWebhookEntry[];
-  sample?: {
-    field?: string;
-    value?: MetaMessagingEvent;
-  };
-};
-
-type MetaMessagingEvent = {
-  sender?: { id?: string };
-  recipient?: { id?: string };
-  timestamp?: number | string;
-  message?: MetaMessagePayload;
-  postback?: { title?: string; payload?: string };
-  delivery?: { mids?: string[] };
-  read?: { watermark?: string };
-  is_echo?: boolean;
-};
-
-type MetaWebhookChangeValue = {
-  messaging_product?: string;
-  metadata?: {
-    page_id?: string;
-    account_id?: string;
-    phone_number_id?: string;
-  };
-  messages?: MetaMessagePayload[];
-  statuses?: Array<{
-    id?: string;
-    status?: string;
-    timestamp?: string;
-    recipient_id?: string;
-  }>;
-  contacts?: Array<{
-    wa_id?: string;
-    profile?: { name?: string };
-  }>;
-};
+import { resolveToken } from "@/lib/auth/token-crypto";
+import {
+  buildDisplayName,
+  extractContactId,
+  extractContactName,
+  getMessageDirection,
+  normalizeChannelKind,
+  normalizeId,
+  parseMetaMessage,
+  pickChannelCandidates,
+  type MetaChannelKind,
+  type MetaMessagePayload,
+  type MetaMessagingEvent,
+  type MetaWebhookChangeValue,
+  type MetaWebhookEntry,
+  type MetaWebhookPayload,
+} from "@/lib/smarttalk/meta-parser";
 
 type ContactIdentity = {
   name: string | null;
@@ -84,38 +48,6 @@ type MessengerConversationResponse = {
   };
 };
 
-type MetaMessagePayload = {
-  mid?: string;
-  id?: string;
-  from?: string;
-  text?: string | { body?: string };
-  message?: { text?: string };
-  postback?: { title?: string; payload?: string };
-  attachments?: Array<{
-    type?: string;
-    payload?: {
-      url?: string;
-    };
-    name?: string;
-    mime_type?: string;
-  }>;
-  attachment?: {
-    type?: string;
-    payload?: {
-      url?: string;
-    };
-    name?: string;
-    mime_type?: string;
-  };
-  image?: { caption?: string };
-  video?: { caption?: string };
-  audio?: unknown;
-  file?: { name?: string; caption?: string; url?: string };
-  sticker?: unknown;
-  quick_reply?: { payload?: string };
-  is_echo?: boolean;
-};
-
 type SmarttalkChannel = {
   id: string;
   organization_id: string;
@@ -126,6 +58,7 @@ type SmarttalkChannel = {
   whatsapp_business_account_id: string | null;
   whatsapp_phone_number: string | null;
   access_token: string | null;
+  access_token_ciphertext: string | null;
   facebook_app_id: string | null;
   meta_business_id: string | null;
   config: Record<string, unknown>;
@@ -140,57 +73,28 @@ function getVerifyToken() {
   return process.env.META_WEBHOOK_VERIFY_TOKEN || "";
 }
 
-function normalizeId(value: string | null | undefined) {
-  return (value || "").trim();
-}
-
-function pickChannelCandidates(entry: MetaWebhookEntry, value?: MetaWebhookChangeValue) {
-  const candidates = new Set<string>();
-  if (entry.id) candidates.add(entry.id);
-  if (value?.metadata?.page_id) candidates.add(value.metadata.page_id);
-  if (value?.metadata?.account_id) candidates.add(value.metadata.account_id);
-  if (value?.metadata?.phone_number_id) candidates.add(value.metadata.phone_number_id);
-  return [...candidates].filter(Boolean);
-}
-
-function resolveChannelType(channel: MetaChannelKind) {
-  return channel === "instagram" ? "instagram" : "facebook_messenger";
-}
-
-function extractContactId(event: MetaMessagingEvent, value?: MetaWebhookChangeValue) {
-  if (event.message?.is_echo || event.is_echo) {
-    return event.recipient?.id || event.sender?.id || "unknown";
+function getMetaAppSecret(channel: "whatsapp" | "messenger" | "facebook" | "instagram") {
+  if (channel === "whatsapp") {
+    return process.env.WHATSAPP_APP_SECRET || process.env.META_APP_SECRET || "";
   }
-
-  return (
-    event.sender?.id ||
-    value?.contacts?.[0]?.wa_id ||
-    value?.metadata?.account_id ||
-    value?.metadata?.page_id ||
-    "unknown"
-  );
+  if (channel === "instagram") {
+    return process.env.META_IG_APP_SECRET || process.env.META_APP_SECRET || "";
+  }
+  return process.env.META_APP_SECRET || "";
 }
 
-function getMessageDirection(event: MetaMessagingEvent, message?: MetaMessagePayload) {
-  return event.is_echo || message?.is_echo ? "outbound" : "inbound";
+function safeEqualStrings(a: string, b: string) {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
 }
 
-function extractContactName(event: MetaMessagingEvent, value?: MetaWebhookChangeValue) {
-  return value?.contacts?.[0]?.profile?.name || null;
-}
-
-function buildDisplayName(firstName?: string, lastName?: string) {
-  return [firstName, lastName].filter(Boolean).join(" ").trim() || null;
-}
-
-function looksLikeAudio(value: string | null | undefined) {
-  if (!value) return false;
-  const normalized = value.toLowerCase();
-  return (
-    normalized.startsWith("audio/") ||
-    normalized.includes("audio") ||
-    /\.(aac|aif|aiff|amr|m4a|mp3|oga|ogg|opus|wav|weba|webm)(\?|#|$)/.test(normalized)
-  );
+function verifyMetaSignature(rawBody: string, signatureHeader: string | null, appSecret: string) {
+  if (!signatureHeader) return false;
+  if (!appSecret) return false;
+  const expected = "sha256=" + createHmac("sha256", appSecret).update(rawBody).digest("hex");
+  return safeEqualStrings(signatureHeader, expected);
 }
 
 async function fetchMessengerProfile(pageToken: string, psid: string): Promise<ContactIdentity | null> {
@@ -249,59 +153,6 @@ async function fetchMessengerParticipantIdentity(
     name: participant.name,
     profile_picture_url: null,
   };
-}
-
-function parseMetaMessage(message: MetaMessagePayload): { type: MessageType; content: MessageContent } {
-  const directText = typeof message.text === "string"
-    ? message.text
-    : message.text?.body;
-
-  if (directText || message.message?.text || message.quick_reply?.payload) {
-    return {
-      type: "text",
-      content: {
-        type: "text",
-        text:
-          directText ||
-          message.message?.text ||
-          message.quick_reply?.payload ||
-          "",
-      },
-    };
-  }
-
-  const attachment = message.attachment || message.attachments?.[0];
-  const url = attachment?.payload?.url || message.file?.url || message.mid || message.id || "";
-  const type = (attachment?.type || "document").toLowerCase();
-  const fileName = attachment?.name || message.file?.name || "";
-  const mimeType = attachment?.mime_type || "";
-
-  if (type === "image") {
-    return { type: "image", content: { type: "image", url, caption: message.image?.caption } };
-  }
-  if (type === "video") {
-    return { type: "video", content: { type: "video", url, caption: message.video?.caption } };
-  }
-  if (type === "audio" || looksLikeAudio(mimeType) || looksLikeAudio(fileName) || looksLikeAudio(url)) {
-    return { type: "audio", content: { type: "audio", url } };
-  }
-  if (type === "sticker") {
-    return { type: "sticker", content: { type: "sticker", url } };
-  }
-
-  return {
-    type: "document",
-    content: {
-      type: "document",
-      url,
-      filename: message.file?.name || "archivo",
-      caption: message.file?.caption,
-    },
-  };
-}
-
-function normalizeChannelKind(channel: MetaChannelKind) {
-  return channel === "instagram" ? "instagram" : "facebook_messenger";
 }
 
 async function findMatchingChannel(
@@ -471,12 +322,13 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
     }
 
     let profile: ContactIdentity | null = null;
-    if (channel.type === "facebook_messenger" && channel.access_token) {
-      profile = await fetchMessengerProfile(channel.access_token, contactId);
+    const channelToken = resolveToken(channel.access_token_ciphertext, channel.access_token);
+    if (channel.type === "facebook_messenger" && channelToken) {
+      profile = await fetchMessengerProfile(channelToken, contactId);
       if (!profile && channel.meta_business_id) {
         profile = await fetchMessengerParticipantIdentity(
           channel.meta_business_id,
-          channel.access_token,
+          channelToken,
           contactId
         );
       }
@@ -533,58 +385,48 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
         ? parsed.content.text.slice(0, 100)
         : `[${parsed.type}]`;
 
-      const { data: existingMessage, error: existingMessageError } = await admin
+      // UNIQUE(conversation_id, wa_message_id) respalda la idempotencia:
+      // ignoreDuplicates→ INSERT ... ON CONFLICT DO NOTHING; array vacío = duplicado.
+      const { data: insertedMessage, error: messageError } = await admin
         .from("messages")
-        .select("id")
-        .eq("conversation_id", conversationId)
-        .eq("wa_message_id", providerMessageId)
-        .maybeSingle();
-
-      if (existingMessageError) {
-        console.error("[meta-webhook] error consultando mensaje existente", existingMessageError.message);
-        continue;
-      }
-
-      if (existingMessage?.id) {
-        await admin
-          .from("conversations")
-          .update({
-            unread_count: direction === "outbound" ? 0 : unreadCount,
-            last_message_preview: preview,
-            status: "open",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", conversationId);
-        continue;
-      }
-
-      const { error: messageError } = await admin.from("messages").insert({
-        conversation_id: conversationId,
-        contact_id: dbContactId,
-        direction,
-        type: parsed.type,
-        content: parsed.content,
-        wa_message_id: providerMessageId,
-        status: direction === "outbound" ? "sent" : "delivered",
-        is_bot: false,
-      });
+        .upsert(
+          {
+            conversation_id: conversationId,
+            contact_id: dbContactId,
+            direction,
+            type: parsed.type,
+            content: parsed.content,
+            wa_message_id: providerMessageId,
+            status: direction === "outbound" ? "sent" : "delivered",
+            is_bot: false,
+          },
+          { onConflict: "conversation_id,wa_message_id", ignoreDuplicates: true }
+        )
+        .select("id");
 
       if (messageError) {
         console.error("[meta-webhook] error guardando mensaje", messageError.message);
         continue;
       }
 
+      const isDuplicate = !insertedMessage || insertedMessage.length === 0;
+
       await admin
         .from("conversations")
         .update({
-          unread_count: direction === "outbound" ? 0 : unreadCount + 1,
+          unread_count:
+            direction === "outbound"
+              ? 0
+              : isDuplicate
+                ? unreadCount
+                : unreadCount + 1,
           last_message_preview: preview,
           status: "open",
           updated_at: new Date().toISOString(),
         })
         .eq("id", conversationId);
 
-      processed += 1;
+      if (!isDuplicate) processed += 1;
     }
 
     for (const change of entry.changes || []) {
@@ -628,33 +470,47 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
           ? parsed.content.text.slice(0, 100)
           : `[${parsed.type}]`;
 
-        const { error: messageError } = await admin.from("messages").insert({
-          conversation_id: conversationId,
-          contact_id: dbContactId,
-          direction: message.is_echo ? "outbound" : "inbound",
-          type: parsed.type,
-          content: parsed.content,
-          wa_message_id: message.mid || message.id || randomUUID(),
-          status: message.is_echo ? "sent" : "delivered",
-          is_bot: false,
-        });
+        const waMessageId = message.mid || message.id || randomUUID();
+        const { data: insertedMessage, error: messageError } = await admin
+          .from("messages")
+          .upsert(
+            {
+              conversation_id: conversationId,
+              contact_id: dbContactId,
+              direction: message.is_echo ? "outbound" : "inbound",
+              type: parsed.type,
+              content: parsed.content,
+              wa_message_id: waMessageId,
+              status: message.is_echo ? "sent" : "delivered",
+              is_bot: false,
+            },
+            { onConflict: "conversation_id,wa_message_id", ignoreDuplicates: true }
+          )
+          .select("id");
 
         if (messageError) {
           console.error("[meta-webhook] error guardando mensaje", messageError.message);
           continue;
         }
 
+        const isDuplicate = !insertedMessage || insertedMessage.length === 0;
+
         await admin
           .from("conversations")
           .update({
-            unread_count: message.is_echo ? 0 : unreadCount + 1,
+            unread_count:
+              message.is_echo
+                ? 0
+                : isDuplicate
+                  ? unreadCount
+                  : unreadCount + 1,
             last_message_preview: preview,
             status: "open",
             updated_at: new Date().toISOString(),
           })
           .eq("id", conversationId);
 
-        processed += 1;
+        if (!isDuplicate) processed += 1;
       }
 
       const statuses = value.statuses || [];
@@ -683,7 +539,8 @@ export function verifyMetaWebhook(request: NextRequest, channel: "whatsapp" | "m
     );
   }
 
-  if (!token || token !== getVerifyToken()) {
+  const expectedToken = getVerifyToken();
+  if (!token || !expectedToken || !safeEqualStrings(token, expectedToken)) {
     return NextResponse.json(
       { error: "hub.verify_token invalido", channel },
       { status: 403 }
@@ -707,10 +564,29 @@ export async function receiveMetaWebhook(
   request: NextRequest,
   channel: "whatsapp" | "messenger" | "facebook" | "instagram"
 ) {
+  const appSecret = getMetaAppSecret(channel);
+  if (!appSecret) {
+    console.error(`[meta-webhook:${channel}] app secret no configurado`);
+    return NextResponse.json(
+      { error: "Webhook security not configured", channel },
+      { status: 500 }
+    );
+  }
+
+  const rawBody = await request.text();
+  const signature = request.headers.get("x-hub-signature-256");
+
+  if (!verifyMetaSignature(rawBody, signature, appSecret)) {
+    return NextResponse.json(
+      { error: "Invalid signature", channel },
+      { status: 401 }
+    );
+  }
+
   let payload: MetaWebhookPayload;
 
   try {
-    payload = (await request.json()) as MetaWebhookPayload;
+    payload = JSON.parse(rawBody) as MetaWebhookPayload;
   } catch {
     return NextResponse.json(
       { error: "JSON invalido", channel },
@@ -718,7 +594,10 @@ export async function receiveMetaWebhook(
     );
   }
 
-  console.log(`[meta-webhook:${channel}]`, JSON.stringify(payload));
+  console.log(`[meta-webhook:${channel}]`, {
+    entries: Array.isArray(payload.entry) ? payload.entry.length : 0,
+    hasSample: Boolean(payload.sample),
+  });
 
   if (payload.sample) {
     console.log(`[meta-webhook-test:${channel}]`, {
@@ -738,10 +617,15 @@ export async function receiveMetaWebhook(
     return NextResponse.json({ received: true, channel });
   }
 
-  const processed = await persistMessengerLikeWebhook(channel, payload);
-  return NextResponse.json({
-    received: true,
-    channel,
-    processed,
+  // Desacople: Meta requiere 200 en <20s. Procesamos en background con `after`
+  // para responder inmediatamente y evitar timeouts / desuscripciones.
+  after(async () => {
+    try {
+      await persistMessengerLikeWebhook(channel, payload);
+    } catch (err) {
+      console.error(`[meta-webhook:${channel}] background processing failed`, err);
+    }
   });
+
+  return NextResponse.json({ received: true, channel, queued: true });
 }

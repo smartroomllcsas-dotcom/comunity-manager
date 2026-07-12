@@ -4,8 +4,27 @@ import { createServerClient } from '@supabase/ssr'
 import type { CMUser } from '@/types/database'
 import { mysqlQuery, quoteId } from '@/lib/mysql'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { hashPassword, verifyPassword } from '@/lib/auth/password'
+import { clientIp, rateLimit } from '@/lib/rate-limit'
 
 const SESSION_KEY = 'cm_user_id'
+const LOGIN_RATE_LIMIT = 5
+const LOGIN_RATE_WINDOW_MS = 15 * 60 * 1000
+
+function checkLoginRateLimit(request: NextRequest, email: string) {
+  const key = `login:${clientIp(request.headers)}:${email.toLowerCase()}`
+  return rateLimit(key, LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW_MS)
+}
+
+function tooManyAttempts(retryAfterSeconds: number) {
+  return NextResponse.json(
+    { user: null, error: 'Demasiados intentos. Intenta más tarde.' },
+    {
+      status: 429,
+      headers: { 'Retry-After': String(retryAfterSeconds) },
+    }
+  )
+}
 
 function getDbProvider() {
   return (process.env.NEXT_PUBLIC_DB_PROVIDER || process.env.DB_PROVIDER || 'supabase').toLowerCase()
@@ -95,7 +114,15 @@ async function readPayload(request: NextRequest) {
 }
 
 function buildSessionCookie(userId: string) {
-  return `${SESSION_KEY}=${encodeURIComponent(userId)}; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax`
+  const parts = [
+    `${SESSION_KEY}=${encodeURIComponent(userId)}`,
+    'Path=/',
+    `Max-Age=${60 * 60 * 24 * 30}`,
+    'SameSite=Lax',
+    'HttpOnly',
+  ]
+  if (process.env.NODE_ENV === 'production') parts.push('Secure')
+  return parts.join('; ')
 }
 
 function nowSql() {
@@ -230,7 +257,7 @@ async function bridgeSmarttalkSession(
   }
 
   response.cookies.set(SESSION_KEY, cmUser.id, {
-    httpOnly: false,
+    httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
     path: '/',
@@ -266,10 +293,22 @@ async function handleMysqlAuth(request: NextRequest, body: any) {
     const email = String(body?.email || '').toLowerCase().trim()
     const password = String(body?.password || '')
 
-    const user = await mysqlGetUserByEmail(email)
+    const gate = checkLoginRateLimit(request, email)
+    if (!gate.ok) return tooManyAttempts(gate.retryAfterSeconds)
 
-    if (!user || user.password_hash !== password) {
+    const user = await mysqlGetUserByEmail(email)
+    const verdict = await verifyPassword(password, user?.password_hash)
+
+    if (!user || !verdict.ok) {
       return NextResponse.json({ user: null, error: 'Invalid email or password' }, { status: 401 })
+    }
+
+    if (verdict.legacy) {
+      const rehashed = await hashPassword(password)
+      await mysqlQuery(
+        `UPDATE ${quoteId('cm_users')} SET ${quoteId('password_hash')} = ?, ${quoteId('updated_at')} = ? WHERE ${quoteId('id')} = ?`,
+        [rehashed, nowSql(), user.id]
+      )
     }
 
     if (wantsHtmlRedirect) {
@@ -293,6 +332,7 @@ async function handleMysqlAuth(request: NextRequest, body: any) {
 
     const userId = randomUUID()
     const timestamp = nowSql()
+    const passwordHash = await hashPassword(password)
 
     await mysqlQuery(
       `INSERT INTO ${quoteId('cm_users')} (
@@ -306,7 +346,7 @@ async function handleMysqlAuth(request: NextRequest, body: any) {
         ${quoteId('created_at')},
         ${quoteId('updated_at')}
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [userId, email, password, name, 'user', 'free', null, timestamp, timestamp]
+      [userId, email, passwordHash, name, 'user', 'free', null, timestamp, timestamp]
     )
 
     const user = await mysqlGetUserById(userId)
@@ -354,6 +394,9 @@ export async function POST(request: NextRequest) {
       const email = String(body?.email || '').toLowerCase().trim()
       const password = String(body?.password || '')
 
+      const gate = checkLoginRateLimit(request, email)
+      if (!gate.ok) return tooManyAttempts(gate.retryAfterSeconds)
+
       const { data, error } = await supabaseRest<CMUser[]>(
         `cm_users?select=*&email=eq.${encodeURIComponent(email)}`
       )
@@ -363,9 +406,20 @@ export async function POST(request: NextRequest) {
       }
 
       const user = Array.isArray(data) ? data[0] : null
+      const verdict = await verifyPassword(password, user?.password_hash)
 
-      if (!user || user.password_hash !== password) {
+      if (!user || !verdict.ok) {
         return NextResponse.json({ user: null, error: 'Invalid email or password' }, { status: 401 })
+      }
+
+      if (verdict.legacy) {
+        const rehashed = await hashPassword(password)
+        await supabaseRest(`cm_users?id=eq.${encodeURIComponent(user.id)}`, {
+          method: 'PATCH',
+          body: { password_hash: rehashed },
+          prefer: 'return=minimal',
+        })
+        user.password_hash = rehashed
       }
 
       const response = wantsHtmlRedirect
@@ -400,13 +454,14 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ user: null, error: 'Email already registered' }, { status: 409 })
       }
 
+      const passwordHash = await hashPassword(password)
       const { data, error } = await supabaseRest<CMUser[]>(
         'cm_users',
         {
           method: 'POST',
           body: {
             email,
-            password_hash: password,
+            password_hash: passwordHash,
             name,
           },
         }

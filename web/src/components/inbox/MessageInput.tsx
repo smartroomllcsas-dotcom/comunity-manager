@@ -228,11 +228,14 @@ export function MessageInput({
         setRecording(false);
         if (!chunks.length) return;
         setUploading(true);
+        setRecordingError(null);
         try {
           const blob = new Blob(chunks, { type: mimeType });
           await uploadRecordedAudio(blob, mimeType);
         } catch (error) {
           console.error(error);
+          const msg = error instanceof Error ? error.message : "No se pudo subir el audio grabado.";
+          setRecordingError(msg);
         } finally {
           setUploading(false);
         }
@@ -305,11 +308,14 @@ export function MessageInput({
   async function handleFileChange(file: File | null) {
     if (!file || disabled || sending || uploading) return;
     setUploading(true);
+    setRecordingError(null);
     try {
       const uploaded = await uploadAttachment(file);
       setAttachment(uploaded);
     } catch (error) {
       console.error(error);
+      const msg = error instanceof Error ? error.message : "No se pudo subir el archivo.";
+      setRecordingError(msg);
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";

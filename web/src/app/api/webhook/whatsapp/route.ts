@@ -2,10 +2,17 @@
 // Verifica HMAC SHA-256 con WHATSAPP_APP_SECRET. URL pública canónica para nuevos canales.
 // El webhook legacy de Community Manager vive en /webhooks/whatsapp.
 import { NextRequest, NextResponse } from "next/server";
-import { createHmac } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 import type { WebhookPayload } from "@/lib/whatsapp/types";
 import { processIncomingMessage, processStatusUpdate } from "@/lib/whatsapp/webhook";
 import { persistWhatsAppWebhook } from "@/lib/webhook";
+
+function safeEqualStrings(a: string, b: string) {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -15,7 +22,7 @@ export async function GET(request: NextRequest) {
 
   const verifyToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || process.env.META_WEBHOOK_VERIFY_TOKEN;
 
-  if (mode === "subscribe" && token === verifyToken) {
+  if (mode === "subscribe" && token && verifyToken && safeEqualStrings(token, verifyToken)) {
     return new NextResponse(challenge, { status: 200 });
   }
   return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -37,7 +44,7 @@ export async function POST(request: NextRequest) {
   }
 
   const expectedSignature = "sha256=" + createHmac("sha256", appSecret).update(body).digest("hex");
-  if (signature !== expectedSignature) {
+  if (!safeEqualStrings(signature, expectedSignature)) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 

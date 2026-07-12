@@ -8,9 +8,13 @@ import { createRequire } from "module";
 import { tmpdir } from "os";
 import path from "path";
 import { promisify } from "util";
+import { fileTypeFromBuffer } from "file-type";
 
 const MEDIA_BUCKET = "chat-media";
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
+// TTL para signed URLs. 30 días cubre la vida útil típica de un mensaje en el inbox;
+// para historial antiguo, se re-firma bajo demanda vía /api/uploads/chat-media/signed.
+const SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 30;
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const bundledFfmpegPath = require("ffmpeg-static") as string | null;
@@ -65,14 +69,21 @@ async function ensureBucketExists() {
   const { data: buckets, error: listError } = await admin.storage.listBuckets();
   if (listError) throw listError;
 
-  const exists = buckets?.some((bucket) => bucket.name === MEDIA_BUCKET);
-  if (!exists) {
+  const existing = buckets?.find((bucket) => bucket.name === MEDIA_BUCKET);
+  if (!existing) {
     const { error: createError } = await admin.storage.createBucket(MEDIA_BUCKET, {
-      public: true,
+      public: false,
     });
     if (createError && !String(createError.message || "").toLowerCase().includes("already exists")) {
       throw createError;
     }
+    return;
+  }
+
+  if (existing.public) {
+    // Bucket legacy creado como público. Solo lo señalamos; el flip a privado
+    // debe hacerse manualmente para no invalidar URLs ya guardadas en mensajes.
+    console.warn(`[uploads] bucket ${MEDIA_BUCKET} sigue como público (legacy); considera updateBucket public:false y re-firmar URLs históricas.`);
   }
 }
 
@@ -180,6 +191,32 @@ export async function POST(request: NextRequest) {
   await ensureBucketExists();
 
   const originalBuffer = Buffer.from(await file.arrayBuffer());
+
+  // Validación magic-bytes: rechaza un HTML/SVG etiquetado como image/png en el form.
+  // Tipos "text/*" no tienen firma; los aceptamos siempre que el mime declarado esté en el allowlist.
+  const detected = await fileTypeFromBuffer(originalBuffer);
+  if (detected) {
+    const detectedMime = detected.mime.toLowerCase();
+    const declaredIsPrefix = allowed.find((entry) => entry.endsWith("/") && mimeType.startsWith(entry));
+    if (declaredIsPrefix) {
+      const declaredPrefix = declaredIsPrefix.slice(0, -1);
+      if (!detectedMime.startsWith(`${declaredPrefix}/`)) {
+        return NextResponse.json(
+          { error: `El archivo no coincide con el tipo declarado (declarado ${mimeType}, real ${detectedMime})` },
+          { status: 400 }
+        );
+      }
+    } else if (detectedMime !== mimeType) {
+      return NextResponse.json(
+        { error: `El archivo no coincide con el tipo declarado (declarado ${mimeType}, real ${detectedMime})` },
+        { status: 400 }
+      );
+    }
+  } else if (!mimeType.startsWith("text/") && mimeType !== "application/pdf" && !mimeType.startsWith("application/vnd")) {
+    // Archivos sin firma binaria conocida (que además no son texto/office) son sospechosos.
+    return NextResponse.json({ error: "No se pudo verificar el tipo del archivo" }, { status: 400 });
+  }
+
   let uploadBuffer = originalBuffer;
   let uploadFileName = file.name || "attachment";
   let uploadMimeType = mimeType;
@@ -213,13 +250,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: uploadError.message }, { status: 500 });
   }
 
-  const { data } = admin.storage.from(MEDIA_BUCKET).getPublicUrl(storagePath);
+  const { data: signed, error: signError } = await admin.storage
+    .from(MEDIA_BUCKET)
+    .createSignedUrl(storagePath, SIGNED_URL_TTL_SECONDS);
+
+  if (signError || !signed?.signedUrl) {
+    return NextResponse.json(
+      { error: signError?.message || "No se pudo firmar la URL del archivo" },
+      { status: 500 }
+    );
+  }
+
   return NextResponse.json({
-    url: data.publicUrl,
+    url: signed.signedUrl,
     path: storagePath,
     fileName: uploadFileName,
     mimeType: uploadMimeType,
-    ext,
+    ext: ext ?? "",
     bucket: MEDIA_BUCKET,
+    expiresIn: SIGNED_URL_TTL_SECONDS,
   });
 }

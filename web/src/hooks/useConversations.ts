@@ -5,6 +5,7 @@ import { useInboxStore } from "@/stores/inbox";
 import type { Conversation } from "@/types/database";
 import { useEffect } from "react";
 import { getConversationChannelKind } from "@/components/inbox/ChannelBadge";
+import { createClient } from "@/lib/supabase/client";
 
 export function useConversations(initialData: Conversation[] = []) {
   const { data: agent } = useCurrentAgent();
@@ -15,18 +16,57 @@ export function useConversations(initialData: Conversation[] = []) {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
-    }, 5000);
+    if (!agent?.organization_id) return;
 
-    return () => window.clearInterval(interval);
-  }, [queryClient]);
+    const supabase = createClient();
+    const invalidate = () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    };
+
+    const conversationsChannel = supabase
+      .channel(`conversations:${agent.organization_id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "smarttalk",
+          table: "conversations",
+          filter: `organization_id=eq.${agent.organization_id}`,
+        },
+        invalidate
+      )
+      .subscribe();
+
+    // Inserts de mensajes cambian last_message_preview y unread_count.
+    // Nos suscribimos también aunque el filtro por organization no aplica en
+    // messages; invalidamos y dejamos que el server responda con lo actualizado.
+    const messagesChannel = supabase
+      .channel(`inbox-messages:${agent.organization_id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "smarttalk", table: "messages" },
+        invalidate
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(conversationsChannel);
+      supabase.removeChannel(messagesChannel);
+    };
+  }, [agent?.organization_id, queryClient]);
 
   return useQuery<Conversation[]>({
     queryKey: ["conversations", filter, searchQuery, statusFilter, channelFilter],
     initialData,
     queryFn: async () => {
-      const response = await fetch("/api/inbox/conversations", { cache: "no-store" });
+      const params = new URLSearchParams();
+      if (filter && filter !== "all") params.set("filter", filter);
+      if (statusFilter && statusFilter !== "all") params.set("status", statusFilter);
+      if (channelFilter && channelFilter !== "all") params.set("channel", channelFilter);
+      if (searchQuery) params.set("search", searchQuery);
+      params.set("limit", "50");
+      const qs = params.toString();
+      const response = await fetch(`/api/inbox/conversations${qs ? `?${qs}` : ""}`, { cache: "no-store" });
       if (!response.ok) {
         const error = await response.json().catch(() => ({}));
         throw new Error(error.error || "No se pudieron cargar las conversaciones");
@@ -62,6 +102,5 @@ export function useConversations(initialData: Conversation[] = []) {
       return filtered;
     },
     enabled: !!agent,
-    refetchInterval: 5000,
   });
 }

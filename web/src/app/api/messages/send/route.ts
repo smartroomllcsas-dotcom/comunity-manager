@@ -8,6 +8,8 @@ import {
   sendRespondIoAttachment,
   getRespondIoCredentials,
 } from "@/lib/respond-io/api";
+import { resolveToken } from "@/lib/auth/token-crypto";
+import { sendMessageSchema } from "@/lib/validation/message";
 import type { MessageContent, MessageType } from "@/types/database";
 
 export async function POST(request: NextRequest) {
@@ -20,15 +22,34 @@ export async function POST(request: NextRequest) {
   const { data: agent } = await supabase.from("agents").select("*").eq("id", user.id).single();
   if (!agent) return NextResponse.json({ error: "Agent not found" }, { status: 404 });
 
-  const { conversationId, type, content } = (await request.json()) as {
+  const rawBody = await request.json().catch(() => null);
+  const parsed = sendMessageSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid message body", issues: parsed.error.issues },
+      { status: 400 }
+    );
+  }
+
+  // parsed.data.type y parsed.data.content.type deben coincidir; el tipo top-level
+  // se mantiene por compat con la lógica downstream que lo usa como MessageType.
+  if (parsed.data.type !== parsed.data.content.type) {
+    return NextResponse.json(
+      { error: "type y content.type no coinciden" },
+      { status: 400 }
+    );
+  }
+
+  const { conversationId, type, content } = parsed.data as {
     conversationId: string;
     type: MessageType;
     content: MessageContent;
   };
 
+  // Nunca traer access_token en el join: si conversation se serializa/loguea, no leakea.
   const { data: conversation } = await supabase
     .from("conversations")
-    .select("*, contact:contacts(*), channel:channels(id, type, access_token, whatsapp_phone_number_id, whatsapp_business_account_id, meta_business_id)")
+    .select("*, contact:contacts(*), channel:channels(id, type, whatsapp_phone_number_id, whatsapp_business_account_id, meta_business_id)")
     .eq("id", conversationId)
     .eq("organization_id", agent.organization_id)
     .single();
@@ -38,6 +59,20 @@ export async function POST(request: NextRequest) {
   }
 
   const channelType = (conversation.channel as { type?: string } | null)?.type;
+
+  // El token vive sólo en esta variable server-side, nunca en el objeto conversation.
+  let channelAccessToken: string | null = null;
+  if (channelType === "facebook_messenger" || channelType === "instagram") {
+    const { data: chan } = await admin
+      .from("channels")
+      .select("access_token, access_token_ciphertext")
+      .eq("id", conversation.channel_id)
+      .single();
+    channelAccessToken = resolveToken(
+      (chan?.access_token_ciphertext as string | null) ?? null,
+      (chan?.access_token as string | null) ?? null
+    );
+  }
   const contactIdentifier = conversation.contact.respond_io_id
     ? `id:${conversation.contact.respond_io_id}`
     : `phone:${conversation.contact.wa_id}`;
@@ -86,7 +121,7 @@ export async function POST(request: NextRequest) {
       }
       providerMessageId = typeof resp.messageId === "string" ? resp.messageId : undefined;
     } else if (channelType === "facebook_messenger" || channelType === "instagram") {
-      if (!conversation.channel?.access_token) {
+      if (!channelAccessToken) {
         return NextResponse.json({ error: "Channel not configured with access token" }, { status: 400 });
       }
       const recipientId = conversation.contact.wa_id;
@@ -94,7 +129,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Conversation contact is missing Meta recipient id" }, { status: 400 });
       }
       if (content.type === "text") {
-        const resp = await sendMetaTextMessage(conversation.channel.access_token, recipientId, content.text);
+        const resp = await sendMetaTextMessage(channelAccessToken, recipientId, content.text);
         providerMessageId = typeof resp?.message_id === "string" ? resp.message_id : undefined;
       } else if (
         content.type === "image" ||
@@ -104,7 +139,7 @@ export async function POST(request: NextRequest) {
         content.type === "sticker"
       ) {
         const resp = await sendMetaAttachment(
-          conversation.channel.access_token,
+          channelAccessToken,
           recipientId,
           content.type === "document" || content.type === "sticker" ? "image" : content.type,
           content.url

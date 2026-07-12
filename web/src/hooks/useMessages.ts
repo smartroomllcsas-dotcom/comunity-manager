@@ -2,16 +2,34 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Message } from "@/types/database";
 import { useEffect } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 export function useMessages(conversationId: string | null) {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
-    }, 5000);
+    if (!conversationId) return;
 
-    return () => window.clearInterval(interval);
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`messages:${conversationId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "smarttalk",
+          table: "messages",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [conversationId, queryClient]);
 
   return useQuery<Message[]>({
@@ -29,6 +47,5 @@ export function useMessages(conversationId: string | null) {
       return messages || [];
     },
     enabled: !!conversationId,
-    refetchInterval: 5000,
   });
 }

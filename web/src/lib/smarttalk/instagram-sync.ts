@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findReusableConversation } from "@/lib/smarttalk/conversation-dedupe";
+import { resolveToken } from "@/lib/auth/token-crypto";
 import type { MessageContent, MessageType } from "@/types/database";
 
 type SmarttalkChannel = {
@@ -9,6 +10,7 @@ type SmarttalkChannel = {
   name: string;
   status: string;
   access_token: string | null;
+  access_token_ciphertext: string | null;
   config: Record<string, unknown> | null;
   last_active_at: string | null;
 };
@@ -17,6 +19,7 @@ type LegacySocialAccount = {
   id: string;
   page_id: string | null;
   page_access_token: string | null;
+  page_access_token_ciphertext: string | null;
   instagram_id: string | null;
   instagram_username: string | null;
 };
@@ -205,7 +208,7 @@ async function getLegacySocialAccount(channel: SmarttalkChannel) {
 
   let query = publicAdmin
     .from("cm_social_accounts")
-    .select("id,page_id,page_access_token,instagram_id,instagram_username")
+    .select("id,page_id,page_access_token,page_access_token_ciphertext,instagram_id,instagram_username")
     .not("instagram_id", "is", null);
 
   if (legacyAccountId) {
@@ -348,14 +351,18 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
 
     try {
       const socialAccount = await getLegacySocialAccount(channel);
-      if (!socialAccount?.page_id || !socialAccount.page_access_token || !socialAccount.instagram_id) {
+      const pageToken = resolveToken(
+        socialAccount?.page_access_token_ciphertext,
+        socialAccount?.page_access_token
+      );
+      if (!socialAccount?.page_id || !pageToken || !socialAccount.instagram_id) {
         result.errors.push(`Instagram channel ${channel.id} missing page/token/account mapping`);
         continue;
       }
 
       const conversations = await graphGet<InstagramConversation>(
         `${socialAccount.page_id}/conversations?platform=instagram&fields=id,updated_time,participants&limit=${CONVERSATION_LIMIT}`,
-        socialAccount.page_access_token
+        pageToken
       );
 
       for (const conversation of conversations.data || []) {
@@ -377,7 +384,7 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
 
         const messages = await graphGet<InstagramMessage>(
           `${encodeURIComponent(conversation.id)}/messages?fields=id,message,from,to,created_time,attachments,sticker&limit=${MESSAGE_LIMIT}`,
-          socialAccount.page_access_token
+          pageToken
         );
         const messageRows = messages.data || [];
         const messageIds = messageRows.map((message) => message.id).filter(Boolean);
@@ -421,9 +428,15 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
           .filter((message): message is NonNullable<typeof message> => Boolean(message));
 
         if (inserts.length > 0) {
-          const { error: insertError } = await admin.from("messages").insert(inserts);
+          // ignoreDuplicates cierra la race con el webhook push que puede escribir el mismo wa_message_id.
+          const { data: upserted, error: insertError } = await admin
+            .from("messages")
+            .upsert(inserts, { onConflict: "conversation_id,wa_message_id", ignoreDuplicates: true })
+            .select("id");
           if (insertError) throw insertError;
-          result.insertedMessages += inserts.length;
+          const insertedCount = upserted?.length ?? 0;
+          result.insertedMessages += insertedCount;
+          result.skippedMessages += inserts.length - insertedCount;
         }
         result.skippedMessages += messageRows.length - inserts.length;
 

@@ -6,6 +6,7 @@ import {
   subscribeWABAToApp,
   registerPhoneNumber,
 } from "@/lib/whatsapp/token-manager";
+import { encryptToken } from "@/lib/auth/token-crypto";
 
 const FB_APP_ID = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID!;
 const FB_APP_SECRET = process.env.FACEBOOK_APP_SECRET!;
@@ -155,7 +156,8 @@ export async function POST(request: NextRequest) {
         whatsapp_phone_number_id: phoneNumberId,
         whatsapp_business_account_id: wabaId,
         whatsapp_phone_number: phoneNumber,
-        access_token: accessToken,
+        access_token: null,
+        access_token_ciphertext: encryptToken(accessToken),
         facebook_app_id: FB_APP_ID,
         token_expires_at: tokenExpiresAt,
         config: {
@@ -172,13 +174,14 @@ export async function POST(request: NextRequest) {
     }
 
     // 9. Also update the organization's default WhatsApp credentials
-    // for backward compatibility with existing webhook logic
+    // for backward compatibility with existing webhook logic.
     await admin
       .from("organizations")
       .update({
         whatsapp_phone_number_id: phoneNumberId,
         whatsapp_business_account_id: wabaId,
-        access_token: accessToken,
+        access_token: null,
+        access_token_ciphertext: encryptToken(accessToken),
       })
       .eq("id", agent.organization_id);
 

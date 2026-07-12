@@ -6,6 +6,7 @@ import {
   getInstagramProfile,
 } from '@/lib/instagram'
 import { subscribeInstagramAccountToApp } from '@/lib/meta'
+import { encryptToken } from '@/lib/auth/token-crypto'
 
 const REDIRECT_URI_FALLBACK = 'https://www.comunitymanager.io/'
 
@@ -72,7 +73,8 @@ export async function GET(request: NextRequest) {
       const tokenExpiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null
       const socialData = {
         client_id: clientId,
-        access_token: longTokenStr,
+        access_token: null as string | null,
+        access_token_ciphertext: encryptToken(longTokenStr),
         instagram_id: profile.id,
         instagram_username: profile.username,
         connected_at: new Date().toISOString(),
@@ -131,7 +133,6 @@ export async function GET(request: NextRequest) {
         ig_user_id: String(profile.id),
         ig_username: profile.username,
         ig_account_type: profile.account_type || '',
-        ig_token_preview: longTokenStr.slice(0, 24),
         ig_expires_in: String(expiresIn),
       })
     )

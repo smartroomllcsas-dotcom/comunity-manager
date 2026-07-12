@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { encryptToken, resolveToken } from "@/lib/auth/token-crypto";
 
 const WA_API_VERSION = process.env.WHATSAPP_API_VERSION || "v21.0";
 const GRAPH_URL = `https://graph.facebook.com/${WA_API_VERSION}`;
@@ -114,12 +115,13 @@ export async function refreshExpiringTokens(): Promise<{
   const sevenDaysFromNow = new Date();
   sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
 
-  // Find channels with tokens expiring in the next 7 days
+  // Find channels with tokens expiring in the next 7 days.
+  // OR() cubre canales cifrados y legacy plano — cualquiera de los dos indica que hay token.
   const { data: channels } = await admin
     .from("channels")
-    .select("id, access_token, organization_id, name")
+    .select("id, access_token, access_token_ciphertext, organization_id, name")
     .eq("status", "active")
-    .not("access_token", "is", null)
+    .or("access_token.not.is.null,access_token_ciphertext.not.is.null")
     .not("token_expires_at", "is", null)
     .lt("token_expires_at", sevenDaysFromNow.toISOString());
 
@@ -133,7 +135,11 @@ export async function refreshExpiringTokens(): Promise<{
 
   for (const channel of channels) {
     try {
-      const result = await exchangeForLongLivedToken(channel.access_token!);
+      const currentToken = resolveToken(channel.access_token_ciphertext, channel.access_token);
+      if (!currentToken) {
+        throw new Error("token no legible");
+      }
+      const result = await exchangeForLongLivedToken(currentToken);
 
       const expiresAt = new Date();
       expiresAt.setSeconds(expiresAt.getSeconds() + result.expires_in);
@@ -141,7 +147,8 @@ export async function refreshExpiringTokens(): Promise<{
       await admin
         .from("channels")
         .update({
-          access_token: result.access_token,
+          access_token: null,
+          access_token_ciphertext: encryptToken(result.access_token),
           token_expires_at: expiresAt.toISOString(),
         })
         .eq("id", channel.id);

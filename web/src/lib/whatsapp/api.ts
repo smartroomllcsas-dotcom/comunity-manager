@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveToken } from "@/lib/auth/token-crypto";
 
 const WA_API_VERSION = process.env.WHATSAPP_API_VERSION || "v21.0";
 const WA_API_BASE = `https://graph.facebook.com/${WA_API_VERSION}`;
@@ -46,14 +47,15 @@ export async function getChannelCredentials(channelId: string) {
   const admin = createAdminClient();
   const { data: channel } = await admin
     .from("channels")
-    .select("whatsapp_phone_number_id, access_token")
+    .select("whatsapp_phone_number_id, access_token, access_token_ciphertext")
     .eq("id", channelId)
     .eq("status", "active")
     .single();
-  if (!channel?.whatsapp_phone_number_id || !channel?.access_token) {
+  const token = resolveToken(channel?.access_token_ciphertext, channel?.access_token);
+  if (!channel?.whatsapp_phone_number_id || !token) {
     throw new Error("Channel not configured or inactive");
   }
-  return { phoneNumberId: channel.whatsapp_phone_number_id, accessToken: channel.access_token };
+  return { phoneNumberId: channel.whatsapp_phone_number_id, accessToken: token };
 }
 
 export async function getOrgWhatsAppCredentials(organizationId: string, channelId?: string) {
@@ -66,7 +68,7 @@ export async function getOrgWhatsAppCredentials(organizationId: string, channelI
   const admin = createAdminClient();
   const { data: channel } = await admin
     .from("channels")
-    .select("whatsapp_phone_number_id, access_token")
+    .select("whatsapp_phone_number_id, access_token, access_token_ciphertext")
     .eq("organization_id", organizationId)
     .eq("type", "whatsapp")
     .eq("status", "active")
@@ -74,14 +76,20 @@ export async function getOrgWhatsAppCredentials(organizationId: string, channelI
     .limit(1)
     .single();
 
-  if (channel?.whatsapp_phone_number_id && channel?.access_token) {
-    return { phoneNumberId: channel.whatsapp_phone_number_id, accessToken: channel.access_token };
+  const channelToken = resolveToken(channel?.access_token_ciphertext, channel?.access_token);
+  if (channel?.whatsapp_phone_number_id && channelToken) {
+    return { phoneNumberId: channel.whatsapp_phone_number_id, accessToken: channelToken };
   }
 
-  // Legacy fallback: read from organizations table
-  const { data: org } = await admin.from("organizations").select("whatsapp_phone_number_id, access_token").eq("id", organizationId).single();
-  if (!org?.whatsapp_phone_number_id || !org?.access_token) {
+  // Legacy fallback: read from organizations table (soporta ciphertext post-Sprint4).
+  const { data: org } = await admin
+    .from("organizations")
+    .select("whatsapp_phone_number_id, access_token, access_token_ciphertext")
+    .eq("id", organizationId)
+    .single();
+  const orgToken = resolveToken(org?.access_token_ciphertext, org?.access_token);
+  if (!org?.whatsapp_phone_number_id || !orgToken) {
     throw new Error("WhatsApp not configured for this organization");
   }
-  return { phoneNumberId: org.whatsapp_phone_number_id, accessToken: org.access_token };
+  return { phoneNumberId: org.whatsapp_phone_number_id, accessToken: orgToken };
 }
