@@ -35,18 +35,34 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(successUrl({ ig_error: 'missing_code' }))
   }
 
+  // OAuth state es obligatorio (CSRF). Rechaza si ausente, desconocido o expirado.
+  if (!state) {
+    return NextResponse.redirect(successUrl({ ig_error: 'missing_state' }))
+  }
+
   try {
-    const stateRecord = state
-      ? await createAdminClient('public')
-          .from('cm_oauth_states')
-          .select('state, client_id')
-          .eq('state', state)
-          .maybeSingle()
-      : { data: null }
-    const clientId = stateRecord?.data?.client_id || null
-    if (state && clientId) {
-      await createAdminClient('public').from('cm_oauth_states').delete().eq('state', state)
+    const publicAdminEarly = createAdminClient('public')
+    const { data: stateRow } = await publicAdminEarly
+      .from('cm_oauth_states')
+      .select('state, client_id, created_at')
+      .eq('state', state)
+      .maybeSingle()
+
+    if (!stateRow?.client_id) {
+      return NextResponse.redirect(successUrl({ ig_error: 'invalid_state' }))
     }
+
+    // Ventana de 15 min. Después consideramos el state expirado.
+    const createdAtMs = stateRow.created_at ? new Date(stateRow.created_at).getTime() : 0
+    if (!createdAtMs || Date.now() - createdAtMs > 15 * 60 * 1000) {
+      // Limpieza defensiva del state expirado.
+      await publicAdminEarly.from('cm_oauth_states').delete().eq('state', state)
+      return NextResponse.redirect(successUrl({ ig_error: 'state_expired' }))
+    }
+
+    const clientId = stateRow.client_id as string
+    // Consumo one-shot: eliminamos el state ya validado (evita replay).
+    await publicAdminEarly.from('cm_oauth_states').delete().eq('state', state)
 
     const short = await exchangeInstagramCode(code, redirectUri)
     let longTokenStr: string

@@ -617,15 +617,71 @@ export async function receiveMetaWebhook(
     return NextResponse.json({ received: true, channel });
   }
 
-  // Desacople: Meta requiere 200 en <20s. Procesamos en background con `after`
-  // para responder inmediatamente y evitar timeouts / desuscripciones.
+  // Queue persistente: guardamos el evento antes de responder. Si after() falla
+  // o el proceso muere, el cron /api/inbox/process-webhook-events lo reintenta.
+  const admin = createAdminClient("smarttalk");
+  const { data: eventRow, error: insertError } = await admin
+    .from("webhook_events")
+    .insert({
+      channel,
+      payload: payload as unknown as Record<string, unknown>,
+      status: "pending",
+    })
+    .select("id")
+    .single();
+
+  if (insertError || !eventRow) {
+    console.error(`[meta-webhook:${channel}] no pude persistir evento`, insertError?.message);
+    return NextResponse.json({ error: "queue_write_failed", channel }, { status: 500 });
+  }
+
+  const eventId = eventRow.id as string;
+
+  // Desacople: Meta requiere 200 en <20s. Procesamos en background con `after`.
   after(async () => {
-    try {
-      await persistMessengerLikeWebhook(channel, payload);
-    } catch (err) {
-      console.error(`[meta-webhook:${channel}] background processing failed`, err);
-    }
+    await processWebhookEventRow({ id: eventId, channel, payload });
   });
 
-  return NextResponse.json({ received: true, channel, queued: true });
+  return NextResponse.json({ received: true, channel, queued: true, eventId });
+}
+
+/**
+ * Procesa una fila de webhook_events y actualiza su estado.
+ * Diseñado para ser llamado desde receiveMetaWebhook (fresh) y desde
+ * /api/inbox/process-webhook-events (retry de fila persistida).
+ */
+export async function processWebhookEventRow(event: {
+  id: string;
+  channel: string;
+  payload: MetaWebhookPayload;
+}): Promise<{ ok: boolean; processed?: number; error?: string }> {
+  const admin = createAdminClient("smarttalk");
+  const channel = event.channel as MetaChannelKind;
+
+  try {
+    const processed = await persistMessengerLikeWebhook(channel, event.payload);
+    await admin
+      .from("webhook_events")
+      .update({ status: "processed", processed_at: new Date().toISOString() })
+      .eq("id", event.id);
+    return { ok: true, processed };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : "unknown";
+    console.error(`[meta-webhook:${channel}] processing failed`, errorMsg);
+    // Incrementar attempts + guardar último error. RPC no disponible → SELECT actual + UPDATE.
+    const { data: current } = await admin
+      .from("webhook_events")
+      .select("attempts")
+      .eq("id", event.id)
+      .single();
+    await admin
+      .from("webhook_events")
+      .update({
+        status: "failed",
+        attempts: (current?.attempts ?? 0) + 1,
+        last_error: errorMsg.slice(0, 500),
+      })
+      .eq("id", event.id);
+    return { ok: false, error: errorMsg };
+  }
 }
