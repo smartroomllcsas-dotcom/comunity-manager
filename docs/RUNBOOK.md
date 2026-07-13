@@ -292,7 +292,7 @@ Todos en Vercel `production` env. Backup local en `web/.env.production` (excluid
 
 ---
 
-## 10. Historial de sprints de hardening (2026-07-12)
+## 10. Historial de sprints de hardening (2026-07-12 → 2026-07-13)
 
 - **Sprint 1:** bcrypt passwords, HttpOnly cookies, HMAC webhooks Meta, bucket privado + signed URLs, rate limit login, whitelist tokens.
 - **Sprint 2:** cifrado AES-256-GCM, RLS restrictivo, UNIQUE indexes idempotencia, `after()` desacople Meta, Realtime frontend, Zod messages/send.
@@ -302,3 +302,82 @@ Todos en Vercel `production` env. Backup local en `web/.env.production` (excluid
 - **Sprint 6:** refactor MessageInput 676→493 líneas (`useVoiceRecorder`, `TemplateBanner`, `EmojiStickerPicker`), fix MCP supabase-selfhosted, paginación mensajes Instagram.
 - **Sprint 7:** `next.config` remotePatterns, paginación `fetchMessengerParticipantIdentity`, cap CONVERSATION 100 con log de warning.
 - **Sprint 8:** `/api/health` con métricas de queue, alertas dead-letter con cooldown, runbook.
+- **Sprint 9:** error boundaries, AttachmentBar refactor (493→375), editor variables plantilla, cursor persistente conversaciones Instagram.
+- **Sprint 10:** editor HEADER plantilla (TEXT/IMAGE/VIDEO/DOCUMENT), alertas canales en error, Vercel Analytics, runbook rotación Meta.
+- **Sprint 11:** retention webhook_events, queue-stall alerts, BUTTONS quick_reply editor, rate limit DB-backed.
+- **Sprint 12:** retention rate_limit_hits, URL button vars, cursor per-conversation, queue-stats endpoint.
+- **Sprint 13:** retry manual dead letters, HEADER LOCATION editor, bulk archive, rate limit whitelist IPs.
+- **Sprint 14:** token expiry alerts, tests TemplateBanner (30 casos), cache /api/health, bulk-close conversations.
+- **Sprint 15:** tests lib/rate-limit (12 casos), cleanup orphaned sync_state, inbox loading skeletons, OpenAPI stub.
+- **Sprint 16:** auto-close idle, org-metrics, cache queue-stats, MAX_ATTEMPTS via env.
+- **Sprint 17:** 404 page, robots.ts + sitemap.ts, contact search.
+- **Sprint 18:** CSV export mensajes, contact tags (single), security headers globales.
+- **Sprint 19:** bulk-tag contacts, health degradedReasons, runbook §11 con endpoints.
+
+---
+
+## 11. Endpoints internos (Bearer $CRON_SECRET)
+
+Todos aceptan `Authorization: Bearer $CRON_SECRET` o header `X-Cron-Secret`. Los ejemplos usan `$CRON` como abreviatura.
+
+### Monitoreo
+
+**`GET /api/health`** (público, sin auth). Cache in-memory 15s + edge 15s.
+```bash
+curl https://www.comunitymanager.io/api/health
+```
+
+**`GET /api/inbox/queue-stats`** — breakdown por canal, throughput, latencia, top errores. Cache 30s.
+```bash
+curl -H "Authorization: Bearer $CRON" https://www.comunitymanager.io/api/inbox/queue-stats
+```
+
+**`GET /api/inbox/org-metrics?organization_id=UUID`** — conversations por status, unread total, messages_last_24h, agents online.
+
+### Webhook queue
+
+**`GET|POST /api/inbox/process-webhook-events`** — cron cada 2 min. Procesa pending/failed<3, retention 7d, alertas dead + stall.
+
+**`POST /api/inbox/webhook-events/{id}/retry`** — reset attempts=0 y status=pending para un evento.
+
+**`POST /api/inbox/webhook-events/retry-all-dead`** — bulk retry de todos los dead (failed && attempts >= 3).
+
+### Housekeeping
+
+**`GET|POST /api/inbox/archive-old?days=90`** — cierra conversations resolved >N días. Cron 4:30 AM.
+
+**`GET|POST /api/inbox/auto-close-idle?days=30`** — cierra conversations open sin unread y updated_at >N días. Cron 5 AM.
+
+**`POST /api/inbox/conversations/bulk-close`** body `{organization_id, status_from, older_than_days}` — cierra en batch.
+
+**`POST /api/inbox/cleanup-orphaned-state`** — borra rows de inbox_sync_state cuya org ya no existe.
+
+### Contactos
+
+**`GET /api/inbox/contacts/search?organization_id=UUID&q=texto`** — ilike sobre name+wa_id, top 25.
+
+**`POST /api/inbox/contacts/{id}/tags`** body `{add?, remove?}` — modifica el array tags del contacto.
+
+**`POST /api/inbox/contacts/bulk-tag`** body `{organization_id, contact_ids, add?, remove?}` — hasta 500 contactos.
+
+### Exports
+
+**`GET /api/inbox/conversations/{id}/export.csv`** — CSV con todos los mensajes de la conversación (cap 10k).
+
+### Cron tokens
+
+**`GET /api/cron/refresh-tokens`** — cron 3 AM. Renueva tokens Meta expiring, alertas de canales error, alertas de tokens con expiración <3d.
+
+---
+
+## 12. Variables de entorno relevantes
+
+Además de las de §8:
+
+| Var | Default | Uso |
+|---|---|---|
+| `TOKEN_ENCRYPTION_KEY` | (required) | AES-256-GCM tokens Meta |
+| `CRON_SECRET` | (required) | Bearer auth para endpoints internos y Vercel Cron |
+| `WEBHOOK_ALERT_URL` | opcional | Slack/Discord/n8n para dead letter + stall + error + expiry alerts |
+| `WEBHOOK_MAX_ATTEMPTS` | `3` | Threshold dead-letter; clamped 1..10 |
+| `RATE_LIMIT_WHITELIST` | vacío | IPs exentas del rate limit (comma-separated) |

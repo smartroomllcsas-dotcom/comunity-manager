@@ -94,13 +94,15 @@ export async function GET() {
     return NextResponse.json(body, { status: 503 });
   }
 
-  const degraded =
-    (queueDepth.oldestPendingAgeSec ?? 0) > 300 || // pending >5 min
-    queueDepth.dead > 0;
+  const degradedReasons: string[] = [];
+  if ((queueDepth.oldestPendingAgeSec ?? 0) > 300) degradedReasons.push("queue_stall_pending_over_5m");
+  if (queueDepth.dead > 0) degradedReasons.push("dead_letters_present");
+  const degraded = degradedReasons.length > 0;
 
   const body = {
     ok: !degraded,
     degraded,
+    degradedReasons,
     ts: nowIso,
     database: { ok: databaseOk },
     webhookEvents: queueDepth,
