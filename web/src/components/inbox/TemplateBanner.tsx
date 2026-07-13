@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useMemo, useState } from "react";
 import { FileCheck2, Send } from "lucide-react";
 import type { MessageTemplate } from "@/types/database";
 
@@ -20,12 +21,50 @@ export function templateHasVariables(template: InboxTemplate) {
   return /\{\{\s*\d+\s*\}\}/.test(getTemplateBodyPreview(template));
 }
 
+/** Extrae los índices únicos de variables del body ("{{1}}", "{{2}}", …) en orden ascendente. */
+export function extractTemplateVariableIndices(template: InboxTemplate): number[] {
+  const body = getTemplateBodyPreview(template);
+  const found = new Set<number>();
+  const regex = /\{\{\s*(\d+)\s*\}\}/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(body)) !== null) {
+    const idx = Number(match[1]);
+    if (Number.isInteger(idx) && idx > 0) found.add(idx);
+  }
+  return [...found].sort((a, b) => a - b);
+}
+
+/** Reemplaza las variables del body con los valores del usuario para la vista previa. */
+export function renderTemplatePreview(template: InboxTemplate, values: Record<number, string>) {
+  const body = getTemplateBodyPreview(template);
+  return body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, raw: string) => {
+    const idx = Number(raw);
+    const value = values[idx];
+    return value && value.trim() ? value : `{{${idx}}}`;
+  });
+}
+
+/** Construye el payload `components` esperado por la WhatsApp Cloud API para variables de BODY. */
+export function buildTemplateBodyComponents(
+  indices: number[],
+  values: Record<number, string>
+): unknown[] {
+  if (indices.length === 0) return [];
+  return [
+    {
+      type: "body",
+      parameters: indices.map((idx) => ({ type: "text", text: values[idx] ?? "" })),
+    },
+  ];
+}
+
 type TemplateBannerProps = {
   templates: InboxTemplate[];
   templatesLoading: boolean;
   selectedTemplateId: string;
   onSelectedTemplateChange: (id: string) => void;
-  onSend: () => void;
+  /** Se invoca al enviar. Recibe los components ya armados con los valores del usuario. */
+  onSend: (components: unknown[]) => void;
   sending: boolean;
 };
 
@@ -38,7 +77,26 @@ export function TemplateBanner({
   sending,
 }: TemplateBannerProps) {
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
-  const hasVariables = selectedTemplate ? templateHasVariables(selectedTemplate) : false;
+  const variableIndices = useMemo(
+    () => (selectedTemplate ? extractTemplateVariableIndices(selectedTemplate) : []),
+    [selectedTemplate]
+  );
+  const [values, setValues] = useState<Record<number, string>>({});
+
+  // Reset valores cuando cambia la plantilla seleccionada.
+  useEffect(() => {
+    setValues({});
+  }, [selectedTemplateId]);
+
+  const allVariablesFilled = variableIndices.every((idx) => (values[idx] ?? "").trim().length > 0);
+  const canSend = !!selectedTemplate && allVariablesFilled && !sending;
+
+  const previewText = selectedTemplate ? renderTemplatePreview(selectedTemplate, values) : "";
+
+  const handleSend = () => {
+    if (!selectedTemplate) return;
+    onSend(buildTemplateBodyComponents(variableIndices, values));
+  };
 
   return (
     <div className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
@@ -72,8 +130,8 @@ export function TemplateBanner({
               ))}
             </select>
             <button
-              onClick={onSend}
-              disabled={!selectedTemplate || sending || hasVariables}
+              onClick={handleSend}
+              disabled={!canSend}
               className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-lg bg-amber-500 px-4 text-sm font-semibold text-[#0d1117] transition-colors hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
               type="button"
             >
@@ -81,15 +139,35 @@ export function TemplateBanner({
               Enviar plantilla
             </button>
           </div>
+          {selectedTemplate && variableIndices.length > 0 && (
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {variableIndices.map((idx) => (
+                <label key={idx} className="flex flex-col gap-1">
+                  <span className="text-[10px] uppercase tracking-[0.15em] text-amber-200/70">
+                    Variable {`{{${idx}}}`}
+                  </span>
+                  <input
+                    value={values[idx] ?? ""}
+                    onChange={(event) =>
+                      setValues((prev) => ({ ...prev, [idx]: event.target.value }))
+                    }
+                    disabled={sending}
+                    placeholder={`Valor para {{${idx}}}`}
+                    className="min-h-[34px] rounded-md border border-[#2d333b] bg-[#0d1117] px-3 text-sm text-white outline-none focus:border-amber-400/70"
+                  />
+                </label>
+              ))}
+            </div>
+          )}
           {selectedTemplate && (
             <div className="mt-2 rounded-lg border border-[#2d333b] bg-[#0d1117]/80 p-2">
               <p className="text-[11px] uppercase tracking-[0.18em] text-[#8b949e]">Vista previa</p>
-              <p className="mt-1 text-xs leading-relaxed text-[#c9d1d9]">
-                {getTemplateBodyPreview(selectedTemplate)}
+              <p className="mt-1 text-xs leading-relaxed text-[#c9d1d9] whitespace-pre-wrap">
+                {previewText}
               </p>
-              {hasVariables && (
-                <p className="mt-2 text-xs text-red-300">
-                  Esta plantilla tiene variables. Primero hay que configurar los campos dinamicos antes de enviarla desde el inbox.
+              {variableIndices.length > 0 && !allVariablesFilled && (
+                <p className="mt-2 text-xs text-amber-300/80">
+                  Completa todas las variables antes de enviar.
                 </p>
               )}
             </div>

@@ -125,6 +125,15 @@ async function graphGetPaginated<T>(
   accessToken: string,
   maxPages: number
 ): Promise<T[]> {
+  const { items } = await graphGetPaginatedWithCursor<T>(path, accessToken, maxPages);
+  return items;
+}
+
+async function graphGetPaginatedWithCursor<T>(
+  path: string,
+  accessToken: string,
+  maxPages: number
+): Promise<{ items: T[]; nextCursor: string | null }> {
   const collected: T[] = [];
   let nextPath: string | null = path;
   for (let page = 0; page < maxPages && nextPath; page++) {
@@ -135,7 +144,43 @@ async function graphGetPaginated<T>(
     if (Array.isArray(response.data)) collected.push(...response.data);
     nextPath = response.paging?.next || null;
   }
-  return collected;
+  // Si aún hay next tras agotar maxPages, es el cursor para el próximo sync.
+  return { items: collected, nextCursor: nextPath };
+}
+
+const INSTAGRAM_SYNC_RESOURCE = "instagram_inbox";
+
+type InstagramSyncMetadata = {
+  conversationsCursor?: string | null;
+};
+
+async function getInstagramSyncMetadata(organizationId: string): Promise<InstagramSyncMetadata> {
+  const admin = createAdminClient("smarttalk");
+  const { data } = await admin
+    .from("inbox_sync_state")
+    .select("metadata")
+    .eq("organization_id", organizationId)
+    .eq("resource", INSTAGRAM_SYNC_RESOURCE)
+    .maybeSingle();
+  return (data?.metadata as InstagramSyncMetadata) ?? {};
+}
+
+async function saveInstagramSyncMetadata(
+  organizationId: string,
+  patch: InstagramSyncMetadata
+) {
+  const admin = createAdminClient("smarttalk");
+  const current = await getInstagramSyncMetadata(organizationId);
+  const merged = { ...current, ...patch };
+  await admin.from("inbox_sync_state").upsert(
+    {
+      organization_id: organizationId,
+      resource: INSTAGRAM_SYNC_RESOURCE,
+      metadata: merged,
+      last_synced_at: new Date().toISOString(),
+    },
+    { onConflict: "organization_id,resource" }
+  );
 }
 
 function pickInstagramContact(
@@ -385,14 +430,23 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
         continue;
       }
 
-      const conversationList = await graphGetPaginated<InstagramConversation>(
-        `${socialAccount.page_id}/conversations?platform=instagram&fields=id,updated_time,participants&limit=${CONVERSATION_LIMIT}`,
+      // Cursor persistente: si el sync anterior no llegó al final, retomamos desde ahí.
+      const syncMeta = await getInstagramSyncMetadata(organizationId);
+      const startPath = syncMeta.conversationsCursor
+        || `${socialAccount.page_id}/conversations?platform=instagram&fields=id,updated_time,participants&limit=${CONVERSATION_LIMIT}`;
+
+      const { items: conversationList, nextCursor } = await graphGetPaginatedWithCursor<InstagramConversation>(
+        startPath,
         pageToken,
         CONVERSATION_MAX_PAGES
       );
-      if (conversationList.length >= CONVERSATION_LIMIT * CONVERSATION_MAX_PAGES) {
-        console.warn(
-          `[instagram-sync] channel ${channel.id} alcanzó el cap de ${CONVERSATION_LIMIT * CONVERSATION_MAX_PAGES} conversaciones; el historial más antiguo requiere sync con cursor persistente.`
+
+      // Persistimos el cursor. null cuando llegamos al final del histórico.
+      await saveInstagramSyncMetadata(organizationId, { conversationsCursor: nextCursor });
+
+      if (nextCursor) {
+        console.info(
+          `[instagram-sync] channel ${channel.id} paró en ${conversationList.length} conversaciones; próximo sync retoma con cursor.`
         );
       }
 

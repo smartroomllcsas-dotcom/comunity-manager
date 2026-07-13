@@ -5,9 +5,7 @@ import {
   Image as ImageIcon,
   Mic,
   Music2,
-  Paperclip,
   Send,
-  Smile,
   Square,
   Sticker,
   Video,
@@ -16,19 +14,12 @@ import {
 import { cn } from "@/lib/utils";
 import { AIAssistButton, AIAssistPreview } from "./AIAssist";
 import { EmojiGrid, StickerGrid, emojiToStickerFilename, emojiToTwemojiUrl } from "./EmojiStickerPicker";
-import { TemplateBanner, templateHasVariables, type InboxTemplate } from "./TemplateBanner";
+import { TemplateBanner, type InboxTemplate } from "./TemplateBanner";
+import { AttachmentBar, type ComposerAttachment } from "./AttachmentBar";
+import { uploadChatMedia } from "./uploadChatMedia";
 import { useVoiceRecorder } from "./useVoiceRecorder";
 import { useTemplates } from "@/hooks/useTemplates";
 import type { Message } from "@/types/database";
-
-type AttachmentKind = "image" | "video" | "audio" | "document" | "sticker";
-
-type ComposerAttachment = {
-  kind: AttachmentKind;
-  url: string;
-  filename: string;
-  mimeType: string;
-};
 
 interface MessageInputProps {
   onSend: (payload: {
@@ -62,8 +53,6 @@ export function MessageInput({
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const audioInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // AI Assist state
@@ -94,42 +83,6 @@ export function MessageInput({
     }
   }, [text]);
 
-  const uploadAttachment = useCallback(async (file: File): Promise<ComposerAttachment> => {
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const res = await fetch("/api/uploads/chat-media", {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({}));
-      throw new Error(error.error || "No se pudo subir el archivo");
-    }
-
-    const data = (await res.json()) as {
-      url: string;
-      fileName: string;
-      mimeType: string;
-    };
-
-    const kind: AttachmentKind = data.mimeType.startsWith("image/")
-      ? "image"
-      : data.mimeType.startsWith("video/")
-        ? "video"
-        : data.mimeType.startsWith("audio/")
-          ? "audio"
-          : "document";
-
-    return {
-      kind,
-      url: data.url,
-      filename: data.fileName,
-      mimeType: data.mimeType,
-    };
-  }, []);
-
   const uploadRecordedAudio = useCallback(
     async (blob: Blob, mimeType: string) => {
       const extension = mimeType.includes("ogg")
@@ -145,13 +98,13 @@ export function MessageInput({
       setUploading(true);
       setInputError(null);
       try {
-        const uploaded = await uploadAttachment(file);
+        const uploaded = await uploadChatMedia(file);
         setAttachment(uploaded);
       } finally {
         setUploading(false);
       }
     },
-    [uploadAttachment]
+    []
   );
 
   const {
@@ -168,18 +121,6 @@ export function MessageInput({
     onAudioRecorded: uploadRecordedAudio,
     onError: setInputError,
   });
-
-  function handlePaperclipClick() {
-    setEmojiPickerOpen(false);
-    setStickerPickerOpen(false);
-    fileInputRef.current?.click();
-  }
-
-  function handleAudioClick() {
-    setEmojiPickerOpen(false);
-    setStickerPickerOpen(false);
-    audioInputRef.current?.click();
-  }
 
   function insertEmoji(emoji: string) {
     const textarea = textareaRef.current;
@@ -211,49 +152,31 @@ export function MessageInput({
     setEmojiPickerOpen(false);
   }
 
-  async function handleFileChange(file: File | null) {
-    if (!file || disabled || sending || uploading) return;
-    setUploading(true);
-    setInputError(null);
+  async function handleTemplateSend(components: unknown[]) {
+    if (!selectedTemplate) return;
+    setSending(true);
     try {
-      const uploaded = await uploadAttachment(file);
-      setAttachment(uploaded);
-    } catch (error) {
-      console.error(error);
-      const msg = error instanceof Error ? error.message : "No se pudo subir el archivo.";
-      setInputError(msg);
+      await onSend({
+        template: {
+          name: selectedTemplate.name,
+          language: selectedTemplate.language,
+          components,
+        },
+      });
+      setSelectedTemplateId("");
     } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      if (audioInputRef.current) audioInputRef.current.value = "";
+      setSending(false);
+      textareaRef.current?.focus();
     }
   }
 
   async function handleSend() {
-    const trimmed = text.trim();
     if (requiresTemplate) {
-      if (!selectedTemplate) return;
-      if (templateHasVariables(selectedTemplate)) {
-        console.warn("Template requires variables and cannot be sent from the simple picker yet.");
-        return;
-      }
-      setSending(true);
-      try {
-        await onSend({
-          template: {
-            name: selectedTemplate.name,
-            language: selectedTemplate.language,
-            components: [],
-          },
-        });
-        setSelectedTemplateId("");
-      } finally {
-        setSending(false);
-        textareaRef.current?.focus();
-      }
+      // Rama de plantilla la maneja TemplateBanner (que arma components y llama a handleTemplateSend).
       return;
     }
 
+    const trimmed = text.trim();
     if (!trimmed && !attachment) return;
     if (sending || uploading) return;
     setSending(true);
@@ -342,31 +265,33 @@ export function MessageInput({
             templatesLoading={templatesLoading}
             selectedTemplateId={selectedTemplateId}
             onSelectedTemplateChange={setSelectedTemplateId}
-            onSend={handleSend}
+            onSend={handleTemplateSend}
             sending={sending}
           />
         )}
         <div className="flex items-end gap-2">
-          <button
-            onClick={handlePaperclipClick}
-            className="p-2 rounded-md text-[#484f58] hover:text-[#8b949e] hover:bg-[#1a1f2e] transition-colors shrink-0 mb-0.5"
+          <AttachmentBar
             disabled={composerDisabled}
-            title="Adjuntar archivo"
-            type="button"
-          >
-            <Paperclip className="h-4.5 w-4.5" />
-          </button>
-
-          <button
-            onClick={handleAudioClick}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-[#1f6feb]/40 bg-[#0d1117] text-[#7dd3fc] hover:text-white hover:bg-[#1a1f2e] hover:border-[#388bfd] transition-colors shrink-0 mb-0.5"
-            disabled={composerDisabled}
-            title="Adjuntar audio"
-            type="button"
-          >
-            <Music2 className="h-4.5 w-4.5" />
-            <span className="text-xs font-medium">Audio</span>
-          </button>
+            onAttachmentSelected={(a) => {
+              setAttachment(a);
+              setInputError(null);
+            }}
+            onError={setInputError}
+            emojiPickerOpen={emojiPickerOpen}
+            stickerPickerOpen={stickerPickerOpen}
+            onToggleEmojiPicker={() => {
+              setEmojiPickerOpen((open) => !open);
+              setStickerPickerOpen(false);
+            }}
+            onToggleStickerPicker={() => {
+              setStickerPickerOpen((open) => !open);
+              setEmojiPickerOpen(false);
+            }}
+            onBeforeAction={() => {
+              setEmojiPickerOpen(false);
+              setStickerPickerOpen(false);
+            }}
+          />
 
           <button
             onClick={toggleVoiceRecording}
@@ -387,49 +312,6 @@ export function MessageInput({
                 : "Grabar"}
             </span>
           </button>
-
-          <button
-            onClick={() => {
-              setEmojiPickerOpen((open) => !open);
-              setStickerPickerOpen(false);
-            }}
-            className="p-2 rounded-md text-[#f9c74f] hover:text-white hover:bg-[#1a1f2e] transition-colors shrink-0 mb-0.5"
-            disabled={composerDisabled}
-            title="Emojis"
-            type="button"
-          >
-            <Smile className="h-4.5 w-4.5" />
-          </button>
-
-          <button
-            onClick={() => {
-              setStickerPickerOpen((open) => !open);
-              setEmojiPickerOpen(false);
-            }}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-[#6e56cf]/40 bg-[#0d1117] text-[#a371f7] hover:text-white hover:bg-[#1a1f2e] hover:border-[#8b5cf6] transition-colors shrink-0 mb-0.5"
-            disabled={composerDisabled}
-            title="Stickers"
-            type="button"
-          >
-            <Sticker className="h-4.5 w-4.5" />
-            <span className="text-xs font-medium">Stickers</span>
-          </button>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"
-            onChange={(e) => handleFileChange(e.target.files?.[0] || null)}
-          />
-
-          <input
-            ref={audioInputRef}
-            type="file"
-            className="hidden"
-            accept="audio/*"
-            onChange={(e) => handleFileChange(e.target.files?.[0] || null)}
-          />
 
           {hasAI && <AIAssistButton onClick={generateSuggestion} disabled={aiLoading} />}
 
