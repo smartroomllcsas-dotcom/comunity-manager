@@ -39,18 +39,18 @@ function CollapsibleSection({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="border-b border-[#2d333b]">
+    <div className="border-b border-border">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-[#1a1f2e] transition-colors"
+        className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-[var(--surface-interactive)] transition-colors"
       >
         {open ? (
-          <ChevronDown className="h-3 w-3 text-[#484f58] shrink-0" />
+          <ChevronDown className="h-3 w-3 text-muted-foreground/70 shrink-0" />
         ) : (
-          <ChevronRight className="h-3 w-3 text-[#484f58] shrink-0" />
+          <ChevronRight className="h-3 w-3 text-muted-foreground/70 shrink-0" />
         )}
-        <Icon className="h-3 w-3 text-[#484f58] shrink-0" />
-        <span className="text-[11px] font-semibold text-[#8b949e] uppercase tracking-wider">
+        <Icon className="h-3 w-3 text-muted-foreground/70 shrink-0" />
+        <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
           {title}
         </span>
       </button>
@@ -89,15 +89,19 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
   const displayName = contact.name || contact.wa_id;
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <aside
+      className="flex flex-col h-full overflow-hidden animate-in slide-in-from-right-2 fade-in-0 duration-200"
+      aria-label="Panel de contacto"
+    >
       {/* Header with close button */}
-      <div className="h-12 min-h-[48px] flex items-center justify-between px-4 border-b border-[#2d333b]">
-        <span className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">
+      <div className="h-12 min-h-[48px] flex items-center justify-between px-4 border-b border-border">
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           Contacto
         </span>
         <button
           onClick={() => setContactPanelOpen(false)}
-          className="p-1 rounded-md text-[#484f58] hover:text-white hover:bg-[#1a1f2e] transition-colors"
+          aria-label="Cerrar panel de contacto"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-[var(--surface-interactive)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           <X className="h-4 w-4" />
         </button>
@@ -106,7 +110,7 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         {/* Contact Header */}
-        <div className="flex flex-col items-center text-center px-4 py-5 border-b border-[#2d333b]">
+        <div className="flex flex-col items-center text-center px-4 py-5 border-b border-border">
           <ContactAvatar
             name={displayName}
             photoUrl={contact.profile_picture_url}
@@ -116,7 +120,7 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
           <h3 className="font-semibold text-white text-sm">
             {contact.name || "Sin nombre"}
           </h3>
-          <p className="text-xs text-[#8b949e] flex items-center gap-1 mt-1">
+          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
             <Phone className="h-3 w-3" />
             {contact.wa_id}
           </p>
@@ -126,24 +130,24 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
         <CollapsibleSection title="Informacion" icon={FileText}>
           <div className="space-y-2">
             <div>
-              <label className="text-[10px] text-[#484f58] uppercase tracking-wider">
+              <label className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">
                 Nombre
               </label>
-              <p className="text-xs text-[#c9d1d9]">{contact.name || "Sin nombre"}</p>
+              <p className="text-xs text-foreground/85">{contact.name || "Sin nombre"}</p>
             </div>
             <div>
-              <label className="text-[10px] text-[#484f58] uppercase tracking-wider">
+              <label className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">
                 WhatsApp
               </label>
-              <p className="text-xs text-[#c9d1d9]">{contact.wa_id}</p>
+              <p className="text-xs text-foreground/85">{contact.wa_id}</p>
             </div>
             {contact.custom_fields &&
               Object.entries(contact.custom_fields).map(([key, value]) => (
                 <div key={key}>
-                  <label className="text-[10px] text-[#484f58] uppercase tracking-wider">
+                  <label className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">
                     {key}
                   </label>
-                  <p className="text-xs text-[#c9d1d9]">{value}</p>
+                  <p className="text-xs text-foreground/85">{value}</p>
                 </div>
               ))}
           </div>
@@ -162,7 +166,7 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
                 </span>
               ))
             ) : (
-              <span className="text-[11px] text-[#484f58]">Sin etiquetas</span>
+              <span className="text-[11px] text-muted-foreground/70">Sin etiquetas</span>
             )}
           </div>
         </CollapsibleSection>
@@ -172,7 +176,7 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
           <select
             value={conversation.assigned_agent_id || "unassigned"}
             onChange={(e) => handleAssign(e.target.value)}
-            className="w-full h-8 rounded-md bg-[#0d1117] border border-[#2d333b] text-xs text-[#c9d1d9] px-2 focus:outline-none focus:border-[#388bfd] transition-colors"
+            className="w-full h-8 rounded-md bg-[var(--surface-base)] border border-border text-xs text-foreground/85 px-2 focus:outline-none focus:border-[#388bfd] transition-colors"
           >
             <option value="unassigned">Sin asignar</option>
             {agents?.map((a) => (
@@ -188,7 +192,7 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
           <select
             value={conversation.status}
             onChange={(e) => handleStatusChange(e.target.value)}
-            className="w-full h-8 rounded-md bg-[#0d1117] border border-[#2d333b] text-xs text-[#c9d1d9] px-2 focus:outline-none focus:border-[#388bfd] transition-colors"
+            className="w-full h-8 rounded-md bg-[var(--surface-base)] border border-border text-xs text-foreground/85 px-2 focus:outline-none focus:border-[#388bfd] transition-colors"
           >
             <option value="open">Abierta</option>
             <option value="pending">Pendiente</option>
@@ -210,7 +214,7 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
                       : "bg-[#30363d]"
                   )}
                 />
-                <span className="text-[9px] text-[#484f58]">{stage}</span>
+                <span className="text-[9px] text-muted-foreground/70">{stage}</span>
               </div>
             ))}
           </div>
@@ -220,15 +224,15 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
         <CollapsibleSection title="Notas" icon={StickyNote} defaultOpen={false}>
           <textarea
             placeholder="Agregar una nota..."
-            className="w-full h-16 rounded-md bg-[#0d1117] border border-[#2d333b] text-xs text-[#c9d1d9] placeholder:text-[#484f58] px-2 py-1.5 resize-none focus:outline-none focus:border-[#388bfd] transition-colors"
+            className="w-full h-16 rounded-md bg-[var(--surface-base)] border border-border text-xs text-foreground/85 placeholder:text-muted-foreground/70 px-2 py-1.5 resize-none focus:outline-none focus:border-[#388bfd] transition-colors"
           />
         </CollapsibleSection>
 
         {/* Conversation Metadata */}
         <div className="px-4 py-3 space-y-1.5">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] text-[#484f58]">Creado</span>
-            <span className="text-[10px] text-[#8b949e]">
+            <span className="text-[10px] text-muted-foreground/70">Creado</span>
+            <span className="text-[10px] text-muted-foreground">
               {format(new Date(conversation.created_at), "dd MMM yyyy HH:mm", {
                 locale: es,
               })}
@@ -236,8 +240,8 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
           </div>
           {conversation.resolved_at && (
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-[#484f58]">Resuelto</span>
-              <span className="text-[10px] text-[#8b949e]">
+              <span className="text-[10px] text-muted-foreground/70">Resuelto</span>
+              <span className="text-[10px] text-muted-foreground">
                 {format(
                   new Date(conversation.resolved_at),
                   "dd MMM yyyy HH:mm",
@@ -248,8 +252,8 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
           )}
           {contact.last_message_at && (
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-[#484f58]">Ultimo mensaje</span>
-              <span className="text-[10px] text-[#8b949e]">
+              <span className="text-[10px] text-muted-foreground/70">Ultimo mensaje</span>
+              <span className="text-[10px] text-muted-foreground">
                 {format(
                   new Date(contact.last_message_at),
                   "dd MMM yyyy HH:mm",
@@ -260,6 +264,6 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
           )}
         </div>
       </div>
-    </div>
+    </aside>
   );
 }

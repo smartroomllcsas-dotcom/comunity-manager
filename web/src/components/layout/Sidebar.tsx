@@ -43,10 +43,10 @@ export function Sidebar() {
 
   return (
     <TooltipProvider>
-      <aside className="w-[56px] bg-[#0d1117] flex flex-col h-screen shrink-0 border-r border-[#2d333b]">
+      <aside className="w-[56px] bg-[var(--surface-base)] flex flex-col h-screen shrink-0 border-r border-border">
         {/* Logo */}
-        <div className="flex items-center justify-center h-[56px] border-b border-[#2d333b]">
-          <Link href="/clients" className="flex items-center justify-center w-9 h-9 rounded-lg overflow-hidden border border-[#2d333b] bg-[#1a1f2e]">
+        <div className="flex items-center justify-center h-[56px] border-b border-border">
+          <Link href="/clients" className="flex items-center justify-center w-9 h-9 rounded-lg overflow-hidden border border-border bg-[var(--surface-interactive)]">
             <img
               src="/community-manager-logo.png"
               alt="CommunityAgent"
@@ -66,21 +66,23 @@ export function Sidebar() {
                   render={
                     <Link
                       href={item.href}
+                      aria-label={item.label}
+                      aria-current={isActive ? "page" : undefined}
                       className={cn(
-                        "relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-150",
+                        "relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                         isActive
-                          ? "bg-[#1a1f2e] text-[#3b82f6]"
-                          : "text-[#7d8590] hover:text-[#e6edf3] hover:bg-[#1a1f2e]/60"
+                          ? "bg-[var(--surface-interactive)] text-primary"
+                          : "text-muted-foreground hover:text-foreground hover:bg-[var(--surface-interactive)]/60"
                       )}
                     />
                   }
                 >
                   {isActive && (
-                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-[#3b82f6] rounded-r-full" />
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-primary rounded-r-full" />
                   )}
-                  <item.icon className="h-[20px] w-[20px]" />
+                  <item.icon className="icon-lg" aria-hidden="true" />
                   {item.badge && (
-                    <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-[#3b82f6]" />
+                    <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-primary" />
                   )}
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
@@ -92,7 +94,7 @@ export function Sidebar() {
         </nav>
 
         {/* Bottom navigation */}
-        <div className="flex flex-col items-center py-3 gap-1 border-t border-[#2d333b]">
+        <div className="flex flex-col items-center py-3 gap-1 border-t border-border">
           {bottomNav.map((item) => {
             const isActive =
               pathname === item.href || pathname.startsWith(item.href + "/");
@@ -102,16 +104,18 @@ export function Sidebar() {
                   render={
                     <Link
                       href={item.href}
+                      aria-label={item.label}
+                      aria-current={isActive ? "page" : undefined}
                       className={cn(
-                        "relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-150",
+                        "relative flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                         isActive
-                          ? "bg-[#1a1f2e] text-[#3b82f6]"
-                          : "text-[#7d8590] hover:text-[#e6edf3] hover:bg-[#1a1f2e]/60"
+                          ? "bg-[var(--surface-interactive)] text-primary"
+                          : "text-muted-foreground hover:text-foreground hover:bg-[var(--surface-interactive)]/60"
                       )}
                     />
                   }
                 >
-                  <item.icon className="h-[20px] w-[20px]" />
+                  <item.icon className="icon-lg" aria-hidden="true" />
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
                   {item.label}
@@ -151,7 +155,7 @@ export function Sidebar() {
                 <div className="flex items-center justify-center w-10 h-10 rounded-lg cursor-pointer text-[#7d8590] hover:text-[#e6edf3]" />
               }
             >
-              <div className="w-7 h-7 rounded-full bg-[#1e2433] border border-[#2d333b] flex items-center justify-center">
+              <div className="w-7 h-7 rounded-full bg-secondary border border-border flex items-center justify-center">
                 <User className="h-3.5 w-3.5" />
               </div>
             </TooltipTrigger>

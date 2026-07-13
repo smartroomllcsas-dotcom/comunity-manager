@@ -29,11 +29,13 @@ export function ConversationItem({ conversation, isSelected, onClick }: Conversa
   return (
     <button
       onClick={onClick}
+      aria-current={isSelected ? "true" : undefined}
+      aria-label={`Conversación con ${displayName}${conversation.unread_count > 0 ? `, ${conversation.unread_count} sin leer` : ""}`}
       className={cn(
-        "w-full flex items-start gap-2.5 px-3 py-2.5 text-left transition-colors relative group",
+        "w-full flex items-start gap-2.5 px-3 py-2.5 text-left transition-colors relative group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-inset",
         isSelected
-          ? "bg-[#1a1f2e] border-l-2 border-l-[#388bfd]"
-          : "hover:bg-[#1a1f2e]/50 border-l-2 border-l-transparent"
+          ? "bg-[var(--surface-interactive)] border-l-2 border-l-primary"
+          : "hover:bg-[var(--surface-interactive)]/60 border-l-2 border-l-transparent"
       )}
     >
       {/* Avatar */}
@@ -47,8 +49,11 @@ export function ConversationItem({ conversation, isSelected, onClick }: Conversa
         <ChannelAvatarMark conversation={conversation} />
         {/* Assigned agent mini avatar */}
         {assignedAgent && (
-          <div className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-[#2d333b] border border-[#161b22] flex items-center justify-center">
-            <span className="text-[7px] font-bold text-[#8b949e]">
+          <div
+            className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-border border border-[var(--surface-elevated)] flex items-center justify-center"
+            aria-label={`Asignado a ${assignedAgent.name || "agente"}`}
+          >
+            <span className="text-[7px] font-bold text-muted-foreground">
               {assignedAgent.name?.[0]?.toUpperCase() || "A"}
             </span>
           </div>
@@ -61,7 +66,7 @@ export function ConversationItem({ conversation, isSelected, onClick }: Conversa
           <div className="flex items-center gap-1.5 min-w-0">
             <span className={cn(
               "text-[13px] truncate",
-              conversation.unread_count > 0 ? "font-semibold text-white" : "font-medium text-[#c9d1d9]"
+              conversation.unread_count > 0 ? "font-semibold text-foreground" : "font-medium text-foreground/85"
             )}>
               {displayName}
             </span>
@@ -69,9 +74,9 @@ export function ConversationItem({ conversation, isSelected, onClick }: Conversa
           </div>
           <div className="flex items-center gap-1 shrink-0">
             {isSnoozed && (
-              <Clock className="h-3 w-3 text-blue-400" />
+              <Clock className="icon-xs text-blue-400" aria-label="Pospuesta" />
             )}
-            <span className="text-[10px] text-[#484f58] tabular-nums">
+            <span className="text-[10px] text-muted-foreground tabular-nums">
               {formatTimestamp(conversation.updated_at)}
             </span>
           </div>
@@ -79,12 +84,15 @@ export function ConversationItem({ conversation, isSelected, onClick }: Conversa
         <div className="flex items-center justify-between mt-0.5 gap-2">
           <p className={cn(
             "text-xs truncate",
-            conversation.unread_count > 0 ? "text-[#8b949e]" : "text-[#484f58]"
+            conversation.unread_count > 0 ? "text-muted-foreground" : "text-muted-foreground/70"
           )}>
             {conversation.last_message_preview || "Sin mensajes"}
           </p>
           {conversation.unread_count > 0 && (
-            <span className="h-[18px] min-w-[18px] px-1 rounded-full bg-[#388bfd] text-white text-[10px] font-semibold flex items-center justify-center shrink-0">
+            <span
+              className="h-[18px] min-w-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-semibold flex items-center justify-center shrink-0"
+              aria-label={`${conversation.unread_count} sin leer`}
+            >
               {conversation.unread_count}
             </span>
           )}
