@@ -2,7 +2,10 @@
 // Envía a WEBHOOK_ALERT_URL (Slack/Discord/n8n webhook, formato genérico JSON).
 import { createAdminClient } from "@/lib/supabase/admin";
 
-const DEAD_LETTER_ATTEMPTS = 3;
+const DEAD_LETTER_ATTEMPTS = Math.min(
+  Math.max(Number(process.env.WEBHOOK_MAX_ATTEMPTS) || 3, 1),
+  10
+);
 const ALERT_COOLDOWN_MS = 15 * 60 * 1000; // 15 min entre alertas para no spammear
 const STALL_THRESHOLD_SEC = 5 * 60; // pending más viejo que 5 min = queue stall
 

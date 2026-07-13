@@ -7,7 +7,10 @@ import { processWebhookEventRow } from "@/lib/smarttalk/meta-webhook";
 import { alertDeadLettersIfAny, alertQueueStallIfAny } from "@/lib/smarttalk/dead-letter-alert";
 import type { MetaWebhookPayload } from "@/lib/smarttalk/meta-parser";
 
-const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = Math.min(
+  Math.max(Number(process.env.WEBHOOK_MAX_ATTEMPTS) || 3, 1),
+  10
+);
 const BATCH_SIZE = 20;
 const RETENTION_DAYS = 7;
 

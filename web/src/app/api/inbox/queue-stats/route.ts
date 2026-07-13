@@ -1,10 +1,15 @@
 // Endpoint autenticado con breakdown detallado del estado de la cola.
 // Auth: Authorization: Bearer $CRON_SECRET o header X-Cron-Secret.
 // Para dashboards internos (Grafana, BetterStack, etc).
+// Cached por worker durante CACHE_TTL_MS + Cache-Control edge s-maxage=30.
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const DEAD_LETTER_ATTEMPTS = 3;
+const CACHE_TTL_MS = 30_000;
+const EDGE_CACHE_SECONDS = 30;
+
+let cache: { at: number; body: Record<string, unknown> } | null = null;
 
 function isAuthorized(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -14,9 +19,21 @@ function isAuthorized(request: NextRequest) {
   return request.headers.get("x-cron-secret") === secret;
 }
 
+function jsonWithCacheHeaders(body: Record<string, unknown>) {
+  return NextResponse.json(body, {
+    headers: {
+      "Cache-Control": `private, max-age=${EDGE_CACHE_SECONDS}`,
+    },
+  });
+}
+
 export async function GET(request: NextRequest) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (cache && Date.now() - cache.at < CACHE_TTL_MS) {
+    return jsonWithCacheHeaders(cache.body);
   }
 
   const admin = createAdminClient("smarttalk");
@@ -95,7 +112,7 @@ export async function GET(request: NextRequest) {
     .order("attempts", { ascending: false })
     .limit(10);
 
-  return NextResponse.json({
+  const body = {
     ts: nowIso,
     channels: Object.fromEntries(channelBreakdown),
     throughput: {
@@ -111,5 +128,7 @@ export async function GET(request: NextRequest) {
       created_at: row.created_at,
     })),
     responseLatencyMs: Date.now() - startedAt,
-  });
+  };
+  cache = { at: Date.now(), body };
+  return jsonWithCacheHeaders(body);
 }
