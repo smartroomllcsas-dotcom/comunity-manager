@@ -67,7 +67,7 @@ export function AttachmentBar({
           onBeforeAction?.();
           fileInputRef.current?.click();
         }}
-        className="p-2 rounded-md text-[#484f58] hover:text-[#8b949e] hover:bg-[#1a1f2e] transition-colors shrink-0 mb-0.5"
+        className="inline-flex h-10 w-10 items-center justify-center rounded-md text-[#8b949e] hover:text-foreground hover:bg-[var(--surface-interactive)] transition-colors shrink-0 mb-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-40 disabled:cursor-not-allowed"
         disabled={buttonDisabled}
         title="Adjuntar archivo"
         type="button"
@@ -80,7 +80,7 @@ export function AttachmentBar({
           onBeforeAction?.();
           audioInputRef.current?.click();
         }}
-        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-[#1f6feb]/40 bg-[#0d1117] text-[#7dd3fc] hover:text-white hover:bg-[#1a1f2e] hover:border-[#388bfd] transition-colors shrink-0 mb-0.5"
+        className="inline-flex min-h-10 items-center gap-1.5 px-3 py-2 rounded-md border border-[#1f6feb]/40 bg-[var(--surface-base)] text-[#7dd3fc] hover:text-white hover:bg-[var(--surface-interactive)] hover:border-primary transition-colors shrink-0 mb-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-40 disabled:cursor-not-allowed"
         disabled={buttonDisabled}
         title="Adjuntar audio"
         type="button"
@@ -94,14 +94,16 @@ export function AttachmentBar({
           onBeforeAction?.();
           onToggleEmojiPicker();
         }}
-        className={`p-2 rounded-md ${
-          emojiPickerOpen ? "text-white bg-[#1a1f2e]" : "text-[#f9c74f] hover:text-white hover:bg-[#1a1f2e]"
-        } transition-colors shrink-0 mb-0.5`}
+        className={`inline-flex h-10 w-10 items-center justify-center rounded-md transition-colors shrink-0 mb-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-40 disabled:cursor-not-allowed ${
+          emojiPickerOpen ? "text-white bg-[var(--surface-interactive)]" : "text-[#f9c74f] hover:text-white hover:bg-[var(--surface-interactive)]"
+        }`}
         disabled={buttonDisabled}
         title="Emojis"
+        aria-label="Abrir selector de emojis"
+        aria-expanded={emojiPickerOpen}
         type="button"
       >
-        <Smile className="h-4.5 w-4.5" />
+        <Smile className="h-4.5 w-4.5" aria-hidden="true" />
       </button>
 
       <button
@@ -109,16 +111,18 @@ export function AttachmentBar({
           onBeforeAction?.();
           onToggleStickerPicker();
         }}
-        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md border transition-colors shrink-0 mb-0.5 ${
+        className={`inline-flex min-h-10 items-center gap-1.5 px-3 py-2 rounded-md border transition-colors shrink-0 mb-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-40 disabled:cursor-not-allowed ${
           stickerPickerOpen
-            ? "border-[#8b5cf6] bg-[#1a1f2e] text-white"
-            : "border-[#6e56cf]/40 bg-[#0d1117] text-[#a371f7] hover:text-white hover:bg-[#1a1f2e] hover:border-[#8b5cf6]"
+            ? "border-[#8b5cf6] bg-[var(--surface-interactive)] text-white"
+            : "border-[#6e56cf]/40 bg-[var(--surface-base)] text-[#a371f7] hover:text-white hover:bg-[var(--surface-interactive)] hover:border-[#8b5cf6]"
         }`}
         disabled={buttonDisabled}
         title="Stickers"
+        aria-label="Abrir selector de stickers"
+        aria-expanded={stickerPickerOpen}
         type="button"
       >
-        <Sticker className="h-4.5 w-4.5" />
+        <Sticker className="h-4.5 w-4.5" aria-hidden="true" />
         <span className="text-xs font-medium">Stickers</span>
       </button>
 

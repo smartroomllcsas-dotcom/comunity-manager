@@ -296,13 +296,15 @@ export function MessageInput({
           <button
             onClick={toggleVoiceRecording}
             className={cn(
-              "inline-flex items-center gap-1.5 px-3 py-2 rounded-md border transition-colors shrink-0 mb-0.5",
+              "inline-flex min-h-10 items-center gap-1.5 px-3 py-2 rounded-md border transition-colors shrink-0 mb-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-40 disabled:cursor-not-allowed",
               recording
                 ? "border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/15"
-                : "border-[#1f6feb]/40 bg-[#0d1117] text-[#7dd3fc] hover:text-white hover:bg-[#1a1f2e] hover:border-[#388bfd]"
+                : "border-[#1f6feb]/40 bg-[var(--surface-base)] text-[#7dd3fc] hover:text-white hover:bg-[var(--surface-interactive)] hover:border-primary"
             )}
             disabled={composerDisabled}
             title={recording ? "Detener grabación" : "Grabar audio"}
+            aria-label={recording ? "Detener grabación de audio" : "Iniciar grabación de audio"}
+            aria-pressed={recording}
             type="button"
           >
             {recording ? <Square className="h-4.5 w-4.5" /> : <Mic className="h-4.5 w-4.5" />}
@@ -353,7 +355,8 @@ export function MessageInput({
           <button
             onClick={handleSend}
             disabled={requiresTemplate || (!text.trim() && !attachment) || sending || uploading || disabled}
-            className="p-2 rounded-lg bg-[#4f46e5] text-white hover:bg-[#6366f1] disabled:opacity-30 disabled:hover:bg-[#4f46e5] transition-colors shrink-0 mb-0.5"
+            aria-label="Enviar mensaje"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[#4f46e5] text-white hover:bg-[#6366f1] disabled:opacity-30 disabled:hover:bg-[#4f46e5] transition-colors shrink-0 mb-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <Send className="h-4 w-4" />
           </button>

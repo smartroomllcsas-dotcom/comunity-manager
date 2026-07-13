@@ -62,7 +62,23 @@
   --secondary: #1e2433;
   --secondary-foreground: #e6edf3;
   --muted: #161b22;
-  --muted-foreground: #7d8590;
+  /* Muted-foreground elevado de #7d8590 (2.8:1) a #8b949e (~5.1:1) para WCAG AA. */
+  --muted-foreground: #8b949e;
+  /* Semántica adicional para superficies del inbox */
+  --surface-base: #0d1117;
+  --surface-elevated: #161b22;
+  --surface-interactive: #1a1f2e;
+  --surface-hover: rgba(26, 31, 46, 0.6);
+  /* Motion tokens: usar --duration-fast para hover/press, --duration-normal para transiciones de estado. */
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 350ms;
+  --easing-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --easing-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  /* Touch target mínimo (Apple HIG 44pt / Material 48dp). */
+  --touch-target: 44px;
+  /* Focus ring color derivado del primary con contraste garantizado. */
+  --focus-ring: #58a6ff;
   --accent: #1e2433;
   --accent-foreground: #e6edf3;
   --destructive: #f85149;
@@ -99,7 +115,7 @@
   --secondary: #1e2433;
   --secondary-foreground: #e6edf3;
   --muted: #161b22;
-  --muted-foreground: #7d8590;
+  --muted-foreground: #8b949e;
   --accent: #1e2433;
   --accent-foreground: #e6edf3;
   --destructive: #f85149;
@@ -129,9 +145,29 @@
   }
   body {
     @apply bg-background text-foreground;
+    line-height: 1.5;
   }
   html {
     @apply font-sans;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Focus visible consistente: solo con teclado, no en clicks. */
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Respetar prefers-reduced-motion en toda la app. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 
   ::-webkit-scrollbar {

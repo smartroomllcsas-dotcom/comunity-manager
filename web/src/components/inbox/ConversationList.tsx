@@ -2,6 +2,7 @@
 import { useInboxStore } from "@/stores/inbox";
 import { ConversationFilters } from "./ConversationFilters";
 import { ConversationItem } from "./ConversationItem";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Loader2, Inbox } from "lucide-react";
 import type { Conversation } from "@/types/database";
 
@@ -19,10 +20,13 @@ export function ConversationList({ conversations = [], isLoading = false }: Conv
   return (
     <>
       {/* Header */}
-      <div className="h-12 min-h-[48px] flex items-center justify-between px-4 border-b border-[#2d333b]">
-        <h2 className="text-sm font-semibold text-white">Bandeja de entrada</h2>
+      <div className="h-12 min-h-[48px] flex items-center justify-between px-4 border-b border-border">
+        <h2 className="text-sm font-semibold text-foreground">Bandeja de entrada</h2>
         {openCount > 0 && (
-          <span className="text-[10px] font-medium bg-[#388bfd]/15 text-[#58a6ff] px-1.5 py-0.5 rounded-full">
+          <span
+            className="text-[10px] font-medium bg-primary/15 text-[#58a6ff] px-1.5 py-0.5 rounded-full"
+            aria-label={`${openCount} conversaciones abiertas`}
+          >
             {openCount}
           </span>
         )}
@@ -34,14 +38,16 @@ export function ConversationList({ conversations = [], isLoading = false }: Conv
       {/* Conversation List */}
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         {isLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-5 w-5 animate-spin text-[#484f58]" />
+          <div className="flex items-center justify-center py-8" role="status" aria-live="polite">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-label="Cargando conversaciones" />
           </div>
         ) : conversations?.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-[#484f58] gap-2">
-            <Inbox className="h-8 w-8" />
-            <p className="text-xs">No hay conversaciones</p>
-          </div>
+          <EmptyState
+            icon={Inbox}
+            title="No hay conversaciones"
+            description="Cuando lleguen mensajes nuevos aparecerán aquí."
+            size="sm"
+          />
         ) : (
           conversations.map((conv) => (
             <ConversationItem

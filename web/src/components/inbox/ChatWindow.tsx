@@ -4,6 +4,7 @@ import { useCurrentAgent } from "@/hooks/useCurrentAgent";
 import { useInboxStore } from "@/stores/inbox";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
+import { EmptyState } from "@/components/ui/empty-state";
 import { InternalNotes } from "./InternalNotes";
 import { SnoozeDropdown } from "./SnoozeDropdown";
 import { ClosingDialog } from "./ClosingDialog";
@@ -321,17 +322,18 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
       {activeTab === "messages" ? (
         <>
           {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto scrollbar-thin">
+          <div className="flex-1 overflow-y-auto scrollbar-thin" role="log" aria-live="polite" aria-atomic="false" aria-relevant="additions text">
             <div className="px-4 py-3 space-y-0.5">
               {isLoading ? (
-                <div className="flex items-center justify-center py-16">
-                  <Loader2 className="h-5 w-5 animate-spin text-[#484f58]" />
+                <div className="flex items-center justify-center py-16" role="status">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-label="Cargando mensajes" />
                 </div>
               ) : messages?.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-[#484f58] gap-2">
-                  <MessageSquare className="h-8 w-8" />
-                  <p className="text-xs">No hay mensajes aun</p>
-                </div>
+                <EmptyState
+                  icon={MessageSquare}
+                  title="No hay mensajes aún"
+                  description="Envía el primer mensaje para iniciar la conversación."
+                />
               ) : (
                 messages?.map((msg) => <MessageBubble key={msg.id} message={msg} />)
               )}
