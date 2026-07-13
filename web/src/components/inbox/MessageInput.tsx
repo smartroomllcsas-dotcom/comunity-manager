@@ -1,10 +1,25 @@
 "use client";
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Send, Paperclip, Smile, Sticker, X, Image as ImageIcon, FileText, Music2, Video, Mic, Square, FileCheck2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FileText,
+  Image as ImageIcon,
+  Mic,
+  Music2,
+  Paperclip,
+  Send,
+  Smile,
+  Square,
+  Sticker,
+  Video,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
-import { AIAssistPreview, AIAssistButton } from "./AIAssist";
+import { AIAssistButton, AIAssistPreview } from "./AIAssist";
+import { EmojiGrid, StickerGrid, emojiToStickerFilename, emojiToTwemojiUrl } from "./EmojiStickerPicker";
+import { TemplateBanner, templateHasVariables, type InboxTemplate } from "./TemplateBanner";
+import { useVoiceRecorder } from "./useVoiceRecorder";
 import { useTemplates } from "@/hooks/useTemplates";
-import type { Message, MessageTemplate } from "@/types/database";
+import type { Message } from "@/types/database";
 
 type AttachmentKind = "image" | "video" | "audio" | "document" | "sticker";
 
@@ -14,24 +29,6 @@ type ComposerAttachment = {
   filename: string;
   mimeType: string;
 };
-
-const EMOJI_PICKER = [
-  "😀", "😁", "😂", "🤣", "😊", "😍", "😘", "😎",
-  "🤝", "🙏", "👏", "🎉", "💪", "🔥", "💡", "✅",
-  "❤️", "💙", "💜", "🫶", "👍", "👀", "🥳", "😅",
-];
-
-const STICKER_PICKER = [
-  "😺", "🤖", "🌟", "🔥", "💥", "🎉", "❤️", "👍",
-];
-
-function emojiToTwemojiUrl(emoji: string) {
-  const codePoints = Array.from(emoji)
-    .map((char) => char.codePointAt(0)?.toString(16))
-    .filter(Boolean)
-    .join("-");
-  return `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/${codePoints}.png`;
-}
 
 interface MessageInputProps {
   onSend: (payload: {
@@ -45,24 +42,6 @@ interface MessageInputProps {
   channelId?: string | null;
   channelType?: string | null;
   whatsappWindowExpired?: boolean;
-}
-
-type InboxTemplate = MessageTemplate & {
-  channel_id?: string | null;
-};
-
-function getTemplateBodyPreview(template: InboxTemplate) {
-  const components = Array.isArray(template.components) ? template.components : [];
-  const body = components.find((component) => {
-    if (!component || typeof component !== "object") return false;
-    return String((component as { type?: unknown }).type || "").toUpperCase() === "BODY";
-  }) as { text?: string } | undefined;
-
-  return body?.text || "Plantilla aprobada de WhatsApp";
-}
-
-function templateHasVariables(template: InboxTemplate) {
-  return /\{\{\s*\d+\s*\}\}/.test(getTemplateBodyPreview(template));
 }
 
 export function MessageInput({
@@ -79,18 +58,13 @@ export function MessageInput({
   const [attachment, setAttachment] = useState<ComposerAttachment | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [uploading, setUploading] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [recordingError, setRecordingError] = useState<string | null>(null);
+  const [inputError, setInputError] = useState<string | null>(null);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const recordingStreamRef = useRef<MediaStream | null>(null);
-  const recordingChunksRef = useRef<Blob[]>([]);
-  const recordingTimerRef = useRef<number | null>(null);
-  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
-  const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
 
   // AI Assist state
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
@@ -120,16 +94,7 @@ export function MessageInput({
     }
   }, [text]);
 
-  useEffect(() => {
-    return () => {
-      if (recordingTimerRef.current) {
-        window.clearInterval(recordingTimerRef.current);
-      }
-      recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
-    };
-  }, []);
-
-  async function uploadAttachment(file: File): Promise<ComposerAttachment> {
+  const uploadAttachment = useCallback(async (file: File): Promise<ComposerAttachment> => {
     const formData = new FormData();
     formData.append("file", file);
 
@@ -143,7 +108,7 @@ export function MessageInput({
       throw new Error(error.error || "No se pudo subir el archivo");
     }
 
-    const data = await res.json() as {
+    const data = (await res.json()) as {
       url: string;
       fileName: string;
       mimeType: string;
@@ -163,7 +128,46 @@ export function MessageInput({
       filename: data.fileName,
       mimeType: data.mimeType,
     };
-  }
+  }, []);
+
+  const uploadRecordedAudio = useCallback(
+    async (blob: Blob, mimeType: string) => {
+      const extension = mimeType.includes("ogg")
+        ? "ogg"
+        : mimeType.includes("wav")
+          ? "wav"
+          : mimeType.includes("mp4")
+            ? "mp4"
+            : "webm";
+      const file = new File([blob], `voice-${Date.now()}.${extension}`, {
+        type: mimeType || "audio/webm",
+      });
+      setUploading(true);
+      setInputError(null);
+      try {
+        const uploaded = await uploadAttachment(file);
+        setAttachment(uploaded);
+      } finally {
+        setUploading(false);
+      }
+    },
+    [uploadAttachment]
+  );
+
+  const {
+    recording,
+    seconds: recordingSeconds,
+    toggle: toggleVoiceRecording,
+  } = useVoiceRecorder({
+    disabled: disabled || sending || uploading,
+    onStart: () => {
+      setEmojiPickerOpen(false);
+      setStickerPickerOpen(false);
+      setInputError(null);
+    },
+    onAudioRecorded: uploadRecordedAudio,
+    onError: setInputError,
+  });
 
   function handlePaperclipClick() {
     setEmojiPickerOpen(false);
@@ -175,100 +179,6 @@ export function MessageInput({
     setEmojiPickerOpen(false);
     setStickerPickerOpen(false);
     audioInputRef.current?.click();
-  }
-
-  async function uploadRecordedAudio(blob: Blob, mimeType: string) {
-    const extension = mimeType.includes("ogg")
-      ? "ogg"
-      : mimeType.includes("wav")
-        ? "wav"
-        : mimeType.includes("mp4")
-          ? "mp4"
-          : "webm";
-    const file = new File(
-      [blob],
-      `voice-${Date.now()}.${extension}`,
-      { type: mimeType || "audio/webm" },
-    );
-    const uploaded = await uploadAttachment(file);
-    setAttachment(uploaded);
-  }
-
-  async function startVoiceRecording() {
-    if (disabled || sending || uploading || recording) return;
-    setEmojiPickerOpen(false);
-    setStickerPickerOpen(false);
-    setRecordingError(null);
-
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setRecordingError("Tu navegador no soporta grabación de audio.");
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      recorderRef.current = recorder;
-      recordingStreamRef.current = stream;
-      recordingChunksRef.current = [];
-      setRecordingSeconds(0);
-      setRecording(true);
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) recordingChunksRef.current.push(event.data);
-      };
-
-      recorder.onstop = async () => {
-        const mimeType = recorder.mimeType || "audio/webm";
-        const chunks = recordingChunksRef.current.slice();
-        recordingChunksRef.current = [];
-        recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
-        recordingStreamRef.current = null;
-        recorderRef.current = null;
-        setRecording(false);
-        if (!chunks.length) return;
-        setUploading(true);
-        setRecordingError(null);
-        try {
-          const blob = new Blob(chunks, { type: mimeType });
-          await uploadRecordedAudio(blob, mimeType);
-        } catch (error) {
-          console.error(error);
-          const msg = error instanceof Error ? error.message : "No se pudo subir el audio grabado.";
-          setRecordingError(msg);
-        } finally {
-          setUploading(false);
-        }
-      };
-
-      recorder.start();
-      recordingTimerRef.current = window.setInterval(() => {
-        setRecordingSeconds((current) => current + 1);
-      }, 1000);
-    } catch (error) {
-      console.error(error);
-      setRecordingError("No se pudo acceder al micrófono.");
-      setRecording(false);
-      recordingStreamRef.current = null;
-      recorderRef.current = null;
-    }
-  }
-
-  function stopVoiceRecording() {
-    if (!recording) return;
-    if (recordingTimerRef.current) {
-      window.clearInterval(recordingTimerRef.current);
-      recordingTimerRef.current = null;
-    }
-    recorderRef.current?.stop();
-  }
-
-  function toggleVoiceRecording() {
-    if (recording) {
-      stopVoiceRecording();
-      return;
-    }
-    void startVoiceRecording();
   }
 
   function insertEmoji(emoji: string) {
@@ -291,14 +201,10 @@ export function MessageInput({
   }
 
   function attachSticker(emoji: string) {
-    const url = emojiToTwemojiUrl(emoji);
     setAttachment({
       kind: "sticker",
-      url,
-      filename: `sticker-${Array.from(emoji)
-        .map((char) => char.codePointAt(0)?.toString(16))
-        .filter(Boolean)
-        .join("-")}.png`,
+      url: emojiToTwemojiUrl(emoji),
+      filename: emojiToStickerFilename(emoji),
       mimeType: "image/png",
     });
     setStickerPickerOpen(false);
@@ -308,14 +214,14 @@ export function MessageInput({
   async function handleFileChange(file: File | null) {
     if (!file || disabled || sending || uploading) return;
     setUploading(true);
-    setRecordingError(null);
+    setInputError(null);
     try {
       const uploaded = await uploadAttachment(file);
       setAttachment(uploaded);
     } catch (error) {
       console.error(error);
       const msg = error instanceof Error ? error.message : "No se pudo subir el archivo.";
-      setRecordingError(msg);
+      setInputError(msg);
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -419,7 +325,6 @@ export function MessageInput({
 
   return (
     <div className="border-t border-[#2d333b] bg-[#161b22]">
-      {/* AI Assist preview - above the input bar */}
       {aiVisible && (
         <AIAssistPreview
           suggestion={aiSuggestion}
@@ -432,65 +337,16 @@ export function MessageInput({
 
       <div className="px-4 py-3">
         {requiresTemplate && (
-          <div className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/15 text-amber-300">
-                <FileCheck2 className="h-4 w-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-amber-100">Ventana de WhatsApp cerrada</p>
-                <p className="mt-0.5 text-xs leading-relaxed text-amber-100/70">
-                  Han pasado mas de 24 horas desde el ultimo mensaje del cliente. Para retomar, envia una plantilla aprobada.
-                </p>
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                  <select
-                    value={selectedTemplateId}
-                    onChange={(event) => setSelectedTemplateId(event.target.value)}
-                    disabled={sending || templatesLoading || availableTemplates.length === 0}
-                    className="min-h-[38px] flex-1 rounded-lg border border-[#2d333b] bg-[#0d1117] px-3 text-sm text-white outline-none focus:border-amber-400/70"
-                  >
-                    <option value="">
-                      {templatesLoading
-                        ? "Cargando plantillas..."
-                        : availableTemplates.length === 0
-                          ? "No hay plantillas aprobadas"
-                          : "Selecciona una plantilla"}
-                    </option>
-                    {availableTemplates.map((template) => (
-                      <option key={template.id} value={template.id}>
-                        {template.name} · {template.language}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={handleSend}
-                    disabled={!selectedTemplate || sending || templateHasVariables(selectedTemplate)}
-                    className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-lg bg-amber-500 px-4 text-sm font-semibold text-[#0d1117] transition-colors hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
-                    type="button"
-                  >
-                    <Send className="h-4 w-4" />
-                    Enviar plantilla
-                  </button>
-                </div>
-                {selectedTemplate && (
-                  <div className="mt-2 rounded-lg border border-[#2d333b] bg-[#0d1117]/80 p-2">
-                    <p className="text-[11px] uppercase tracking-[0.18em] text-[#8b949e]">Vista previa</p>
-                    <p className="mt-1 text-xs leading-relaxed text-[#c9d1d9]">
-                      {getTemplateBodyPreview(selectedTemplate)}
-                    </p>
-                    {templateHasVariables(selectedTemplate) && (
-                      <p className="mt-2 text-xs text-red-300">
-                        Esta plantilla tiene variables. Primero hay que configurar los campos dinamicos antes de enviarla desde el inbox.
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          <TemplateBanner
+            templates={availableTemplates}
+            templatesLoading={templatesLoading}
+            selectedTemplateId={selectedTemplateId}
+            onSelectedTemplateChange={setSelectedTemplateId}
+            onSend={handleSend}
+            sending={sending}
+          />
         )}
         <div className="flex items-end gap-2">
-          {/* Attachment button */}
           <button
             onClick={handlePaperclipClick}
             className="p-2 rounded-md text-[#484f58] hover:text-[#8b949e] hover:bg-[#1a1f2e] transition-colors shrink-0 mb-0.5"
@@ -518,14 +374,18 @@ export function MessageInput({
               "inline-flex items-center gap-1.5 px-3 py-2 rounded-md border transition-colors shrink-0 mb-0.5",
               recording
                 ? "border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/15"
-                : "border-[#1f6feb]/40 bg-[#0d1117] text-[#7dd3fc] hover:text-white hover:bg-[#1a1f2e] hover:border-[#388bfd]",
+                : "border-[#1f6feb]/40 bg-[#0d1117] text-[#7dd3fc] hover:text-white hover:bg-[#1a1f2e] hover:border-[#388bfd]"
             )}
             disabled={composerDisabled}
             title={recording ? "Detener grabación" : "Grabar audio"}
             type="button"
           >
             {recording ? <Square className="h-4.5 w-4.5" /> : <Mic className="h-4.5 w-4.5" />}
-            <span className="text-xs font-medium">{recording ? `Grabando ${Math.floor(recordingSeconds / 60)}:${String(recordingSeconds % 60).padStart(2, "0")}` : "Grabar"}</span>
+            <span className="text-xs font-medium">
+              {recording
+                ? `Grabando ${Math.floor(recordingSeconds / 60)}:${String(recordingSeconds % 60).padStart(2, "0")}`
+                : "Grabar"}
+            </span>
           </button>
 
           <button
@@ -571,13 +431,8 @@ export function MessageInput({
             onChange={(e) => handleFileChange(e.target.files?.[0] || null)}
           />
 
-          {/* Emoji button */}
-          {/* AI Assist button */}
-          {hasAI && (
-            <AIAssistButton onClick={generateSuggestion} disabled={aiLoading} />
-          )}
+          {hasAI && <AIAssistButton onClick={generateSuggestion} disabled={aiLoading} />}
 
-          {/* Text area */}
           <div className="flex-1 relative">
             {attachment && (
               <div className="mb-2 rounded-lg border border-[#2d333b] bg-[#0d1117] px-3 py-2 flex items-center justify-between gap-2">
@@ -613,7 +468,6 @@ export function MessageInput({
             />
           </div>
 
-          {/* Send button */}
           <button
             onClick={handleSend}
             disabled={requiresTemplate || (!text.trim() && !attachment) || sending || uploading || disabled}
@@ -623,47 +477,11 @@ export function MessageInput({
           </button>
         </div>
 
-        {emojiPickerOpen && (
-          <div className="mt-2 grid grid-cols-8 gap-1 rounded-lg border border-[#2d333b] bg-[#0d1117] p-2 max-w-[360px]">
-            {EMOJI_PICKER.map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                onClick={() => insertEmoji(emoji)}
-                className="h-8 w-8 rounded-md hover:bg-[#1a1f2e] text-lg flex items-center justify-center"
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-        )}
+        {emojiPickerOpen && <EmojiGrid onPick={insertEmoji} />}
+        {stickerPickerOpen && <StickerGrid onPick={attachSticker} />}
 
-        {stickerPickerOpen && (
-          <div className="mt-2 grid grid-cols-4 gap-2 rounded-lg border border-[#2d333b] bg-[#0d1117] p-2 max-w-[360px]">
-            {STICKER_PICKER.map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                onClick={() => attachSticker(emoji)}
-                className="h-16 rounded-md bg-[#161b22] border border-[#2d333b] hover:border-[#388bfd] flex items-center justify-center p-2"
-                title="Enviar sticker"
-              >
-                <img
-                  src={emojiToTwemojiUrl(emoji)}
-                  alt={`Sticker ${emoji}`}
-                  className="h-10 w-10 object-contain"
-                  loading="lazy"
-                />
-              </button>
-            ))}
-          </div>
-        )}
+        {inputError && <p className="mt-2 text-xs text-red-400 pl-1">{inputError}</p>}
 
-        {recordingError && (
-          <p className="mt-2 text-xs text-red-400 pl-1">{recordingError}</p>
-        )}
-
-        {/* Quick reply hint */}
         {!disabled && (
           <p className="text-[10px] text-[#30363d] mt-1.5 pl-1">
             Escribe / para respuestas rapidas &middot; Enter para enviar &middot; Usa Grabar para voz

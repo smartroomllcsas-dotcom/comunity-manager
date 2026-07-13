@@ -62,6 +62,10 @@ type InstagramMessage = {
 
 type GraphResponse<T> = {
   data?: T[];
+  paging?: {
+    next?: string;
+    cursors?: { before?: string; after?: string };
+  };
   error?: {
     message?: string;
   };
@@ -79,22 +83,24 @@ const GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v21.0";
 const GRAPH_URL = `https://graph.facebook.com/${GRAPH_VERSION}`;
 const GRAPH_TIMEOUT_MS = 20_000;
 const CONVERSATION_LIMIT = 10;
-const MESSAGE_LIMIT = 15;
+const MESSAGE_LIMIT = 25;
+const MESSAGE_MAX_PAGES = 4; // hasta 100 mensajes por conversación por sync
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : null;
 }
 
 async function graphGet<T>(path: string, accessToken: string): Promise<GraphResponse<T>> {
+  const isFullUrl = path.startsWith("https://");
   const separator = path.includes("?") ? "&" : "?";
+  const url = isFullUrl
+    ? (path.includes("access_token=") ? path : `${path}${separator}access_token=${encodeURIComponent(accessToken)}`)
+    : `${GRAPH_URL}/${path}${separator}access_token=${encodeURIComponent(accessToken)}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GRAPH_TIMEOUT_MS);
 
   try {
-    const response = await fetch(
-      `${GRAPH_URL}/${path}${separator}access_token=${encodeURIComponent(accessToken)}`,
-      { cache: "no-store", signal: controller.signal }
-    );
+    const response = await fetch(url, { cache: "no-store", signal: controller.signal });
     const data = (await response.json().catch(() => ({}))) as GraphResponse<T>;
 
     if (!response.ok || data.error) {
@@ -111,6 +117,24 @@ async function graphGet<T>(path: string, accessToken: string): Promise<GraphResp
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function graphGetPaginated<T>(
+  path: string,
+  accessToken: string,
+  maxPages: number
+): Promise<T[]> {
+  const collected: T[] = [];
+  let nextPath: string | null = path;
+  for (let page = 0; page < maxPages && nextPath; page++) {
+    const response: GraphResponse<T> = await graphGet<T>(nextPath, accessToken);
+    if (response.error) {
+      throw new Error(`Meta Graph paging error: ${response.error.message || "unknown"}`);
+    }
+    if (Array.isArray(response.data)) collected.push(...response.data);
+    nextPath = response.paging?.next || null;
+  }
+  return collected;
 }
 
 function pickInstagramContact(
@@ -382,11 +406,11 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
 
         result.conversations += 1;
 
-        const messages = await graphGet<InstagramMessage>(
+        const messageRows = await graphGetPaginated<InstagramMessage>(
           `${encodeURIComponent(conversation.id)}/messages?fields=id,message,from,to,created_time,attachments,sticker&limit=${MESSAGE_LIMIT}`,
-          pageToken
+          pageToken,
+          MESSAGE_MAX_PAGES
         );
-        const messageRows = messages.data || [];
         const messageIds = messageRows.map((message) => message.id).filter(Boolean);
 
         const { data: existingMessages } = messageIds.length
