@@ -126,25 +126,35 @@ async function fetchMessengerParticipantIdentity(
 ): Promise<ContactIdentity | null> {
   const metaVersion = process.env.META_GRAPH_VERSION || "v21.0";
   const fields = "participants{id,name}";
-  const url = `https://graph.facebook.com/${metaVersion}/${encodeURIComponent(pageId)}/conversations?fields=${fields}&limit=100&access_token=${encodeURIComponent(pageToken)}`;
+  const MAX_PAGES = 5; // hasta 500 conversaciones antes de rendirse
+  let url: string | null =
+    `https://graph.facebook.com/${metaVersion}/${encodeURIComponent(pageId)}/conversations?fields=${fields}&limit=100&access_token=${encodeURIComponent(pageToken)}`;
 
-  const response = await fetch(url);
-  const data = (await response.json()) as MessengerConversationResponse;
+  let participant: { id?: string; name?: string } | undefined;
 
-  if (!response.ok || data.error) {
-    console.warn("[meta-webhook] messenger conversations lookup failed", {
-      pageId,
-      psid,
-      error: data.error?.message || `HTTP ${response.status}`,
-    });
-    return null;
+  for (let page = 0; page < MAX_PAGES && url && !participant; page++) {
+    const response = await fetch(url);
+    const data = (await response.json()) as MessengerConversationResponse & {
+      paging?: { next?: string };
+    };
+
+    if (!response.ok || data.error) {
+      console.warn("[meta-webhook] messenger conversations lookup failed", {
+        pageId,
+        psid,
+        page,
+        error: data.error?.message || `HTTP ${response.status}`,
+      });
+      return null;
+    }
+
+    const conversation = data.data?.find((item) =>
+      item.participants?.data?.some((entry) => entry.id === psid)
+    );
+    participant = conversation?.participants?.data?.find((entry) => entry.id === psid);
+    url = data.paging?.next || null;
   }
 
-  const conversation = data.data?.find((item) =>
-    item.participants?.data?.some((participant) => participant.id === psid)
-  );
-
-  const participant = conversation?.participants?.data?.find((entry) => entry.id === psid);
   if (!participant?.name) {
     return null;
   }

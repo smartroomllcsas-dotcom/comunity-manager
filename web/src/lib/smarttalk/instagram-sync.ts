@@ -82,7 +82,8 @@ type SyncResult = {
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v21.0";
 const GRAPH_URL = `https://graph.facebook.com/${GRAPH_VERSION}`;
 const GRAPH_TIMEOUT_MS = 20_000;
-const CONVERSATION_LIMIT = 10;
+const CONVERSATION_LIMIT = 25;
+const CONVERSATION_MAX_PAGES = 4; // hasta 100 conversaciones por sync
 const MESSAGE_LIMIT = 25;
 const MESSAGE_MAX_PAGES = 4; // hasta 100 mensajes por conversación por sync
 
@@ -384,12 +385,18 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
         continue;
       }
 
-      const conversations = await graphGet<InstagramConversation>(
+      const conversationList = await graphGetPaginated<InstagramConversation>(
         `${socialAccount.page_id}/conversations?platform=instagram&fields=id,updated_time,participants&limit=${CONVERSATION_LIMIT}`,
-        pageToken
+        pageToken,
+        CONVERSATION_MAX_PAGES
       );
+      if (conversationList.length >= CONVERSATION_LIMIT * CONVERSATION_MAX_PAGES) {
+        console.warn(
+          `[instagram-sync] channel ${channel.id} alcanzó el cap de ${CONVERSATION_LIMIT * CONVERSATION_MAX_PAGES} conversaciones; el historial más antiguo requiere sync con cursor persistente.`
+        );
+      }
 
-      for (const conversation of conversations.data || []) {
+      for (const conversation of conversationList) {
         const externalContact = pickInstagramContact(conversation, socialAccount.instagram_id);
         if (!externalContact?.id) continue;
 
