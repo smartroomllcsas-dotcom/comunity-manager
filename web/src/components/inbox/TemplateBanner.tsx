@@ -103,7 +103,14 @@ export function extractHeaderInfo(template: InboxTemplate): HeaderInfo {
   return { present: true, format, text, variableIndices };
 }
 
-/** Construye el payload `components` esperado por la WhatsApp Cloud API. Soporta HEADER + BODY + BUTTONS (quick_reply). */
+export type HeaderLocationValues = {
+  latitude?: number | string;
+  longitude?: number | string;
+  name?: string;
+  address?: string;
+};
+
+/** Construye el payload `components` esperado por la WhatsApp Cloud API. Soporta HEADER + BODY + BUTTONS (quick_reply + url). */
 export function buildTemplateComponents(params: {
   bodyIndices: number[];
   bodyValues: Record<number, string>;
@@ -111,6 +118,7 @@ export function buildTemplateComponents(params: {
   headerTextValues?: Record<number, string>;
   headerMediaUrl?: string;
   headerMediaFilename?: string;
+  headerLocation?: HeaderLocationValues;
   buttons?: TemplateButton[];
   buttonPayloads?: Record<number, string>;
 }): unknown[] {
@@ -149,6 +157,25 @@ export function buildTemplateComponents(params: {
           },
         ],
       });
+    } else if (format === "LOCATION" && params.headerLocation) {
+      const lat = Number(params.headerLocation.latitude);
+      const lng = Number(params.headerLocation.longitude);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        out.push({
+          type: "header",
+          parameters: [
+            {
+              type: "location",
+              location: {
+                latitude: lat,
+                longitude: lng,
+                ...(params.headerLocation.name ? { name: params.headerLocation.name } : {}),
+                ...(params.headerLocation.address ? { address: params.headerLocation.address } : {}),
+              },
+            },
+          ],
+        });
+      }
     }
   }
 
@@ -232,6 +259,7 @@ export function TemplateBanner({
   const [headerTextValues, setHeaderTextValues] = useState<Record<number, string>>({});
   const [headerMediaUrl, setHeaderMediaUrl] = useState("");
   const [headerMediaFilename, setHeaderMediaFilename] = useState("");
+  const [headerLocation, setHeaderLocation] = useState<HeaderLocationValues>({});
   const [buttonPayloads, setButtonPayloads] = useState<Record<number, string>>({});
 
   // Reset valores cuando cambia la plantilla seleccionada.
@@ -240,6 +268,7 @@ export function TemplateBanner({
     setHeaderTextValues({});
     setHeaderMediaUrl("");
     setHeaderMediaFilename("");
+    setHeaderLocation({});
     setButtonPayloads({});
   }, [selectedTemplateId]);
 
@@ -247,6 +276,10 @@ export function TemplateBanner({
   const allHeaderTextVarsFilled = header.variableIndices.every((idx) => (headerTextValues[idx] ?? "").trim().length > 0);
   const headerMediaRequired = header.present && (header.format === "IMAGE" || header.format === "VIDEO" || header.format === "DOCUMENT");
   const headerMediaFilled = !headerMediaRequired || headerMediaUrl.trim().length > 0;
+  const headerLocationRequired = header.present && header.format === "LOCATION";
+  const headerLocationFilled =
+    !headerLocationRequired ||
+    (Number.isFinite(Number(headerLocation.latitude)) && Number.isFinite(Number(headerLocation.longitude)));
 
   const quickReplyButtons = buttons
     .map((btn, index) => ({ ...btn, _index: index }))
@@ -260,7 +293,14 @@ export function TemplateBanner({
     (btn) => (buttonPayloads[btn._index] ?? "").trim().length > 0
   );
 
-  const canSend = !!selectedTemplate && allBodyVariablesFilled && allHeaderTextVarsFilled && headerMediaFilled && allUrlVarsFilled && !sending;
+  const canSend =
+    !!selectedTemplate &&
+    allBodyVariablesFilled &&
+    allHeaderTextVarsFilled &&
+    headerMediaFilled &&
+    headerLocationFilled &&
+    allUrlVarsFilled &&
+    !sending;
 
   const previewText = selectedTemplate ? renderTemplatePreview(selectedTemplate, values) : "";
 
@@ -274,6 +314,7 @@ export function TemplateBanner({
         headerTextValues,
         headerMediaUrl: headerMediaUrl.trim() || undefined,
         headerMediaFilename: headerMediaFilename.trim() || undefined,
+        headerLocation: headerLocationRequired ? headerLocation : undefined,
         buttons,
         buttonPayloads,
       })
@@ -377,9 +418,56 @@ export function TemplateBanner({
                 </div>
               )}
               {header.format === "LOCATION" && (
-                <p className="mt-2 text-xs text-amber-300/70">
-                  Los encabezados tipo LOCATION requieren enviar coordenadas — no soportado en este editor todavía.
-                </p>
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] uppercase tracking-[0.15em] text-amber-200/70">Latitud</span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={headerLocation.latitude ?? ""}
+                      onChange={(event) =>
+                        setHeaderLocation((prev) => ({ ...prev, latitude: event.target.value }))
+                      }
+                      disabled={sending}
+                      placeholder="4.7110"
+                      className="min-h-[34px] rounded-md border border-[#2d333b] bg-[#0d1117] px-3 text-sm text-white outline-none focus:border-amber-400/70"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] uppercase tracking-[0.15em] text-amber-200/70">Longitud</span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={headerLocation.longitude ?? ""}
+                      onChange={(event) =>
+                        setHeaderLocation((prev) => ({ ...prev, longitude: event.target.value }))
+                      }
+                      disabled={sending}
+                      placeholder="-74.0721"
+                      className="min-h-[34px] rounded-md border border-[#2d333b] bg-[#0d1117] px-3 text-sm text-white outline-none focus:border-amber-400/70"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 sm:col-span-2">
+                    <span className="text-[10px] uppercase tracking-[0.15em] text-amber-200/70">Nombre (opcional)</span>
+                    <input
+                      value={headerLocation.name ?? ""}
+                      onChange={(event) => setHeaderLocation((prev) => ({ ...prev, name: event.target.value }))}
+                      disabled={sending}
+                      placeholder="Tienda Centro"
+                      className="min-h-[34px] rounded-md border border-[#2d333b] bg-[#0d1117] px-3 text-sm text-white outline-none focus:border-amber-400/70"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 sm:col-span-2">
+                    <span className="text-[10px] uppercase tracking-[0.15em] text-amber-200/70">Dirección (opcional)</span>
+                    <input
+                      value={headerLocation.address ?? ""}
+                      onChange={(event) => setHeaderLocation((prev) => ({ ...prev, address: event.target.value }))}
+                      disabled={sending}
+                      placeholder="Cra 7 #12-34, Bogotá"
+                      className="min-h-[34px] rounded-md border border-[#2d333b] bg-[#0d1117] px-3 text-sm text-white outline-none focus:border-amber-400/70"
+                    />
+                  </label>
+                </div>
               )}
             </div>
           )}

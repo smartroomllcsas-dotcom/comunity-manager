@@ -5,15 +5,16 @@ import type { CMUser } from '@/types/database'
 import { mysqlQuery, quoteId } from '@/lib/mysql'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { hashPassword, verifyPassword } from '@/lib/auth/password'
-import { clientIp, rateLimit } from '@/lib/rate-limit'
+import { clientIp, rateLimitWithWhitelist } from '@/lib/rate-limit'
 
 const SESSION_KEY = 'cm_user_id'
 const LOGIN_RATE_LIMIT = 5
 const LOGIN_RATE_WINDOW_MS = 15 * 60 * 1000
 
 async function checkLoginRateLimit(request: NextRequest, email: string) {
-  const key = `login:${clientIp(request.headers)}:${email.toLowerCase()}`
-  return rateLimit(key, LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW_MS)
+  const ip = clientIp(request.headers)
+  const key = `login:${ip}:${email.toLowerCase()}`
+  return rateLimitWithWhitelist(ip, key, LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW_MS)
 }
 
 function tooManyAttempts(retryAfterSeconds: number) {

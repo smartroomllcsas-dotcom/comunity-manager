@@ -92,3 +92,36 @@ export function clientIp(headers: Headers): string {
   if (forwarded) return forwarded.split(",")[0]?.trim() || "unknown";
   return headers.get("x-real-ip") || "unknown";
 }
+
+let cachedWhitelist: Set<string> | null = null;
+
+function getWhitelist(): Set<string> {
+  if (cachedWhitelist) return cachedWhitelist;
+  const raw = process.env.RATE_LIMIT_WHITELIST || "";
+  cachedWhitelist = new Set(
+    raw
+      .split(",")
+      .map((ip) => ip.trim())
+      .filter(Boolean)
+  );
+  return cachedWhitelist;
+}
+
+/** Devuelve true si el IP está en RATE_LIMIT_WHITELIST (útil para monitors, staff, tests internos). */
+export function isWhitelistedIp(ip: string | null | undefined): boolean {
+  if (!ip) return false;
+  return getWhitelist().has(ip);
+}
+
+/** Wrapper: si el IP está whitelisted, devuelve ok=true sin registrar hit ni chequear DB. */
+export async function rateLimitWithWhitelist(
+  ip: string,
+  key: string,
+  limit: number,
+  windowMs: number
+): Promise<RateLimitResult> {
+  if (isWhitelistedIp(ip)) {
+    return { ok: true, remaining: limit, retryAfterSeconds: 0, backend: "db" };
+  }
+  return rateLimit(key, limit, windowMs);
+}
