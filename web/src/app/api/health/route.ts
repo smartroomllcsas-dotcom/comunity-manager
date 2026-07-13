@@ -1,11 +1,30 @@
 // Health check público. Sin auth — para uptime monitors externos.
 // Devuelve DB status + métricas del inbox (queue depth, dead letters).
+// Cached por worker durante CACHE_TTL_MS y en el edge vía Cache-Control.
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const DEAD_LETTER_ATTEMPTS = 3;
+const CACHE_TTL_MS = 15_000;
+const EDGE_CACHE_SECONDS = 15;
+
+let cache: { at: number; body: Record<string, unknown>; status: number } | null = null;
+
+function jsonWithCacheHeaders(body: Record<string, unknown>, status: number) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      "Cache-Control": `public, s-maxage=${EDGE_CACHE_SECONDS}, stale-while-revalidate=${EDGE_CACHE_SECONDS * 2}`,
+    },
+  });
+}
 
 export async function GET() {
+  // Fast path: si la última respuesta está fresca, devolvemos memoria (no DB hit).
+  if (cache && Date.now() - cache.at < CACHE_TTL_MS) {
+    return jsonWithCacheHeaders(cache.body, cache.status);
+  }
+
   const startedAt = Date.now();
   const admin = createAdminClient("smarttalk");
   const nowIso = new Date().toISOString();
@@ -64,30 +83,29 @@ export async function GET() {
     };
     databaseOk = true;
   } catch (err) {
-    return NextResponse.json(
-      {
-        ok: false,
-        ts: nowIso,
-        database: { ok: false, error: err instanceof Error ? err.message : String(err) },
-        latencyMs: Date.now() - startedAt,
-      },
-      { status: 503 }
-    );
+    const body = {
+      ok: false,
+      ts: nowIso,
+      database: { ok: false, error: err instanceof Error ? err.message : String(err) },
+      latencyMs: Date.now() - startedAt,
+    };
+    // No cacheamos errores para que se recuperen rápido.
+    cache = null;
+    return NextResponse.json(body, { status: 503 });
   }
 
   const degraded =
     (queueDepth.oldestPendingAgeSec ?? 0) > 300 || // pending >5 min
     queueDepth.dead > 0;
 
-  return NextResponse.json(
-    {
-      ok: !degraded,
-      degraded,
-      ts: nowIso,
-      database: { ok: databaseOk },
-      webhookEvents: queueDepth,
-      latencyMs: Date.now() - startedAt,
-    },
-    { status: degraded ? 200 : 200 } // 200 aún si degraded — dashboards lo interpretan
-  );
+  const body = {
+    ok: !degraded,
+    degraded,
+    ts: nowIso,
+    database: { ok: databaseOk },
+    webhookEvents: queueDepth,
+    latencyMs: Date.now() - startedAt,
+  };
+  cache = { at: Date.now(), body, status: 200 };
+  return jsonWithCacheHeaders(body, 200);
 }
