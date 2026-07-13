@@ -198,8 +198,70 @@ Configurar `WEBHOOK_ALERT_URL` en Vercel (webhook Slack/Discord/n8n). Cuando el 
 
 ### 7.7 Instagram sync deja mensajes viejos afuera
 
-- Cap por sync: 100 conversaciones × 100 mensajes. Cuentas grandes requieren cursor persistente por conversación (backlog Sprint 9+).
+- Cap por sync: 100 conversaciones × 100 mensajes. Cursor persistente en `inbox_sync_state.metadata.conversationsCursor` (desde Sprint 9) retoma en cada corrida hasta agotar el histórico.
 - Los mensajes nuevos igual llegan por webhook push — el sync solo cubre backfill inicial.
+
+---
+
+## 7-bis. Rotación de secretos Meta (App Secrets y Verify Tokens)
+
+Los tres app secrets (`META_APP_SECRET` para FB/Messenger, `META_IG_APP_SECRET` para Instagram, `WHATSAPP_APP_SECRET` para WhatsApp) y los dos verify tokens deben rotarse periódicamente (recomendado: cada 90 días o si sospechás compromiso).
+
+**Riesgo:** durante la rotación hay una ventana en la que Meta puede firmar con la vieja mientras el app ya usa la nueva → webhook rechazado con 401. La rotación siempre debe hacerse **sin bajar el webhook** — se cambia el app secret en el dashboard de Meta y en Vercel casi simultáneamente.
+
+### Procedimiento para `META_APP_SECRET`, `META_IG_APP_SECRET`, `WHATSAPP_APP_SECRET`
+
+Todos los secrets funcionan igual — este ejemplo usa `META_APP_SECRET` (FB/Messenger App):
+
+1. **Preparar la nueva clave.**
+   - Ir al Meta Developer dashboard → tu App → Settings → Basic
+   - Copiar el App Secret actual (temp) — no lo vayas a perder
+2. **Añadir la nueva al Vercel primero** (con nombre alternativo):
+   ```bash
+   vercel env add META_APP_SECRET_NEXT production
+   # pegar el mismo valor que aún hay en el dashboard (rotación se hace en el dashboard)
+   ```
+3. **Actualizar el código temporalmente** para aceptar ambos secrets. En `lib/smarttalk/meta-webhook.ts`, modifica `getMetaAppSecret` para probar primero `META_APP_SECRET_NEXT` luego `META_APP_SECRET`. Deploy.
+4. **Regenerar el secret en el dashboard.**
+   - En el Meta Developer dashboard → App → Settings → Basic → **Reset App Secret**
+   - Copiá el nuevo App Secret
+5. **Actualizar `META_APP_SECRET` en Vercel** con el nuevo valor:
+   ```bash
+   vercel env rm META_APP_SECRET production
+   vercel env add META_APP_SECRET production
+   # pegar el NUEVO valor del dashboard
+   ```
+6. **Redeploy** para que la variable actualizada tome efecto:
+   ```bash
+   vercel --prod --yes
+   ```
+7. **Verificar que los webhooks siguen entrando 200**:
+   ```bash
+   # Enviar test payload desde el Meta dashboard o esperar tráfico real
+   # y consultar los logs de Vercel Functions
+   curl -s https://www.comunitymanager.io/api/health | jq .webhookEvents
+   ```
+8. **Limpiar la alternancia temporal.**
+   - Quitar `META_APP_SECRET_NEXT` de Vercel
+   - Revertir el cambio en `getMetaAppSecret` (o dejar el fallback si te resulta útil)
+
+### Procedimiento para `META_WEBHOOK_VERIFY_TOKEN` y `WHATSAPP_WEBHOOK_VERIFY_TOKEN`
+
+Los verify tokens son estáticos y solo se usan en el GET inicial de verificación del webhook — no en los POST reales. Rotarlos requiere:
+
+1. Generar nuevo valor: `openssl rand -hex 32`
+2. Añadir a Vercel: `vercel env add META_WEBHOOK_VERIFY_TOKEN production` (o `WHATSAPP_WEBHOOK_VERIFY_TOKEN`)
+3. Redeploy
+4. En el Meta dashboard → App → Webhooks → editar la subscripción y pegar el nuevo verify token → Meta enviará un GET al webhook para verificar
+5. Si Meta confirma la verificación, la rotación está completa
+
+### Checklist post-rotación
+
+- [ ] `curl /api/health` responde `ok: true`
+- [ ] `webhook_events` tiene inserts recientes (< 5 min)
+- [ ] Sin errores 401 "Invalid signature" en los últimos 30 min en Vercel logs
+- [ ] `.env.production` local actualizado con el nuevo valor (para el reencrypt-tokens.mjs si aplica)
+- [ ] Nueva clave guardada en el password manager
 
 ---
 

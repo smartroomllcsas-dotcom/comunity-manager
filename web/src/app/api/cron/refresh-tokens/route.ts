@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { refreshExpiringTokens } from "@/lib/whatsapp/token-manager";
+import { alertErroredChannelsIfAny } from "@/lib/smarttalk/channel-error-alert";
 
 // Vercel Cron or external cron calls this endpoint daily
 export async function GET(request: NextRequest) {
@@ -13,9 +14,12 @@ export async function GET(request: NextRequest) {
 
   try {
     const result = await refreshExpiringTokens();
+    // Tras el refresh, alerta si algún canal quedó en status=error (token no refreshable, credenciales inválidas, etc).
+    const alert = await alertErroredChannelsIfAny();
     return Response.json({
       success: true,
       ...result,
+      channelErrorAlert: alert,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {

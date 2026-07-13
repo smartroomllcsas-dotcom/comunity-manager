@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 import AuthProvider from '@/components/AuthProvider'
 import FacebookSDK from '@/components/FacebookSDK'
@@ -23,6 +24,7 @@ export default function RootLayout({
       <body className="bg-background text-foreground antialiased">
         <FacebookSDK />
         <AuthProvider>{children}</AuthProvider>
+        <Analytics />
       </body>
     </html>
   )
