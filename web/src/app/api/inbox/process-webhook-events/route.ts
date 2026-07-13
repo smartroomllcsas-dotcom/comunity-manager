@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { processWebhookEventRow } from "@/lib/smarttalk/meta-webhook";
+import { alertDeadLettersIfAny } from "@/lib/smarttalk/dead-letter-alert";
 import type { MetaWebhookPayload } from "@/lib/smarttalk/meta-parser";
 
 const MAX_ATTEMPTS = 3;
@@ -52,11 +53,15 @@ async function processBatch() {
     }
   }
 
+  // Verifica dead letters y notifica si hay (con cooldown interno).
+  const alert = await alertDeadLettersIfAny();
+
   return NextResponse.json({
     batch: rows?.length ?? 0,
     processed,
     failed,
     errors,
+    deadLetterAlert: alert,
   });
 }
 
