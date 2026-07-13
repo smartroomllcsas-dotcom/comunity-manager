@@ -1,0 +1,212 @@
+openapi: 3.1.0
+info:
+  title: Community Manager · Internal API
+  version: 1.0.0
+  description: |
+    Endpoints internos del inbox de Community Manager. Todos requieren
+    `Authorization: Bearer $CRON_SECRET` (o header alterno `X-Cron-Secret`)
+    excepto `/api/health` que es público.
+
+servers:
+  - url: https://www.comunitymanager.io
+    description: Producción
+
+security:
+  - CronBearer: []
+  - CronHeader: []
+
+paths:
+  /api/health:
+    get:
+      operationId: getHealth
+      summary: Health check público
+      security: []
+      responses:
+        "200":
+          description: Servicio OK (posiblemente degraded)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: DB no disponible
+
+  /api/inbox/queue-stats:
+    get:
+      operationId: getQueueStats
+      summary: Estadísticas detalladas de la cola de webhook_events
+      responses:
+        "200":
+          description: Breakdown por canal + throughput + errores recientes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueStats"
+        "401": { description: Unauthorized }
+
+  /api/inbox/process-webhook-events:
+    get:
+      operationId: processWebhookEventsCron
+      summary: Cron para procesar batch de webhook_events pendientes
+      responses:
+        "200":
+          description: Batch procesado
+        "401": { description: Unauthorized }
+    post:
+      operationId: processWebhookEventsExternal
+      summary: Alias para cron externos
+      responses:
+        "200": { description: Batch procesado }
+        "401": { description: Unauthorized }
+
+  /api/inbox/webhook-events/{id}/retry:
+    post:
+      operationId: retryWebhookEvent
+      summary: Reintenta un webhook_event específico (resetea status y attempts)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Reintento programado }
+        "404": { description: not_found }
+        "401": { description: Unauthorized }
+
+  /api/inbox/webhook-events/retry-all-dead:
+    post:
+      operationId: retryAllDeadWebhookEvents
+      summary: Reintenta todos los dead letters (failed y attempts >= 3)
+      responses:
+        "200":
+          description: Bulk retry
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  retried: { type: integer }
+                  ids: { type: array, items: { type: string, format: uuid } }
+        "401": { description: Unauthorized }
+
+  /api/inbox/archive-old:
+    get:
+      operationId: archiveOldConversationsGet
+      summary: Archiva (status=closed) conversations resueltas antiguas
+      parameters:
+        - in: query
+          name: days
+          schema: { type: integer, minimum: 1, maximum: 365, default: 90 }
+      responses:
+        "200": { description: Archivo procesado }
+        "401": { description: Unauthorized }
+    post:
+      operationId: archiveOldConversationsPost
+      summary: Alias POST del archive-old
+      responses:
+        "200": { description: Archivo procesado }
+        "401": { description: Unauthorized }
+
+  /api/inbox/conversations/bulk-close:
+    post:
+      operationId: bulkCloseConversations
+      summary: Cierra conversations de una org por status previo y edad
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [organization_id]
+              properties:
+                organization_id: { type: string, format: uuid }
+                status_from:
+                  type: string
+                  enum: [open, pending, resolved]
+                  default: resolved
+                older_than_days:
+                  type: integer
+                  minimum: 0
+                  maximum: 365
+                  default: 30
+      responses:
+        "200": { description: Cerradas }
+        "400": { description: Params inválidos }
+        "401": { description: Unauthorized }
+
+  /api/inbox/cleanup-orphaned-state:
+    post:
+      operationId: cleanupOrphanedSyncState
+      summary: Borra inbox_sync_state cuya organization_id ya no existe
+      responses:
+        "200": { description: OK con count }
+        "401": { description: Unauthorized }
+
+  /api/cron/refresh-tokens:
+    get:
+      operationId: refreshTokensCron
+      summary: Renueva tokens Meta próximos a expirar + alertas de canales
+      responses:
+        "200": { description: Result con conteos + alertas }
+        "401": { description: Unauthorized }
+
+components:
+  securitySchemes:
+    CronBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+    CronHeader:
+      type: apiKey
+      in: header
+      name: X-Cron-Secret
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        degraded: { type: boolean }
+        ts: { type: string, format: date-time }
+        database:
+          type: object
+          properties: { ok: { type: boolean } }
+        webhookEvents:
+          type: object
+          properties:
+            pending: { type: integer }
+            failed: { type: integer }
+            dead: { type: integer }
+            oldestPendingAgeSec: { type: integer, nullable: true }
+        latencyMs: { type: integer }
+
+    QueueStats:
+      type: object
+      properties:
+        ts: { type: string, format: date-time }
+        channels:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              pending: { type: integer }
+              processed: { type: integer }
+              failed: { type: integer }
+              dead: { type: integer }
+        throughput:
+          type: object
+          properties:
+            processedLastHour: { type: integer }
+            sampleSize: { type: integer }
+            avgLatencyMs: { type: integer, nullable: true }
+            p95LatencyMs: { type: integer, nullable: true }
+        recentErrors:
+          type: array
+          items:
+            type: object
+            properties:
+              channel: { type: string }
+              attempts: { type: integer }
+              last_error: { type: string }
+              created_at: { type: string, format: date-time }
+        responseLatencyMs: { type: integer }
