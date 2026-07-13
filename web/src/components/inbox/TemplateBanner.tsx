@@ -44,6 +44,28 @@ export function renderTemplatePreview(template: InboxTemplate, values: Record<nu
   });
 }
 
+export type TemplateButton = {
+  type: "QUICK_REPLY" | "URL" | "PHONE_NUMBER" | string;
+  text: string;
+  url?: string;
+  phone_number?: string;
+};
+
+export function extractButtons(template: InboxTemplate): TemplateButton[] {
+  const components = Array.isArray(template.components) ? template.components : [];
+  const buttonsComp = components.find((component) => {
+    if (!component || typeof component !== "object") return false;
+    return String((component as { type?: unknown }).type || "").toUpperCase() === "BUTTONS";
+  }) as { buttons?: Array<{ type?: string; text?: string; url?: string; phone_number?: string }> } | undefined;
+  const items = Array.isArray(buttonsComp?.buttons) ? buttonsComp!.buttons! : [];
+  return items.map((btn) => ({
+    type: (btn.type || "").toUpperCase(),
+    text: btn.text || "",
+    url: btn.url,
+    phone_number: btn.phone_number,
+  }));
+}
+
 export type HeaderFormat = "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT" | "LOCATION";
 
 export type HeaderInfo = {
@@ -81,7 +103,7 @@ export function extractHeaderInfo(template: InboxTemplate): HeaderInfo {
   return { present: true, format, text, variableIndices };
 }
 
-/** Construye el payload `components` esperado por la WhatsApp Cloud API. Soporta HEADER + BODY. */
+/** Construye el payload `components` esperado por la WhatsApp Cloud API. Soporta HEADER + BODY + BUTTONS (quick_reply). */
 export function buildTemplateComponents(params: {
   bodyIndices: number[];
   bodyValues: Record<number, string>;
@@ -89,6 +111,8 @@ export function buildTemplateComponents(params: {
   headerTextValues?: Record<number, string>;
   headerMediaUrl?: string;
   headerMediaFilename?: string;
+  buttons?: TemplateButton[];
+  buttonPayloads?: Record<number, string>;
 }): unknown[] {
   const out: unknown[] = [];
 
@@ -135,6 +159,21 @@ export function buildTemplateComponents(params: {
     });
   }
 
+  // BUTTONS: solo QUICK_REPLY necesita payload en el send request.
+  // URL con {{1}} necesitaría un parámetro adicional — no soportado todavía.
+  if (params.buttons && params.buttons.length > 0) {
+    params.buttons.forEach((btn, index) => {
+      if (btn.type !== "QUICK_REPLY") return;
+      const payload = params.buttonPayloads?.[index] || btn.text || `button_${index}`;
+      out.push({
+        type: "button",
+        sub_type: "quick_reply",
+        index: String(index),
+        parameters: [{ type: "payload", payload }],
+      });
+    });
+  }
+
   return out;
 }
 
@@ -173,10 +212,15 @@ export function TemplateBanner({
     () => (selectedTemplate ? extractHeaderInfo(selectedTemplate) : { present: false, format: null, text: "", variableIndices: [] }),
     [selectedTemplate]
   );
+  const buttons = useMemo(
+    () => (selectedTemplate ? extractButtons(selectedTemplate) : []),
+    [selectedTemplate]
+  );
   const [values, setValues] = useState<Record<number, string>>({});
   const [headerTextValues, setHeaderTextValues] = useState<Record<number, string>>({});
   const [headerMediaUrl, setHeaderMediaUrl] = useState("");
   const [headerMediaFilename, setHeaderMediaFilename] = useState("");
+  const [buttonPayloads, setButtonPayloads] = useState<Record<number, string>>({});
 
   // Reset valores cuando cambia la plantilla seleccionada.
   useEffect(() => {
@@ -184,6 +228,7 @@ export function TemplateBanner({
     setHeaderTextValues({});
     setHeaderMediaUrl("");
     setHeaderMediaFilename("");
+    setButtonPayloads({});
   }, [selectedTemplateId]);
 
   const allBodyVariablesFilled = variableIndices.every((idx) => (values[idx] ?? "").trim().length > 0);
@@ -204,9 +249,15 @@ export function TemplateBanner({
         headerTextValues,
         headerMediaUrl: headerMediaUrl.trim() || undefined,
         headerMediaFilename: headerMediaFilename.trim() || undefined,
+        buttons,
+        buttonPayloads,
       })
     );
   };
+
+  const quickReplyButtons = buttons
+    .map((btn, index) => ({ ...btn, _index: index }))
+    .filter((btn) => btn.type === "QUICK_REPLY");
 
   return (
     <div className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
@@ -329,6 +380,47 @@ export function TemplateBanner({
                   />
                 </label>
               ))}
+            </div>
+          )}
+          {selectedTemplate && buttons.length > 0 && (
+            <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/5 p-2">
+              <p className="text-[10px] uppercase tracking-[0.15em] text-amber-200/70">
+                Botones ({buttons.length})
+              </p>
+              <ul className="mt-2 flex flex-wrap gap-2">
+                {buttons.map((btn, index) => (
+                  <li
+                    key={`btn-${index}`}
+                    className="rounded-md border border-[#2d333b] bg-[#0d1117] px-2 py-1 text-xs text-[#c9d1d9]"
+                  >
+                    <span className="text-[9px] uppercase text-[#484f58] mr-1">{btn.type.toLowerCase()}</span>
+                    {btn.text || "(sin texto)"}
+                    {btn.type === "URL" && btn.url && (
+                      <span className="ml-1 text-[10px] text-[#484f58]">→ {btn.url.slice(0, 40)}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {quickReplyButtons.length > 0 && (
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {quickReplyButtons.map((btn) => (
+                    <label key={`payload-${btn._index}`} className="flex flex-col gap-1">
+                      <span className="text-[10px] uppercase tracking-[0.15em] text-amber-200/70">
+                        Payload de &quot;{btn.text}&quot;
+                      </span>
+                      <input
+                        value={buttonPayloads[btn._index] ?? btn.text}
+                        onChange={(event) =>
+                          setButtonPayloads((prev) => ({ ...prev, [btn._index]: event.target.value }))
+                        }
+                        disabled={sending}
+                        placeholder={btn.text}
+                        className="min-h-[30px] rounded-md border border-[#2d333b] bg-[#0d1117] px-2 text-xs text-white outline-none focus:border-amber-400/70"
+                      />
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {selectedTemplate && (

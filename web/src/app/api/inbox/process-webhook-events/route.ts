@@ -4,11 +4,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { processWebhookEventRow } from "@/lib/smarttalk/meta-webhook";
-import { alertDeadLettersIfAny } from "@/lib/smarttalk/dead-letter-alert";
+import { alertDeadLettersIfAny, alertQueueStallIfAny } from "@/lib/smarttalk/dead-letter-alert";
 import type { MetaWebhookPayload } from "@/lib/smarttalk/meta-parser";
 
 const MAX_ATTEMPTS = 3;
 const BATCH_SIZE = 20;
+const RETENTION_DAYS = 7;
 
 function isAuthorized(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -53,8 +54,17 @@ async function processBatch() {
     }
   }
 
-  // Verifica dead letters y notifica si hay (con cooldown interno).
+  // Verifica dead letters + queue stall y notifica si aplica (cooldown interno).
   const alert = await alertDeadLettersIfAny();
+  const stallAlert = await alertQueueStallIfAny();
+
+  // Retention: borra webhook_events procesados hace >7 días.
+  const retentionCutoff = new Date(Date.now() - RETENTION_DAYS * 86400 * 1000).toISOString();
+  const { count: retentionDeleted } = await admin
+    .from("webhook_events")
+    .delete({ count: "exact" })
+    .eq("status", "processed")
+    .lt("processed_at", retentionCutoff);
 
   return NextResponse.json({
     batch: rows?.length ?? 0,
@@ -62,6 +72,8 @@ async function processBatch() {
     failed,
     errors,
     deadLetterAlert: alert,
+    queueStallAlert: stallAlert,
+    retentionDeleted: retentionDeleted ?? 0,
   });
 }
 

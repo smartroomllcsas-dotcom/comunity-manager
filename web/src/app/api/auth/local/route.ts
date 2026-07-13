@@ -11,7 +11,7 @@ const SESSION_KEY = 'cm_user_id'
 const LOGIN_RATE_LIMIT = 5
 const LOGIN_RATE_WINDOW_MS = 15 * 60 * 1000
 
-function checkLoginRateLimit(request: NextRequest, email: string) {
+async function checkLoginRateLimit(request: NextRequest, email: string) {
   const key = `login:${clientIp(request.headers)}:${email.toLowerCase()}`
   return rateLimit(key, LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW_MS)
 }
@@ -293,7 +293,7 @@ async function handleMysqlAuth(request: NextRequest, body: any) {
     const email = String(body?.email || '').toLowerCase().trim()
     const password = String(body?.password || '')
 
-    const gate = checkLoginRateLimit(request, email)
+    const gate = await checkLoginRateLimit(request, email)
     if (!gate.ok) return tooManyAttempts(gate.retryAfterSeconds)
 
     const user = await mysqlGetUserByEmail(email)
@@ -394,7 +394,7 @@ export async function POST(request: NextRequest) {
       const email = String(body?.email || '').toLowerCase().trim()
       const password = String(body?.password || '')
 
-      const gate = checkLoginRateLimit(request, email)
+      const gate = await checkLoginRateLimit(request, email)
       if (!gate.ok) return tooManyAttempts(gate.retryAfterSeconds)
 
       const { data, error } = await supabaseRest<CMUser[]>(
