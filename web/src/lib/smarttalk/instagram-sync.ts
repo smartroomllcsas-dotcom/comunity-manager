@@ -152,6 +152,7 @@ const INSTAGRAM_SYNC_RESOURCE = "instagram_inbox";
 
 type InstagramSyncMetadata = {
   conversationsCursor?: string | null;
+  messageCursors?: Record<string, string>;
 };
 
 async function getInstagramSyncMetadata(organizationId: string): Promise<InstagramSyncMetadata> {
@@ -467,11 +468,25 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
 
         result.conversations += 1;
 
-        const messageRows = await graphGetPaginated<InstagramMessage>(
-          `${encodeURIComponent(conversation.id)}/messages?fields=id,message,from,to,created_time,attachments,sticker&limit=${MESSAGE_LIMIT}`,
+        // Cursor persistente por conversación: si el sync anterior paró mid-way, retomamos.
+        const savedCursors = syncMeta.messageCursors ?? {};
+        const messageStartPath = savedCursors[conversation.id]
+          || `${encodeURIComponent(conversation.id)}/messages?fields=id,message,from,to,created_time,attachments,sticker&limit=${MESSAGE_LIMIT}`;
+
+        const { items: messageRows, nextCursor: messagesNextCursor } = await graphGetPaginatedWithCursor<InstagramMessage>(
+          messageStartPath,
           pageToken,
           MESSAGE_MAX_PAGES
         );
+
+        // Actualiza el cursor de esta conversación (o lo limpia si llegamos al final).
+        const updatedCursors = { ...savedCursors };
+        if (messagesNextCursor) {
+          updatedCursors[conversation.id] = messagesNextCursor;
+        } else {
+          delete updatedCursors[conversation.id];
+        }
+        syncMeta.messageCursors = updatedCursors;
         const messageIds = messageRows.map((message) => message.id).filter(Boolean);
 
         const { data: existingMessages } = messageIds.length
@@ -546,6 +561,11 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
             .eq("id", conversationId);
         }
       }
+
+      // Persistimos los cursors de mensajes tras procesar todas las conversaciones del canal.
+      await saveInstagramSyncMetadata(organizationId, {
+        messageCursors: syncMeta.messageCursors ?? {},
+      });
 
       await admin
         .from("channels")

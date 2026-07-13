@@ -66,6 +66,13 @@ async function processBatch() {
     .eq("status", "processed")
     .lt("processed_at", retentionCutoff);
 
+  // Retention: rate_limit_hits con hit_at >24h ya no aportan (ventana máxima usada es 15 min).
+  const rateLimitCutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const { count: rateLimitDeleted } = await admin
+    .from("rate_limit_hits")
+    .delete({ count: "exact" })
+    .lt("hit_at", rateLimitCutoff);
+
   return NextResponse.json({
     batch: rows?.length ?? 0,
     processed,
@@ -74,6 +81,7 @@ async function processBatch() {
     deadLetterAlert: alert,
     queueStallAlert: stallAlert,
     retentionDeleted: retentionDeleted ?? 0,
+    rateLimitDeleted: rateLimitDeleted ?? 0,
   });
 }
 

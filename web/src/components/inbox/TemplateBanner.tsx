@@ -159,22 +159,34 @@ export function buildTemplateComponents(params: {
     });
   }
 
-  // BUTTONS: solo QUICK_REPLY necesita payload en el send request.
-  // URL con {{1}} necesitaría un parámetro adicional — no soportado todavía.
+  // BUTTONS: QUICK_REPLY siempre requiere payload; URL con {{N}} requiere el valor.
   if (params.buttons && params.buttons.length > 0) {
     params.buttons.forEach((btn, index) => {
-      if (btn.type !== "QUICK_REPLY") return;
-      const payload = params.buttonPayloads?.[index] || btn.text || `button_${index}`;
-      out.push({
-        type: "button",
-        sub_type: "quick_reply",
-        index: String(index),
-        parameters: [{ type: "payload", payload }],
-      });
+      if (btn.type === "QUICK_REPLY") {
+        const payload = params.buttonPayloads?.[index] || btn.text || `button_${index}`;
+        out.push({
+          type: "button",
+          sub_type: "quick_reply",
+          index: String(index),
+          parameters: [{ type: "payload", payload }],
+        });
+      } else if (btn.type === "URL" && btn.url && /\{\{\s*\d+\s*\}\}/.test(btn.url)) {
+        const value = params.buttonPayloads?.[index] || "";
+        out.push({
+          type: "button",
+          sub_type: "url",
+          index: String(index),
+          parameters: [{ type: "text", text: value }],
+        });
+      }
     });
   }
 
   return out;
+}
+
+export function urlButtonHasVariable(btn: TemplateButton) {
+  return btn.type === "URL" && !!btn.url && /\{\{\s*\d+\s*\}\}/.test(btn.url);
 }
 
 /** @deprecated usar buildTemplateComponents. Mantenido por compatibilidad. */
@@ -235,7 +247,20 @@ export function TemplateBanner({
   const allHeaderTextVarsFilled = header.variableIndices.every((idx) => (headerTextValues[idx] ?? "").trim().length > 0);
   const headerMediaRequired = header.present && (header.format === "IMAGE" || header.format === "VIDEO" || header.format === "DOCUMENT");
   const headerMediaFilled = !headerMediaRequired || headerMediaUrl.trim().length > 0;
-  const canSend = !!selectedTemplate && allBodyVariablesFilled && allHeaderTextVarsFilled && headerMediaFilled && !sending;
+
+  const quickReplyButtons = buttons
+    .map((btn, index) => ({ ...btn, _index: index }))
+    .filter((btn) => btn.type === "QUICK_REPLY");
+
+  const urlButtonsWithVar = buttons
+    .map((btn, index) => ({ ...btn, _index: index }))
+    .filter((btn) => urlButtonHasVariable(btn));
+
+  const allUrlVarsFilled = urlButtonsWithVar.every(
+    (btn) => (buttonPayloads[btn._index] ?? "").trim().length > 0
+  );
+
+  const canSend = !!selectedTemplate && allBodyVariablesFilled && allHeaderTextVarsFilled && headerMediaFilled && allUrlVarsFilled && !sending;
 
   const previewText = selectedTemplate ? renderTemplatePreview(selectedTemplate, values) : "";
 
@@ -254,10 +279,6 @@ export function TemplateBanner({
       })
     );
   };
-
-  const quickReplyButtons = buttons
-    .map((btn, index) => ({ ...btn, _index: index }))
-    .filter((btn) => btn.type === "QUICK_REPLY");
 
   return (
     <div className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
@@ -415,6 +436,26 @@ export function TemplateBanner({
                         }
                         disabled={sending}
                         placeholder={btn.text}
+                        className="min-h-[30px] rounded-md border border-[#2d333b] bg-[#0d1117] px-2 text-xs text-white outline-none focus:border-amber-400/70"
+                      />
+                    </label>
+                  ))}
+                </div>
+              )}
+              {urlButtonsWithVar.length > 0 && (
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {urlButtonsWithVar.map((btn) => (
+                    <label key={`url-${btn._index}`} className="flex flex-col gap-1">
+                      <span className="text-[10px] uppercase tracking-[0.15em] text-amber-200/70">
+                        Variable URL &quot;{btn.text}&quot;
+                      </span>
+                      <input
+                        value={buttonPayloads[btn._index] ?? ""}
+                        onChange={(event) =>
+                          setButtonPayloads((prev) => ({ ...prev, [btn._index]: event.target.value }))
+                        }
+                        disabled={sending}
+                        placeholder={btn.url}
                         className="min-h-[30px] rounded-md border border-[#2d333b] bg-[#0d1117] px-2 text-xs text-white outline-none focus:border-amber-400/70"
                       />
                     </label>
