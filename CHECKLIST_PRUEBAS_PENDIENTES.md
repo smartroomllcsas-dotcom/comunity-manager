@@ -21,6 +21,15 @@ Manual principal:
 - [x] Migracion `011` aplicada y objetos verificados en Supabase.
 - [x] Usuarios y asesores separados en modelo, limites e interfaz.
 - [x] Cron diario compatible con Vercel Hobby.
+- [x] Portada publica con planes vigentes.
+- [x] Seleccion de plan y registro comercial.
+- [x] Agencia creada en plan gratuito con plan elegido pendiente.
+- [x] Propietario creado como administrador y usuario de agencia.
+- [x] Migracion `012` aplicada en Supabase.
+- [x] Checkout bloqueado si faltan credenciales de la pasarela.
+- [ ] Desplegar portada publica y onboarding en Vercel Production.
+- [ ] Configurar credenciales ePayco sandbox en Vercel.
+- [ ] Completar un pago sandbox desde el onboarding publico.
 - [ ] Funcion PostgreSQL transaccional validada en staging.
 - [ ] Disenos autenticados revisados en navegador.
 - [ ] Worker de outbox implementado y probado.
@@ -75,7 +84,7 @@ Manual principal:
 
 ## C. Regresion de autenticacion
 
-- [ ] Registro nuevo.
+- [x] Registro nuevo mediante seleccion de plan.
 - [ ] Login correcto.
 - [ ] Login incorrecto.
 - [ ] Migracion de contrasena heredada a `bcrypt`.
@@ -146,7 +155,7 @@ Manual principal:
 - [ ] Configurar limites por periodo.
 - [ ] Configurar precio COP real.
 - [ ] Publicar plan.
-- [ ] Plan visible en facturacion.
+- [x] Plan visible en catalogo publico.
 - [ ] Plan sin precio no es comprable.
 - [ ] Nueva version no modifica suscripciones actuales.
 - [ ] Archivar plan impide nuevas compras.

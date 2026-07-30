@@ -10,11 +10,30 @@ import { clientIp, rateLimitWithWhitelist } from '@/lib/rate-limit'
 const SESSION_KEY = 'cm_user_id'
 const LOGIN_RATE_LIMIT = 5
 const LOGIN_RATE_WINDOW_MS = 15 * 60 * 1000
+const REGISTER_RATE_LIMIT = 3
+const REGISTER_RATE_WINDOW_MS = 60 * 60 * 1000
+
+interface RegistrationContext {
+  organizationName: string
+  billingPhone: string
+  billingCountryCode: string
+  selectedPlanId: string
+}
 
 async function checkLoginRateLimit(request: NextRequest, email: string) {
   const ip = clientIp(request.headers)
   const key = `login:${ip}:${email.toLowerCase()}`
   return rateLimitWithWhitelist(ip, key, LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW_MS)
+}
+
+async function checkRegisterRateLimit(request: NextRequest) {
+  const ip = clientIp(request.headers)
+  return rateLimitWithWhitelist(
+    ip,
+    `register:${ip}`,
+    REGISTER_RATE_LIMIT,
+    REGISTER_RATE_WINDOW_MS
+  )
 }
 
 function tooManyAttempts(retryAfterSeconds: number) {
@@ -141,7 +160,8 @@ async function bridgeSmarttalkSession(
   response: NextResponse,
   cmUser: CMUser,
   email: string,
-  password: string
+  password: string,
+  registration?: RegistrationContext
 ) {
   const publicAdmin = createAdminClient('public')
   const smarttalkAdmin = createAdminClient('smarttalk')
@@ -224,7 +244,9 @@ async function bridgeSmarttalkSession(
     let organizationId = firstClient?.smarttalk_organization_id ?? null
 
     if (!organizationId) {
-      const orgName = cmUser.name ? `${cmUser.name} Workspace` : `${email} Workspace`
+      const orgName =
+        registration?.organizationName ||
+        (cmUser.name ? `${cmUser.name} Workspace` : `${email} Workspace`)
       const { data: freePlan } = await smarttalkAdmin
         .from('plans')
         .select('id')
@@ -238,6 +260,15 @@ async function bridgeSmarttalkSession(
           name: orgName,
           cm_client_id: firstClient?.id ?? null,
           plan_id: freePlan?.id || null,
+          ...(registration
+            ? {
+                billing_email: email,
+                billing_phone: registration.billingPhone,
+                billing_country_code: registration.billingCountryCode,
+                onboarding_plan_id: registration.selectedPlanId,
+                onboarding_status: 'pending_payment',
+              }
+            : {}),
         })
         .select('id')
         .single()
@@ -255,7 +286,7 @@ async function bridgeSmarttalkSession(
       .eq('user_id', cmUser.id)
       .is('smarttalk_organization_id', null)
 
-    const role = cmUser.role === 'admin' ? 'admin' : 'agent'
+    const role = registration || cmUser.role === 'admin' ? 'admin' : 'agent'
     const { error: agentErr } = await smarttalkAdmin.from('agents').insert({
       id: authUserId,
       organization_id: organizationId,
@@ -326,7 +357,7 @@ async function handleMysqlAuth(request: NextRequest, body: any) {
     }
 
     if (wantsHtmlRedirect) {
-      const response = NextResponse.redirect(new URL('/', request.url), { status: 303 })
+      const response = NextResponse.redirect(new URL('/app', request.url), { status: 303 })
       response.headers.set('Set-Cookie', buildSessionCookie(user.id))
       return response
     }
@@ -370,7 +401,7 @@ async function handleMysqlAuth(request: NextRequest, body: any) {
     }
 
     if (wantsHtmlRedirect) {
-      const response = NextResponse.redirect(new URL('/', request.url), { status: 303 })
+      const response = NextResponse.redirect(new URL('/app', request.url), { status: 303 })
       response.headers.set('Set-Cookie', buildSessionCookie(user.id))
       return response
     }
@@ -437,7 +468,7 @@ export async function POST(request: NextRequest) {
       }
 
       const response = wantsHtmlRedirect
-        ? NextResponse.redirect(new URL('/', request.url), { status: 303 })
+        ? NextResponse.redirect(new URL('/app', request.url), { status: 303 })
         : NextResponse.json({ user: sanitizeUser(user), error: null })
 
       const bridgeError = await bridgeSmarttalkSession(request, response, user, email, password)
@@ -449,9 +480,79 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'register') {
+      const registrationGate = await checkRegisterRateLimit(request)
+      if (!registrationGate.ok) {
+        return tooManyAttempts(registrationGate.retryAfterSeconds)
+      }
+
       const email = String(body?.email || '').toLowerCase().trim()
       const password = String(body?.password || '')
       const name = String(body?.name || '').trim()
+      const organizationName = String(body?.organizationName || '').trim()
+      const billingPhone = String(body?.billingPhone || '').trim()
+      const billingCountryCode = String(body?.billingCountryCode || 'CO').trim().toUpperCase()
+      const selectedPlanCode = String(body?.selectedPlanCode || '').trim()
+
+      if (
+        !email ||
+        !email.includes('@') ||
+        password.length < 8 ||
+        name.length < 2 ||
+        !organizationName ||
+        organizationName.length > 120 ||
+        billingPhone.length < 7 ||
+        billingPhone.length > 30 ||
+        !/^[A-Z]{2}$/.test(billingCountryCode) ||
+        !selectedPlanCode
+      ) {
+        return NextResponse.json(
+          { user: null, error: 'Datos de registro incompletos o inválidos' },
+          { status: 400 }
+        )
+      }
+
+      const smarttalkAdmin = createAdminClient('smarttalk')
+      const { data: selectedPlan, error: selectedPlanError } = await smarttalkAdmin
+        .from('plans')
+        .select('id')
+        .eq('code', selectedPlanCode)
+        .eq('status', 'active')
+        .eq('is_public', true)
+        .maybeSingle()
+
+      if (selectedPlanError || !selectedPlan) {
+        return NextResponse.json(
+          { user: null, error: 'El plan seleccionado no está disponible' },
+          { status: 409 }
+        )
+      }
+
+      const { data: gatewayRows } = await smarttalkAdmin
+        .from('payment_gateway_settings')
+        .select('gateway')
+        .eq('is_enabled', true)
+        .eq('checkout_enabled', true)
+      const enabledGateways = (gatewayRows || []).map((row) => row.gateway)
+
+      const { data: activePrice } = await smarttalkAdmin
+        .from('plan_prices')
+        .select('id')
+        .eq('plan_id', selectedPlan.id)
+        .eq('currency', 'COP')
+        .eq('billing_interval', 'month')
+        .eq('is_active', true)
+        .in('provider', enabledGateways)
+        .lte('active_from', new Date().toISOString())
+        .is('active_to', null)
+        .limit(1)
+        .maybeSingle()
+
+      if (!activePrice) {
+        return NextResponse.json(
+          { user: null, error: 'El plan no tiene un precio activo' },
+          { status: 409 }
+        )
+      }
 
       const { data: existingRows, error: existingError } = await supabaseRest<Pick<CMUser, 'id'>[]>(
         `cm_users?select=id&email=eq.${encodeURIComponent(email)}`
@@ -468,6 +569,26 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ user: null, error: 'Email already registered' }, { status: 409 })
       }
 
+      const publicAdmin = createAdminClient('public')
+      const { data: authUsers, error: authUsersError } =
+        await publicAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+      if (authUsersError) {
+        return NextResponse.json(
+          { user: null, error: 'No se pudo validar la cuenta de autenticación' },
+          { status: 500 }
+        )
+      }
+      if (
+        authUsers.users.some(
+          (authUser) => authUser.email?.toLowerCase() === email
+        )
+      ) {
+        return NextResponse.json(
+          { user: null, error: 'Este correo ya tiene una cuenta. Inicia sesión.' },
+          { status: 409 }
+        )
+      }
+
       const passwordHash = await hashPassword(password)
       const { data, error } = await supabaseRest<CMUser[]>(
         'cm_users',
@@ -477,6 +598,8 @@ export async function POST(request: NextRequest) {
             email,
             password_hash: passwordHash,
             name,
+            role: 'user',
+            plan: 'free',
           },
         }
       )
@@ -492,10 +615,22 @@ export async function POST(request: NextRequest) {
       }
 
       const response = wantsHtmlRedirect
-        ? NextResponse.redirect(new URL('/', request.url), { status: 303 })
+        ? NextResponse.redirect(new URL('/app', request.url), { status: 303 })
         : NextResponse.json({ user: sanitizeUser(user), error: null })
 
-      const bridgeError = await bridgeSmarttalkSession(request, response, user, email, password)
+      const bridgeError = await bridgeSmarttalkSession(
+        request,
+        response,
+        user,
+        email,
+        password,
+        {
+          organizationName,
+          billingPhone,
+          billingCountryCode,
+          selectedPlanId: selectedPlan.id,
+        }
+      )
       if (bridgeError) {
         return NextResponse.json({ user: null, error: bridgeError }, { status: 500 })
       }

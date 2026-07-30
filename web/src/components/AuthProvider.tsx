@@ -19,6 +19,7 @@ export function useAuth() {
 }
 
 const PUBLIC_ROUTES = new Set([
+  '/',
   '/login',
   '/st/login',
   '/privacy-policy',

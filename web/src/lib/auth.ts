@@ -37,15 +37,31 @@ export async function login(email: string, password: string): Promise<{ user: CM
   return { user: payload.user as CMUser, error: null }
 }
 
-export async function register(email: string, password: string, name: string): Promise<{ user: CMUser | null; error: string | null }> {
+export interface RegistrationData {
+  email: string
+  password: string
+  name: string
+  organizationName?: string
+  billingPhone?: string
+  billingCountryCode?: string
+  selectedPlanCode?: string
+}
+
+export async function register(
+  emailOrData: string | RegistrationData,
+  password?: string,
+  name?: string
+): Promise<{ user: CMUser | null; error: string | null }> {
+  const data: RegistrationData =
+    typeof emailOrData === 'string'
+      ? { email: emailOrData, password: password || '', name: name || '' }
+      : emailOrData
   const res = await fetch('/api/auth/local', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       action: 'register',
-      email,
-      password,
-      name,
+      ...data,
     }),
   })
 

@@ -5,8 +5,8 @@ import AuthProvider from '@/components/AuthProvider'
 import FacebookSDK from '@/components/FacebookSDK'
 
 export const metadata: Metadata = {
-  title: 'ComunityAgent - Community Manager Platform',
-  description: 'AI-powered community management platform',
+  title: 'ComunityManager - Gestión multicanal para agencias',
+  description: 'Centraliza WhatsApp, Facebook Messenger e Instagram para gestionar marcas, asesores y conversaciones.',
   icons: {
     icon: '/community-manager-logo.png',
     shortcut: '/community-manager-logo.png',

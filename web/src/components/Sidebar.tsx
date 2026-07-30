@@ -6,7 +6,7 @@ import { useAuth } from './AuthProvider'
 import LegalLinks from './LegalLinks'
 
 const navItems = [
-  { href: '/', label: 'Panel', icon: LayoutIcon },
+  { href: '/app', label: 'Panel', icon: LayoutIcon },
   { href: '/chat', label: 'Chat', icon: ChatIcon },
   { href: '/clients', label: 'Clientes', icon: UsersIcon },
   { href: '/calendar', label: 'Calendario', icon: CalendarIcon },
@@ -18,7 +18,7 @@ export default function Sidebar() {
   const pathname = usePathname()
   const { user, logout } = useAuth()
 
-  const isActive = (href: string) => pathname === href || (href !== '/' && pathname.startsWith(href))
+  const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`)
 
   return (
     <aside className="fixed left-0 top-0 h-screen w-60 bg-slate-950 border-r border-slate-800 flex flex-col z-50">

@@ -2,7 +2,7 @@
 
 Fecha de preparacion: 2026-07-29  
 Fecha de aplicacion: 2026-07-30  
-Estado: `009`, `010` y `011` aplicadas y verificadas en Supabase `smartmedia`
+Estado: `009`, `010`, `011` y `012` aplicadas y verificadas en Supabase `smartmedia`
 Renovacion inicial: manual
 
 ## Registro de aplicacion
@@ -27,6 +27,8 @@ Resultado verificado:
 - Wompi y PayU inician deshabilitadas en `sandbox` y renovacion `manual`.
 - No se activaron cobros automaticos.
 - `011` separa usuarios de agencia y asesores de marca.
+- `012` agrega el onboarding publico y conserva el plan elegido como pendiente.
+- La activacion sigue dependiendo de un pago aprobado.
 - Existen asignaciones de asesor y de invitacion con integridad por agencia.
 - Los agentes existentes quedaron como usuarios de agencia.
 - No se crearon asesores automaticamente.
@@ -47,6 +49,18 @@ aplicados.
 1. `web/supabase/migrations/20260729000100_009_agency_billing_foundation.sql`
 2. `web/supabase/migrations/20260729000200_010_multi_gateway_manual_renewal.sql`
 3. `web/supabase/migrations/20260730000100_011_agency_users_brand_advisors.sql`
+4. `web/supabase/migrations/20260730000200_012_public_plan_onboarding.sql`
+
+## Migracion 012
+
+Objetivo:
+
+- Guarda datos de facturacion de la organizacion.
+- Guarda el plan comercial elegido sin asignarlo como plan activo.
+- Registra el estado del onboarding.
+- Sincroniza el onboarding con estados del checkout.
+- No modifica canales, mensajes ni suscripciones existentes.
+- Fue aplicada y validada el 2026-07-30.
 
 ## Migracion 011
 
@@ -220,4 +234,4 @@ PAYMENT_AUTO_RENEWAL_APPROVED=false
 
 Ademas, deshabilitar checkout desde
 `/admin/payment-gateways`. No eliminar tablas ni columnas en una emergencia.
-Si se requiere correccion de esquema, crear una migracion `011` hacia adelante.
+Si se requiere correccion de esquema, crear una nueva migracion hacia adelante.

@@ -53,6 +53,20 @@ Cada plan:
 - Tiene un precio mensual COP activo para ePayco.
 - Usa ePayco sandbox y renovacion manual.
 
+## Usuario de prueba del onboarding publico
+
+- Correo: `cliente.prueba.planes@comunitymanager.io`
+- Nombre: `Cliente Prueba Planes`
+- Agencia: `Agencia Prueba Onboarding`
+- Organization ID: `3b3f344a-a546-48de-a796-b9313c849ec7`
+- Rol: `admin`
+- Tipo: `agency_user`
+- Plan activo inicial: `free`
+- Plan elegido: `demo-inicial-2026`
+- Estado de onboarding: `pending_payment`
+- Suscripciones antes del pago: `0`
+- La contrasena temporal no se almacena en Git.
+
 ## Evidencia de validacion
 
 - Login de produccion: HTTP `200`.
@@ -63,6 +77,8 @@ Cada plan:
 - La migracion `011` agrega `agency.users`, `brand.advisors_total` y
   `brand.advisors_per_brand`.
 - ePayco: habilitada en `sandbox`.
+- Checkout de onboarding: bloqueado correctamente por credenciales ePayco
+  pendientes (`PAYMENT_GATEWAY_NOT_CONFIGURED`).
 - Renovacion automatica: no habilitada.
 - `BILLING_ENFORCEMENT_MODE`: `off`.
 

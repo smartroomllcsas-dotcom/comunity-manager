@@ -2,14 +2,13 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { login, register } from '@/lib/auth'
+import Link from 'next/link'
+import { login } from '@/lib/auth'
 import LegalLinks from '@/components/LegalLinks'
 
 export default function LoginPage() {
-  const [isRegister, setIsRegister] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [pending, setPending] = useState(false)
   const router = useRouter()
@@ -21,16 +20,14 @@ export default function LoginPage() {
     setPending(true)
 
     try {
-      const result = isRegister
-        ? await register(email, password, name)
-        : await login(email, password)
+      const result = await login(email, password)
 
       if (result.error) {
         setError(result.error)
         return
       }
 
-      router.push('/')
+      router.push('/app')
     } finally {
       setPending(false)
     }
@@ -55,25 +52,11 @@ export default function LoginPage() {
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
           <h2 className="text-lg font-semibold text-slate-100 mb-5">
-            {isRegister ? 'Crear Cuenta' : 'Iniciar Sesión'}
+            Iniciar Sesión
           </h2>
 
           <form action="/api/auth/local" method="post" onSubmit={handleSubmit} className="space-y-4">
-            <input type="hidden" name="action" value={isRegister ? 'register' : 'login'} />
-            {isRegister && (
-              <div>
-                <label className="text-xs text-slate-400 block mb-1.5">Nombre</label>
-                <input
-                  type="text"
-                  name="name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required={isRegister}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500 transition-colors"
-                  placeholder="Tu nombre"
-                />
-              </div>
-            )}
+            <input type="hidden" name="action" value="login" />
 
             <div>
               <label className="text-xs text-slate-400 block mb-1.5">Email</label>
@@ -112,17 +95,14 @@ export default function LoginPage() {
               disabled={pending}
               className="w-full bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 disabled:opacity-50 text-white rounded-lg py-2.5 text-sm font-medium transition-colors"
             >
-              {pending ? 'Cargando...' : isRegister ? 'Crear Cuenta' : 'Iniciar Sesión'}
+              {pending ? 'Cargando...' : 'Iniciar Sesión'}
             </button>
           </form>
 
           <div className="mt-5 text-center space-y-2">
-            <button
-              onClick={() => { setIsRegister(!isRegister); setError('') }}
-              className="text-xs text-violet-400 hover:text-violet-300 transition-colors"
-            >
-              {isRegister ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes cuenta? Regístrate'}
-            </button>
+            <Link href="/#planes" className="text-xs text-violet-400 hover:text-violet-300 transition-colors">
+              ¿No tienes cuenta? Elige un plan
+            </Link>
             <p className="text-xs text-slate-500">
               Login unificado: tu cuenta da acceso al panel de CommunityAgent y a la bandeja multicanal.
             </p>
