@@ -11,8 +11,9 @@ import type { PaymentGatewayCode } from "@/lib/payments/types";
 
 export const dynamic = "force-dynamic";
 
-function ProgressBar({ current, max, label }: { current: number; max: number; label: string }) {
-  const pct = max > 0 ? Math.min((current / max) * 100, 100) : 0;
+function ProgressBar({ current, max, label }: { current: number; max: number | null; label: string }) {
+  const unlimited = max === null || max < 0;
+  const pct = !unlimited && max > 0 ? Math.min((current / max) * 100, 100) : 0;
   const color =
     pct > 90 ? "bg-red-500" : pct > 70 ? "bg-yellow-500" : "bg-blue-500";
   return (
@@ -20,7 +21,7 @@ function ProgressBar({ current, max, label }: { current: number; max: number; la
       <div className="flex items-center justify-between text-xs mb-1.5">
         <span className="text-[#8b949e]">{label}</span>
         <span className="text-white font-medium">
-          {current.toLocaleString()} / {max.toLocaleString()}
+          {current.toLocaleString()} / {unlimited ? "Ilimitado" : max.toLocaleString()}
         </span>
       </div>
       <div className="h-2 bg-[#2d333b] rounded-full overflow-hidden">
@@ -45,6 +46,7 @@ export default function BillingSettingsPage() {
   const [enabledGateways, setEnabledGateways] = useState<PaymentGatewayCode[]>([]);
   const [usage, setUsage] = useState({
     agents: 0,
+    advisors: 0,
     contacts: 0,
     broadcasts: 0,
     flows: 0,
@@ -56,16 +58,17 @@ export default function BillingSettingsPage() {
       setLoading(true);
       const orgId = currentAgent!.organization_id;
 
-      const [orgRes, plansRes, agentsRes, contactsRes, broadcastsRes, flowsRes, subRes, paymentsRes, gatewaysRes] =
+      const [orgRes, plansRes, agentsRes, advisorsRes, contactsRes, broadcastsRes, flowsRes, subRes, paymentsRes, gatewaysRes] =
         await Promise.all([
-          supabase.from("organizations").select("*, plan:plans(*)").eq("id", orgId).single(),
+          supabase.from("organizations").select("*, plan:plans(*, entitlements:plan_entitlements(*))").eq("id", orgId).single(),
           supabase
             .from("plans")
-            .select("*, prices:plan_prices(*)")
+            .select("*, prices:plan_prices(*), entitlements:plan_entitlements(*)")
             .eq("status", "active")
             .eq("is_public", true)
             .order("price_monthly", { ascending: true }),
-          supabase.from("agents").select("id", { count: "exact", head: true }).eq("organization_id", orgId),
+          supabase.from("agents").select("id", { count: "exact", head: true }).eq("organization_id", orgId).eq("member_type", "agency_user"),
+          supabase.from("agents").select("id", { count: "exact", head: true }).eq("organization_id", orgId).eq("member_type", "brand_advisor"),
           supabase.from("contacts").select("id", { count: "exact", head: true }).eq("organization_id", orgId),
           supabase
             .from("broadcasts")
@@ -96,6 +99,7 @@ export default function BillingSettingsPage() {
       }
       setUsage({
         agents: agentsRes.count ?? 0,
+        advisors: advisorsRes.count ?? 0,
         contacts: contactsRes.count ?? 0,
         broadcasts: broadcastsRes.count ?? 0,
         flows: flowsRes.count ?? 0,
@@ -161,7 +165,13 @@ export default function BillingSettingsPage() {
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div className="flex items-center gap-2 text-[#8b949e]">
                 <Check className="h-3.5 w-3.5 text-green-400" />
-                {currentPlan.max_agents} agentes
+                {currentPlan.max_agents} usuarios de agencia
+              </div>
+              <div className="flex items-center gap-2 text-[#8b949e]">
+                <Check className="h-3.5 w-3.5 text-green-400" />
+                {currentPlan.entitlements?.find(
+                  (item) => item.feature_code === "brand.advisors_total"
+                )?.limit_value ?? "Ilimitados"} asesores de marca
               </div>
               <div className="flex items-center gap-2 text-[#8b949e]">
                 <Check className="h-3.5 w-3.5 text-green-400" />
@@ -195,7 +205,14 @@ export default function BillingSettingsPage() {
             <ProgressBar
               current={usage.agents}
               max={currentPlan?.max_agents ?? 1}
-              label="Agentes"
+              label="Usuarios de agencia"
+            />
+            <ProgressBar
+              current={usage.advisors}
+              max={currentPlan?.entitlements?.find(
+                (item) => item.feature_code === "brand.advisors_total"
+              )?.limit_value ?? null}
+              label="Asesores de marca"
             />
             <ProgressBar
               current={usage.contacts}
@@ -257,6 +274,9 @@ export default function BillingSettingsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {plans.map((plan) => {
               const isCurrent = currentPlan?.id === plan.id;
+              const advisorLimit = plan.entitlements?.find(
+                (item) => item.feature_code === "brand.advisors_total"
+              )?.limit_value;
               const activePrices = (plan.prices || []).filter(
                 (item) =>
                   item.is_active &&
@@ -297,7 +317,13 @@ export default function BillingSettingsPage() {
                   <div className="space-y-2 text-xs text-[#8b949e] flex-1 mb-4">
                     <div className="flex items-center gap-2">
                       <Check className="h-3.5 w-3.5 text-green-400 shrink-0" />
-                      {plan.max_agents === -1 ? "Agentes ilimitados" : `${plan.max_agents} agentes`}
+                      {plan.max_agents === -1 ? "Usuarios de agencia ilimitados" : `${plan.max_agents} usuarios de agencia`}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Check className="h-3.5 w-3.5 text-green-400 shrink-0" />
+                      {advisorLimit == null
+                        ? "Asesores de marca ilimitados"
+                        : `${advisorLimit} asesores de marca`}
                     </div>
                     <div className="flex items-center gap-2">
                       <Check className="h-3.5 w-3.5 text-green-400 shrink-0" />

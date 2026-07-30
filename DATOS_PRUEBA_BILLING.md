@@ -38,17 +38,18 @@ debe registrarse mediante el checkout y la confirmacion sandbox.
 
 ## Planes de ejemplo
 
-| Codigo | Nombre | Precio mensual COP | Agentes | Marcas | Canales | Contactos | Mensajes/mes | IA |
-|---|---|---:|---:|---:|---:|---:|---:|---|
-| `demo-inicial-2026` | Demo Inicial | 59.000 | 2 | 5 | 3 | 1.000 | 1.000 | No |
-| `demo-crecimiento-2026` | Demo Crecimiento | 149.000 | 5 | 15 | 10 | 10.000 | 10.000 | Si |
-| `demo-escala-2026` | Demo Escala | 299.000 | 15 | 50 | 30 | 50.000 | 50.000 | Si |
+| Codigo | Nombre | Precio COP | Usuarios agencia | Asesores | Por marca | Marcas | Canales |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `demo-inicial-2026` | Demo Inicial | 59.000 | 2 | 5 | 2 | 5 | 3 |
+| `demo-crecimiento-2026` | Demo Crecimiento | 149.000 | 5 | 20 | 5 | 15 | 10 |
+| `demo-escala-2026` | Demo Escala | 299.000 | 15 | 75 | 15 | 50 | 30 |
 
 Cada plan:
 
 - Esta en estado `active`.
 - Es publico.
-- Tiene 12 beneficios configurados.
+- Tiene 15 beneficios configurados, incluidos los tres limites nuevos.
+- Tiene limites separados para usuarios de agencia y asesores de marca.
 - Tiene un precio mensual COP activo para ePayco.
 - Usa ePayco sandbox y renovacion manual.
 
@@ -58,7 +59,9 @@ Cada plan:
 - API `/api/admin/plans` con la sesion creada: HTTP `200`.
 - Planes demo encontrados: `3`.
 - Precio ePayco activo por plan: `1`.
-- Beneficios por plan: `12`.
+- Beneficios por plan demo: `15`.
+- La migracion `011` agrega `agency.users`, `brand.advisors_total` y
+  `brand.advisors_per_brand`.
 - ePayco: habilitada en `sandbox`.
 - Renovacion automatica: no habilitada.
 - `BILLING_ENFORCEMENT_MODE`: `off`.
@@ -86,4 +89,3 @@ durante las pruebas. Para retirar el catalogo demo:
 3. Archivar los planes con prefijo `demo-`.
 4. Desactivar el usuario administrativo de prueba.
 5. Conservar eventos y pagos para trazabilidad.
-

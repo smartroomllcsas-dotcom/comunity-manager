@@ -8,6 +8,7 @@ import type {
 interface BillingCheckInput {
   organizationId: string;
   featureCode: BillingFeatureCode;
+  brandId?: string;
   requestedUnits?: number;
   source?: string;
 }
@@ -178,7 +179,8 @@ function makeDecision(
 async function getCurrentUsage(
   organizationId: string,
   featureCode: BillingFeatureCode,
-  period: { start: string; end: string }
+  period: { start: string; end: string },
+  brandId?: string
 ) {
   const admin = createAdminClient();
 
@@ -195,6 +197,57 @@ async function getCurrentUsage(
         .eq("status", "pending"),
     ]);
     return (agents.count || 0) + (invitations.count || 0);
+  }
+
+  if (featureCode === BILLING_FEATURES.AGENCY_USERS) {
+    const [agents, invitations] = await Promise.all([
+      admin
+        .from("agents")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .eq("member_type", "agency_user"),
+      admin
+        .from("invitations")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .eq("member_type", "agency_user")
+        .eq("status", "pending"),
+    ]);
+    return (agents.count || 0) + (invitations.count || 0);
+  }
+
+  if (featureCode === BILLING_FEATURES.BRAND_ADVISORS_TOTAL) {
+    const [agents, invitations] = await Promise.all([
+      admin
+        .from("agents")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .eq("member_type", "brand_advisor"),
+      admin
+        .from("invitations")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .eq("member_type", "brand_advisor")
+        .eq("status", "pending"),
+    ]);
+    return (agents.count || 0) + (invitations.count || 0);
+  }
+
+  if (featureCode === BILLING_FEATURES.BRAND_ADVISORS_PER_BRAND) {
+    if (!brandId) return 0;
+    const [assignments, invitationAssignments] = await Promise.all([
+      admin
+        .from("brand_advisor_assignments")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .eq("brand_id", brandId),
+      admin
+        .from("invitation_brand_assignments")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .eq("brand_id", brandId),
+    ]);
+    return (assignments.count || 0) + (invitationAssignments.count || 0);
   }
 
   if (featureCode === BILLING_FEATURES.BRANDS_TOTAL) {
@@ -413,7 +466,8 @@ export async function checkBillingFeature(
   const currentUsage = await getCurrentUsage(
     input.organizationId,
     input.featureCode,
-    period
+    period,
+    input.brandId
   );
   const wouldExceed =
     currentUsage + requestedUnits > Number(entitlement.limit_value);

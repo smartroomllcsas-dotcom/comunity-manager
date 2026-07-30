@@ -14,6 +14,8 @@ const emptyPlan = {
   price_monthly: 0,
   currency: "COP",
   provider: "epayco",
+  max_brand_advisors: 5,
+  max_advisors_per_brand: 2,
   max_brands: 1,
   max_channels: 3,
   max_messages_per_month: 1000,
@@ -64,6 +66,8 @@ export default function AdminPlansPage() {
         : plan.price_monthly,
       currency: activePrice?.currency || "COP",
       provider: activePrice?.provider || "epayco",
+      max_brand_advisors: limitFor("brand.advisors_total", -1),
+      max_advisors_per_brand: limitFor("brand.advisors_per_brand", -1),
       max_brands: limitFor("brands.total", 1),
       max_channels: limitFor("channels.active", 3),
       max_messages_per_month: limitFor(
@@ -194,11 +198,29 @@ export default function AdminPlansPage() {
               </select>
             </div>
             <div>
-              <label className="block text-xs text-[#8b949e] mb-1">Max Agentes (-1 = ilimitado)</label>
+              <label className="block text-xs text-[#8b949e] mb-1">Usuarios de agencia (-1 = ilimitado)</label>
               <input
                 type="number"
                 value={form.max_agents}
                 onChange={(e) => setForm((f) => ({ ...f, max_agents: Number(e.target.value) }))}
+                className="w-full px-3 py-2 bg-[#161b22] border border-[#2d333b] rounded-md text-sm text-white focus:outline-none focus:border-[#3b82f6]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-[#8b949e] mb-1">Asesores de marca totales</label>
+              <input
+                type="number"
+                value={form.max_brand_advisors}
+                onChange={(e) => setForm((f) => ({ ...f, max_brand_advisors: Number(e.target.value) }))}
+                className="w-full px-3 py-2 bg-[#161b22] border border-[#2d333b] rounded-md text-sm text-white focus:outline-none focus:border-[#3b82f6]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-[#8b949e] mb-1">Asesores por marca</label>
+              <input
+                type="number"
+                value={form.max_advisors_per_brand}
+                onChange={(e) => setForm((f) => ({ ...f, max_advisors_per_brand: Number(e.target.value) }))}
                 className="w-full px-3 py-2 bg-[#161b22] border border-[#2d333b] rounded-md text-sm text-white focus:outline-none focus:border-[#3b82f6]"
               />
             </div>
@@ -332,13 +354,13 @@ export default function AdminPlansPage() {
               )}
             </p>
             <div className="space-y-1.5 text-xs text-[#8b949e] flex-1 mb-4">
-              <div>{plan.max_agents === -1 ? "Agentes ilimitados" : `${plan.max_agents} agentes`}</div>
+              <div>{plan.max_agents === -1 ? "Usuarios de agencia ilimitados" : `${plan.max_agents} usuarios de agencia`}</div>
               <div>{plan.max_contacts === -1 ? "Contactos ilimitados" : `${plan.max_contacts.toLocaleString()} contactos`}</div>
               <div>{plan.max_broadcasts_per_month === -1 ? "Broadcasts ilimitados" : `${plan.max_broadcasts_per_month} broadcasts/mes`}</div>
               <div>{plan.max_chatbot_flows === -1 ? "Flujos ilimitados" : `${plan.max_chatbot_flows} flujos`}</div>
               {plan.ai_enabled && <div className="text-blue-400">IA habilitada</div>}
               {plan.entitlements?.filter((item) =>
-                ["brands.total", "channels.active", "messages.outbound_month"].includes(item.feature_code)
+                ["brand.advisors_total", "brand.advisors_per_brand", "brands.total", "channels.active", "messages.outbound_month"].includes(item.feature_code)
               ).map((item) => (
                 <div key={item.feature_code}>
                   {item.feature_code}: {item.limit_value ?? "ilimitado"}

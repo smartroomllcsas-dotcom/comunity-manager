@@ -52,7 +52,7 @@ export async function getCmClientAccess(
       .maybeSingle(),
     smarttalkAdmin
       .from("agents")
-      .select("organization_id")
+      .select("id, organization_id, member_type")
       .eq("id", user.id)
       .maybeSingle(),
   ]);
@@ -69,6 +69,15 @@ export async function getCmClientAccess(
     Boolean(agent?.organization_id) &&
     client.smarttalk_organization_id === agent?.organization_id;
   if (!ownsClient && !belongsToAgency) return null;
+  if (agent?.member_type === "brand_advisor") {
+    const { data: assignment } = await smarttalkAdmin
+      .from("brand_advisor_assignments")
+      .select("id")
+      .eq("agent_id", agent.id)
+      .eq("brand_id", client.id)
+      .maybeSingle();
+    if (!assignment) return null;
+  }
 
   return {
     clientId: client.id,

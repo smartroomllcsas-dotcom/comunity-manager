@@ -2,7 +2,7 @@
 
 Fecha de preparacion: 2026-07-29  
 Fecha de aplicacion: 2026-07-30  
-Estado: `009` y `010` aplicadas y verificadas en el proyecto Supabase `smartmedia`  
+Estado: `009`, `010` y `011` aplicadas y verificadas en Supabase `smartmedia`
 Renovacion inicial: manual
 
 ## Registro de aplicacion
@@ -26,6 +26,10 @@ Resultado verificado:
 - ePayco inicia habilitada para checkout en `sandbox` y renovacion `manual`.
 - Wompi y PayU inician deshabilitadas en `sandbox` y renovacion `manual`.
 - No se activaron cobros automaticos.
+- `011` separa usuarios de agencia y asesores de marca.
+- Existen asignaciones de asesor y de invitacion con integridad por agencia.
+- Los agentes existentes quedaron como usuarios de agencia.
+- No se crearon asesores automaticamente.
 
 ## Regla de despliegue
 
@@ -42,6 +46,18 @@ aplicados.
 
 1. `web/supabase/migrations/20260729000100_009_agency_billing_foundation.sql`
 2. `web/supabase/migrations/20260729000200_010_multi_gateway_manual_renewal.sql`
+3. `web/supabase/migrations/20260730000100_011_agency_users_brand_advisors.sql`
+
+## Migracion 011
+
+Objetivo:
+
+- Separa `agency_user` de `brand_advisor`.
+- Asigna asesores a una o varias marcas.
+- Agrega limites de usuarios de agencia, asesores totales y asesores por marca.
+- Mantiene `team.members` como compatibilidad heredada.
+- No modifica conexiones ni mensajes de Meta, WhatsApp o Instagram.
+- Mantiene enforcement global en `off`.
 
 ## Migracion 009
 

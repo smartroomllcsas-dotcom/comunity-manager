@@ -15,6 +15,8 @@ export default function InvitePage() {
     id: string;
     email: string;
     role: string;
+    memberType: string;
+    brandIds: string[];
     orgName: string;
     organizationId: string;
   } | null>(null);
@@ -82,7 +84,11 @@ export default function InvitePage() {
         <div className="mb-4 p-3 bg-blue-50 rounded-md text-sm text-center">
           <p>
             Has sido invitado a <strong>{invitation.orgName}</strong> como{" "}
-            <strong>{roleLabels[invitation.role] || invitation.role}</strong>
+            <strong>
+              {invitation.memberType === "brand_advisor"
+                ? "Asesor de marca"
+                : roleLabels[invitation.role] || invitation.role}
+            </strong>
           </p>
         </div>
         <form action={handleSubmit} className="space-y-4">

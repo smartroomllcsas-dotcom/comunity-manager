@@ -46,6 +46,15 @@ export async function PATCH(
   if (!targetAgent) {
     return Response.json({ error: "Agent not found in your organization" }, { status: 404 });
   }
+  if (targetAgent.member_type === "brand_advisor" && role !== "agent") {
+    return Response.json(
+      {
+        error:
+          "Un asesor de marca debe conservar el rol Agente. Cambia primero su tipo de miembro.",
+      },
+      { status: 400 }
+    );
+  }
 
   const { error } = await admin
     .from("agents")

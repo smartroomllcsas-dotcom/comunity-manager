@@ -1,7 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const LEGACY_FEATURES = {
-  max_agents: "team.members",
+  max_agents: "agency.users",
   max_contacts: "contacts.total",
   max_broadcasts_per_month: "broadcasts.month",
   max_chatbot_flows: "automations.flows",
@@ -44,6 +44,8 @@ export async function syncPlanEntitlements(
 
   for (const [field, featureCode, resetInterval] of [
     ["max_brands", "brands.total", "none"],
+    ["max_brand_advisors", "brand.advisors_total", "none"],
+    ["max_advisors_per_brand", "brand.advisors_per_brand", "none"],
     ["max_channels", "channels.active", "none"],
     [
       "max_messages_per_month",

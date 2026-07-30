@@ -123,6 +123,7 @@ export interface CMChatMessage {
 
 export type AgentRole = "admin" | "supervisor" | "agent";
 export type AgentStatus = "online" | "away" | "offline";
+export type AgentMemberType = "agency_user" | "brand_advisor";
 export type ConversationStatus = "open" | "pending" | "resolved" | "closed";
 export type ConversationPriority = "low" | "medium" | "high";
 export type MessageDirection = "inbound" | "outbound";
@@ -204,6 +205,7 @@ export interface Invitation {
   organization_id: string;
   email: string;
   role: AgentRole;
+  member_type: AgentMemberType;
   invited_by: string;
   accepted_at: string | null;
   expires_at: string;
@@ -236,6 +238,7 @@ export interface Agent {
   name: string;
   email: string;
   role: AgentRole;
+  member_type: AgentMemberType;
   status: AgentStatus;
   max_concurrent_chats: number;
   is_super_admin: boolean;
@@ -399,11 +402,22 @@ export interface Invitation {
   organization_id: string;
   email: string;
   role: AgentRole;
+  member_type: AgentMemberType;
   status: InvitationStatus;
   invited_by: string;
   expires_at: string;
   created_at: string;
   inviter?: Agent;
+  brand_ids?: string[];
+}
+
+export interface BrandAdvisorAssignment {
+  id: string;
+  organization_id: string;
+  agent_id: string;
+  brand_id: string;
+  created_by: string | null;
+  created_at: string;
 }
 
 export interface InternalNote {

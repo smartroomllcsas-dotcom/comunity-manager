@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAgents } from "@/hooks/useAgents";
 import { useCurrentAgent } from "@/hooks/useCurrentAgent";
 import { useInvitations } from "@/hooks/useInvitations";
@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { UserPlus, Trash2, Mail, Shield, Users, Clock, ArrowLeft } from "lucide-react";
+import { UserPlus, Trash2, Mail, Shield, Users, Clock, ArrowLeft, Building2, UserRoundCog } from "lucide-react";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +47,18 @@ const statusColors: Record<string, { dot: string; label: string }> = {
   offline: { dot: "bg-gray-500", label: "Desconectado" },
 };
 
+interface BrandOption {
+  id: string;
+  name: string;
+  status: string;
+}
+
+interface MembershipAssignment {
+  id: string;
+  agent_id: string;
+  brand_id: string;
+}
+
 export default function AgentsSettingsPage() {
   const { data: agents, isLoading: agentsLoading } = useAgents();
   const { data: currentAgent } = useCurrentAgent();
@@ -56,13 +68,49 @@ export default function AgentsSettingsPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("agent");
+  const [inviteMemberType, setInviteMemberType] = useState("agency_user");
+  const [inviteBrandIds, setInviteBrandIds] = useState<string[]>([]);
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteError, setInviteError] = useState("");
+  const [brands, setBrands] = useState<BrandOption[]>([]);
+  const [assignments, setAssignments] = useState<MembershipAssignment[]>([]);
+  const [membershipOpen, setMembershipOpen] = useState(false);
+  const [membershipAgentId, setMembershipAgentId] = useState("");
+  const [membershipType, setMembershipType] = useState("agency_user");
+  const [membershipBrandIds, setMembershipBrandIds] = useState<string[]>([]);
+  const [membershipError, setMembershipError] = useState("");
+  const [membershipLoading, setMembershipLoading] = useState(false);
 
   const [removeConfirm, setRemoveConfirm] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const isAdmin = currentAgent?.role === "admin";
+
+  async function loadMemberships() {
+    const response = await fetch("/api/agents/memberships", {
+      cache: "no-store",
+    });
+    if (!response.ok) return;
+    const payload = await response.json();
+    setBrands(payload.brands || []);
+    setAssignments(payload.assignments || []);
+  }
+
+  useEffect(() => {
+    if (currentAgent) void loadMemberships();
+  }, [currentAgent?.organization_id]);
+
+  function toggleBrand(
+    brandId: string,
+    selected: string[],
+    setter: (value: string[]) => void
+  ) {
+    setter(
+      selected.includes(brandId)
+        ? selected.filter((id) => id !== brandId)
+        : [...selected, brandId]
+    );
+  }
 
   async function handleInvite() {
     setInviteError("");
@@ -71,7 +119,12 @@ export default function AgentsSettingsPage() {
       const res = await fetch("/api/invitations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+        body: JSON.stringify({
+          email: inviteEmail,
+          role: inviteRole,
+          member_type: inviteMemberType,
+          brand_ids: inviteMemberType === "brand_advisor" ? inviteBrandIds : [],
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -82,8 +135,50 @@ export default function AgentsSettingsPage() {
       setInviteOpen(false);
       setInviteEmail("");
       setInviteRole("agent");
+      setInviteMemberType("agency_user");
+      setInviteBrandIds([]);
     } finally {
       setInviteLoading(false);
+    }
+  }
+
+  function openMembershipEditor(agentId: string, memberType: string) {
+    setMembershipAgentId(agentId);
+    setMembershipType(memberType || "agency_user");
+    setMembershipBrandIds(
+      assignments
+        .filter((assignment) => assignment.agent_id === agentId)
+        .map((assignment) => assignment.brand_id)
+    );
+    setMembershipError("");
+    setMembershipOpen(true);
+  }
+
+  async function handleMembershipSave() {
+    setMembershipError("");
+    setMembershipLoading(true);
+    try {
+      const response = await fetch("/api/agents/memberships", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_id: membershipAgentId,
+          member_type: membershipType,
+          brand_ids: membershipType === "brand_advisor" ? membershipBrandIds : [],
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setMembershipError(payload.error || "No se pudo actualizar el miembro.");
+        return;
+      }
+      await Promise.all([
+        loadMemberships(),
+        queryClient.invalidateQueries({ queryKey: ["agents"] }),
+      ]);
+      setMembershipOpen(false);
+    } finally {
+      setMembershipLoading(false);
     }
   }
 
@@ -132,6 +227,11 @@ export default function AgentsSettingsPage() {
   }
 
   const pendingInvitations = invitations?.filter((i) => i.status === "pending") || [];
+  const agencyUsers =
+    agents?.filter((agent) => (agent.member_type || "agency_user") === "agency_user")
+      .length ?? 0;
+  const brandAdvisors =
+    agents?.filter((agent) => agent.member_type === "brand_advisor").length ?? 0;
 
   return (
     <div className="min-h-full bg-[#0d1117]">
@@ -174,8 +274,36 @@ export default function AgentsSettingsPage() {
                   />
                 </div>
                 <div className="space-y-2">
+                  <Label htmlFor="invite-member-type" className="text-xs text-[#8b949e]">Tipo de miembro</Label>
+                  <Select
+                    value={inviteMemberType}
+                    onValueChange={(value) => {
+                      if (!value) return;
+                      setInviteMemberType(value);
+                      if (value === "brand_advisor") setInviteRole("agent");
+                    }}
+                  >
+                    <SelectTrigger className="w-full bg-[#0d1117] border-[#2d333b] text-white h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#1a1f2e] border-[#2d333b]">
+                      <SelectItem value="agency_user">Usuario de agencia</SelectItem>
+                      <SelectItem value="brand_advisor">Asesor de marca</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-[#8b949e]">
+                    {inviteMemberType === "agency_user"
+                      ? "Trabaja para la agencia y puede colaborar en varias marcas."
+                      : "Pertenece a una marca y consume el limite de asesores, no el de usuarios de agencia."}
+                  </p>
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="invite-role" className="text-xs text-[#8b949e]">Rol</Label>
-                  <Select value={inviteRole} onValueChange={(v) => v && setInviteRole(v)}>
+                  <Select
+                    value={inviteRole}
+                    onValueChange={(v) => v && setInviteRole(v)}
+                    disabled={inviteMemberType === "brand_advisor"}
+                  >
                     <SelectTrigger className="w-full bg-[#0d1117] border-[#2d333b] text-white h-9">
                       <SelectValue />
                     </SelectTrigger>
@@ -191,6 +319,38 @@ export default function AgentsSettingsPage() {
                     {inviteRole === "agent" && "Puede ver y responder solo sus chats asignados."}
                   </p>
                 </div>
+                {inviteMemberType === "brand_advisor" && (
+                  <div className="space-y-2">
+                    <Label className="text-xs text-[#8b949e]">Marcas asignadas</Label>
+                    <div className="max-h-36 overflow-y-auto rounded-md border border-[#2d333b] bg-[#0d1117] p-2 space-y-1">
+                      {brands.length === 0 ? (
+                        <p className="text-xs text-[#8b949e] p-2">
+                          Crea primero una marca para poder invitar asesores.
+                        </p>
+                      ) : (
+                        brands.map((brand) => (
+                          <label
+                            key={brand.id}
+                            className="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-white hover:bg-[#1a1f2e] cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={inviteBrandIds.includes(brand.id)}
+                              onChange={() =>
+                                toggleBrand(
+                                  brand.id,
+                                  inviteBrandIds,
+                                  setInviteBrandIds
+                                )
+                              }
+                            />
+                            {brand.name}
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
                 {inviteError && (
                   <p className="text-sm text-red-400">{inviteError}</p>
                 )}
@@ -198,7 +358,12 @@ export default function AgentsSettingsPage() {
               <DialogFooter>
                 <Button
                   onClick={handleInvite}
-                  disabled={!inviteEmail || inviteLoading}
+                  disabled={
+                    !inviteEmail ||
+                    inviteLoading ||
+                    (inviteMemberType === "brand_advisor" &&
+                      inviteBrandIds.length === 0)
+                  }
                   className="bg-blue-600 hover:bg-blue-700 text-white"
                 >
                   {inviteLoading ? "Enviando..." : "Enviar invitacion"}
@@ -209,20 +374,97 @@ export default function AgentsSettingsPage() {
         )}
       </div>
 
+      <Dialog open={membershipOpen} onOpenChange={setMembershipOpen}>
+        <DialogContent className="sm:max-w-md bg-[#1a1f2e] border-[#2d333b]">
+          <DialogHeader>
+            <DialogTitle className="text-white">Clasificar miembro</DialogTitle>
+            <DialogDescription className="text-[#8b949e]">
+              Separa el equipo interno de los asesores asignados a marcas.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label className="text-xs text-[#8b949e]">Tipo de miembro</Label>
+              <Select
+                value={membershipType}
+                onValueChange={(value) => value && setMembershipType(value)}
+              >
+                <SelectTrigger className="w-full bg-[#0d1117] border-[#2d333b] text-white h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1a1f2e] border-[#2d333b]">
+                  <SelectItem value="agency_user">Usuario de agencia</SelectItem>
+                  <SelectItem value="brand_advisor">Asesor de marca</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {membershipType === "brand_advisor" && (
+              <div className="space-y-2">
+                <Label className="text-xs text-[#8b949e]">Marcas asignadas</Label>
+                <div className="max-h-44 overflow-y-auto rounded-md border border-[#2d333b] bg-[#0d1117] p-2 space-y-1">
+                  {brands.map((brand) => (
+                    <label
+                      key={brand.id}
+                      className="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-white hover:bg-[#1a1f2e] cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={membershipBrandIds.includes(brand.id)}
+                        onChange={() =>
+                          toggleBrand(
+                            brand.id,
+                            membershipBrandIds,
+                            setMembershipBrandIds
+                          )
+                        }
+                      />
+                      {brand.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            {membershipError && (
+              <p className="text-sm text-red-400">{membershipError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={handleMembershipSave}
+              disabled={
+                membershipLoading ||
+                (membershipType === "brand_advisor" &&
+                  membershipBrandIds.length === 0)
+              }
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {membershipLoading ? "Guardando..." : "Guardar clasificacion"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="p-6">
         {/* Stats cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <div className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg p-4">
             <div className="flex items-center gap-2 mb-2">
               <Users className="h-4 w-4 text-[#8b949e]" />
-              <span className="text-xs font-medium text-[#8b949e]">Miembros</span>
+              <span className="text-xs font-medium text-[#8b949e]">Usuarios de agencia</span>
             </div>
-            <p className="text-2xl font-bold text-white">{agents?.length ?? 0}</p>
+            <p className="text-2xl font-bold text-white">{agencyUsers}</p>
+          </div>
+          <div className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Building2 className="h-4 w-4 text-[#8b949e]" />
+              <span className="text-xs font-medium text-[#8b949e]">Asesores de marca</span>
+            </div>
+            <p className="text-2xl font-bold text-white">{brandAdvisors}</p>
           </div>
           <div className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg p-4">
             <div className="flex items-center gap-2 mb-2">
               <Shield className="h-4 w-4 text-[#8b949e]" />
-              <span className="text-xs font-medium text-[#8b949e]">Admins</span>
+              <span className="text-xs font-medium text-[#8b949e]">Administradores</span>
             </div>
             <p className="text-2xl font-bold text-white">
               {agents?.filter((a) => a.role === "admin").length ?? 0}
@@ -244,6 +486,8 @@ export default function AgentsSettingsPage() {
               <tr className="border-b border-[#2d333b]">
                 <th className="px-4 py-2.5 text-left text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Nombre</th>
                 <th className="px-4 py-2.5 text-left text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Email</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Tipo</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Marcas</th>
                 <th className="px-4 py-2.5 text-left text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Rol</th>
                 <th className="px-4 py-2.5 text-left text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Estado</th>
                 <th className="px-4 py-2.5 text-left text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Max chats</th>
@@ -253,7 +497,7 @@ export default function AgentsSettingsPage() {
             <tbody>
               {agentsLoading ? (
                 <tr>
-                  <td colSpan={isAdmin ? 6 : 5} className="text-center py-12 text-[#8b949e]">
+                  <td colSpan={isAdmin ? 8 : 7} className="text-center py-12 text-[#8b949e]">
                     <div className="flex flex-col items-center gap-2">
                       <div className="h-8 w-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                       <span>Cargando...</span>
@@ -262,7 +506,7 @@ export default function AgentsSettingsPage() {
                 </tr>
               ) : agents?.length === 0 ? (
                 <tr>
-                  <td colSpan={isAdmin ? 6 : 5} className="text-center py-12 text-[#8b949e]">
+                  <td colSpan={isAdmin ? 8 : 7} className="text-center py-12 text-[#8b949e]">
                     No hay miembros en el equipo
                   </td>
                 </tr>
@@ -283,6 +527,33 @@ export default function AgentsSettingsPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-[#8b949e]">{agent.email}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full border ${
+                          agent.member_type === "brand_advisor"
+                            ? "bg-amber-500/20 text-amber-300 border-amber-500/30"
+                            : "bg-cyan-500/20 text-cyan-300 border-cyan-500/30"
+                        }`}>
+                          {agent.member_type === "brand_advisor"
+                            ? "Asesor de marca"
+                            : "Usuario de agencia"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-[#8b949e]">
+                        {agent.member_type === "brand_advisor"
+                          ? assignments
+                              .filter(
+                                (assignment) => assignment.agent_id === agent.id
+                              )
+                              .map(
+                                (assignment) =>
+                                  brands.find(
+                                    (brand) => brand.id === assignment.brand_id
+                                  )?.name
+                              )
+                              .filter(Boolean)
+                              .join(", ") || "Sin asignar"
+                          : "Todas"}
+                      </td>
                       <td className="px-4 py-3">
                         {isAdmin && !isSelf ? (
                           <Select
@@ -317,7 +588,19 @@ export default function AgentsSettingsPage() {
                       {isAdmin && (
                         <td className="px-4 py-3">
                           {!isSelf && (
-                            <>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() =>
+                                  openMembershipEditor(
+                                    agent.id,
+                                    agent.member_type || "agency_user"
+                                  )
+                                }
+                                title="Configurar tipo y marcas"
+                                className="p-1.5 rounded hover:bg-blue-500/10 text-[#8b949e] hover:text-blue-400 transition-colors"
+                              >
+                                <UserRoundCog className="h-4 w-4" />
+                              </button>
                               {removeConfirm === agent.id ? (
                                 <div className="flex items-center gap-1">
                                   <Button
@@ -346,7 +629,7 @@ export default function AgentsSettingsPage() {
                                   <Trash2 className="h-4 w-4" />
                                 </button>
                               )}
-                            </>
+                            </div>
                           )}
                         </td>
                       )}
@@ -376,6 +659,8 @@ export default function AgentsSettingsPage() {
                   <thead>
                     <tr className="border-b border-[#2d333b]">
                       <th className="px-4 py-2.5 text-left text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Email</th>
+                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Tipo</th>
+                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Marcas</th>
                       <th className="px-4 py-2.5 text-left text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Rol</th>
                       <th className="px-4 py-2.5 text-left text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Fecha</th>
                       <th className="px-4 py-2.5 text-left text-xs font-semibold text-[#8b949e] uppercase tracking-wider">Expira</th>
@@ -386,6 +671,23 @@ export default function AgentsSettingsPage() {
                     {pendingInvitations.map((invitation) => (
                       <tr key={invitation.id} className="border-b border-[#2d333b]/50 hover:bg-[#1a1f2e] transition-colors">
                         <td className="px-4 py-3 text-sm font-medium text-white">{invitation.email}</td>
+                        <td className="px-4 py-3 text-xs text-[#8b949e]">
+                          {invitation.member_type === "brand_advisor"
+                            ? "Asesor de marca"
+                            : "Usuario de agencia"}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-[#8b949e]">
+                          {invitation.member_type === "brand_advisor"
+                            ? (invitation.brand_ids || [])
+                                .map(
+                                  (brandId) =>
+                                    brands.find((brand) => brand.id === brandId)
+                                      ?.name
+                                )
+                                .filter(Boolean)
+                                .join(", ") || "Sin asignar"
+                            : "Todas"}
+                        </td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full border ${roleBadgeColors[invitation.role] || "bg-gray-500/20 text-gray-400 border-gray-500/30"}`}>
                             {roleLabels[invitation.role] ?? invitation.role}

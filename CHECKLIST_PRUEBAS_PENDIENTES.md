@@ -18,6 +18,8 @@ Manual principal:
 - [x] `/`, `/login` y `/api/health` responden HTTP `200`.
 - [x] Rutas administrativas redirigen a login sin sesion.
 - [x] Cron de billing rechaza llamadas sin secreto con HTTP `401`.
+- [x] Migracion `011` aplicada y objetos verificados en Supabase.
+- [x] Usuarios y asesores separados en modelo, limites e interfaz.
 - [x] Cron diario compatible con Vercel Hobby.
 - [ ] Funcion PostgreSQL transaccional validada en staging.
 - [ ] Disenos autenticados revisados en navegador.
@@ -82,6 +84,23 @@ Manual principal:
 - [ ] Rol `admin` administra su agencia.
 - [ ] Superadmin administra catalogo.
 - [ ] Hash de contrasena nunca aparece en respuestas.
+
+## C.1 Usuarios de agencia y asesores
+
+- [x] Agentes existentes migrados como `agency_user`.
+- [x] No se crearon asesores automaticamente.
+- [ ] Invitar un usuario de agencia.
+- [ ] Invitar un asesor con una marca.
+- [ ] Invitar un asesor con varias marcas.
+- [ ] Rechazar asesor sin marca.
+- [ ] Rechazar una marca de otra agencia.
+- [ ] Reclasificar usuario de agencia como asesor.
+- [ ] Reclasificar asesor como usuario de agencia.
+- [ ] Validar limite total de asesores en `observe`.
+- [ ] Validar limite por marca en `observe`.
+- [ ] Confirmar que un asesor no accede a una marca no asignada.
+- [ ] Etiquetar canales y conversaciones por marca antes del aislamiento total
+  del inbox.
 
 ## D. Regresion Facebook Messenger
 
