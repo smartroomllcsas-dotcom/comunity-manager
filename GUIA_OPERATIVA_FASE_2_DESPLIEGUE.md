@@ -1,9 +1,9 @@
 # Guia operativa: Fase 2, Supabase y despliegue
 
-Proyecto: CommunityManager / SmartTalk  
-Fecha de revision: 2026-07-29  
+Proyecto: CommunityManager (esquema tecnico heredado `smarttalk`)
+Fecha de revision: 2026-07-30
 Directorio de aplicacion: `web`  
-Estado: codigo preparado; migraciones aplicadas el 2026-07-30; despliegue remoto pendiente
+Estado: migraciones aplicadas; codigo publicado y despliegue Production verificado
 
 Actualizacion Vercel 2026-07-30:
 
@@ -15,7 +15,12 @@ Actualizacion Vercel 2026-07-30:
   `PAYMENT_RENEWAL_MODE=manual` y
   `PAYMENT_AUTO_RENEWAL_APPROVED=false`.
 - `CRON_SECRET` ya existia y no fue reemplazado.
-- El redeploy permanece pendiente hasta publicar el codigo nuevo en Git.
+- La rama `codex/billing-subscriptions` fue publicada en GitHub.
+- El deployment de Vercel `dpl_7PTKhjKJPae3jucjVmamFx6yGUnk` quedo
+  `Ready` el 2026-07-30.
+- Dominio principal verificado: `https://www.comunitymanager.io`.
+- El despliegue conserva billing en `off`, ePayco en sandbox y renovacion
+  manual. No se habilitaron cobros reales.
 
 ## 1. Resultado de la revision
 
@@ -33,7 +38,7 @@ Actualizacion Vercel 2026-07-30:
 | Renovacion manual | Implementada para ePayco | Pendiente sandbox |
 | Renovacion automatica | Solo infraestructura de datos | No habilitar |
 | Limites backend | Integrados con modo gradual | Mantener en `off` |
-| Cron de vencimiento y gracia | Aplicado, ejecucion diaria | Pendiente ejecucion remota |
+| Cron de vencimiento y gracia | Desplegado, ejecucion diaria y acceso protegido | Pendiente ejecucion autenticada |
 | Outbox y cola | Tablas e indices preparados | No; worker pendiente |
 | Notificaciones de billing | Tabla preparada | No; servicio de envio pendiente |
 | Cambios programados de plan | Campos preparados | No; orquestacion pendiente |
@@ -336,10 +341,10 @@ npm run build
 
 Estado registrado en esta revision:
 
-- 6 pruebas aprobadas.
+- 99 pruebas aprobadas: 93 Vitest y 6 Node.
 - Lint sin errores.
-- Build Next.js y TypeScript aprobado.
-- 82 rutas compiladas.
+- Build Next.js 16.2.12 y TypeScript aprobado.
+- 96 rutas compiladas.
 - `git diff --check` aprobado.
 - Validacion PostgreSQL local pendiente por falta de Docker/Podman.
 - El equipo tiene cliente `psql`, pero no el binario servidor `postgres`.
@@ -379,6 +384,22 @@ En Vercel:
 
 Los cambios de variables solo aplican a nuevos deployments. Después de
 modificarlas debes volver a desplegar.
+
+### Estado Production verificado el 2026-07-30
+
+- Proyecto Vercel: `cg-moda/comunityagent`.
+- Deployment: `dpl_7PTKhjKJPae3jucjVmamFx6yGUnk`.
+- Estado: `Ready`.
+- URL principal: `https://www.comunitymanager.io`.
+- `/`, `/login` y `/api/health`: HTTP `200`.
+- `/admin/plans`, `/admin/payment-gateways` y `/settings/billing`: redireccion
+  HTTP `307` a `/login` sin sesion, comportamiento esperado.
+- `/api/cron/billing-lifecycle`: HTTP `401` sin `CRON_SECRET`, comportamiento
+  esperado y seguro.
+- Health de base de datos: `ok`.
+- Webhooks al verificar: `pending=0`, `failed=0`, `dead=0`.
+- Las siete variables operativas de billing aparecen configuradas en
+  `Production`; Vercel mantiene sus valores cifrados.
 
 ### Cron configurado
 
@@ -532,10 +553,12 @@ los crons del deployment anterior. Verifica ambos componentes.
 - [x] Build de produccion.
 - [x] TypeScript.
 - [x] Lint.
-- [x] 6 pruebas unitarias.
+- [x] 99 pruebas automatizadas.
 - [x] Firmas ePayco, Wompi y PayU.
 - [x] Documentacion de variables y despliegue.
 - [x] Cron compatible con Vercel Hobby.
+- [x] Deployment Production `Ready`.
+- [x] Smoke test publico y proteccion de rutas.
 
 ### Debes aprobar en staging
 
@@ -555,11 +578,13 @@ los crons del deployment anterior. Verifica ambos componentes.
 
 ### Debes aprobar antes de producción
 
-- [ ] Variables Production revisadas por dos personas.
+- [x] Variables operativas de billing presentes en Production.
+- [ ] Valores y alcance de variables revisados por dos personas.
 - [ ] Preview aprobada.
 - [ ] Backup de produccion.
-- [ ] Migraciones de produccion.
-- [ ] Smoke test de produccion con ePayco sandbox.
+- [x] Migraciones `009` y `010` aplicadas en la base conectada.
+- [x] Smoke test tecnico de produccion.
+- [ ] Compra ePayco sandbox end-to-end.
 - [ ] Logs y responsable operativo definidos.
 - [ ] Plan de rollback comprobado.
 

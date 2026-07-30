@@ -3,17 +3,21 @@
 Manual principal:
 `GUIA_OPERATIVA_FASE_2_DESPLIEGUE.md`
 
-## Evidencia aprobada localmente 2026-07-29
+## Evidencia aprobada localmente y en Production 2026-07-30
 
 - [x] Arquitectura por organizacion.
 - [x] ePayco, Wompi y PayU desacopladas mediante adaptadores.
 - [x] Renovacion predeterminada en modo manual.
 - [x] Checkout Wompi/PayU bloqueado hasta certificar webhooks.
 - [x] Activacion ePayco movida a funcion PostgreSQL transaccional e idempotente.
-- [x] `npm test`: 6 pruebas aprobadas.
+- [x] `npm test`: 99 pruebas aprobadas, 93 Vitest y 6 Node.
 - [x] `npm run lint -- --quiet`: aprobado.
 - [x] `npm run build`: aprobado.
 - [x] `git diff --check`: aprobado.
+- [x] Deployment Vercel Production en estado `Ready`.
+- [x] `/`, `/login` y `/api/health` responden HTTP `200`.
+- [x] Rutas administrativas redirigen a login sin sesion.
+- [x] Cron de billing rechaza llamadas sin secreto con HTTP `401`.
 - [x] Cron diario compatible con Vercel Hobby.
 - [ ] Funcion PostgreSQL transaccional validada en staging.
 - [ ] Disenos autenticados revisados en navegador.
@@ -35,8 +39,8 @@ Manual principal:
   sus webhooks.
 - [ ] Repetir pruebas de Messenger, WhatsApp e Instagram despues de migrar.
 
-**Proyecto:** CommunityManager / SmartTalk  
-**Fecha:** 2026-07-29  
+**Proyecto:** CommunityManager (esquema tecnico heredado `smarttalk`)
+**Fecha:** 2026-07-30
 **Uso:** marcar solo con evidencia: captura, log, ID de evento o consulta SQL.
 
 ## A. Preparacion y recuperacion
@@ -46,7 +50,10 @@ Manual principal:
 - [ ] Variables de entorno verificadas sin exponer secretos.
 - [x] Variables operativas de billing agregadas en Vercel Production el
   2026-07-30: enforcement `off`, gracia de 3 dias, sandbox y renovacion manual.
-- [ ] Confirmar las variables en ejecucion despues del primer despliegue.
+- [x] Confirmar las variables operativas en Vercel Production despues del
+  primer despliegue.
+- [ ] Confirmar con prueba funcional que las credenciales sandbox de ePayco
+  son correctas.
 - [ ] Pasarela confirmada en sandbox.
 - [ ] URL publica HTTPS de webhook confirmada.
 - [ ] Logs y correlation IDs visibles.
@@ -69,7 +76,7 @@ Manual principal:
 - [ ] Registro nuevo.
 - [ ] Login correcto.
 - [ ] Login incorrecto.
-- [ ] Migracion de contrasena heredada a `scrypt`.
+- [ ] Migracion de contrasena heredada a `bcrypt`.
 - [ ] Logout invalida sesiones.
 - [ ] Rol `agent` no administra facturacion.
 - [ ] Rol `admin` administra su agencia.
@@ -267,6 +274,7 @@ Manual principal:
 
 - [x] Build de produccion aprobado localmente.
 - [x] Pruebas unitarias aprobadas localmente.
+- [x] Deployment Production y smoke test publico aprobados.
 - [ ] Contract tests de pasarela aprobados.
 - [ ] Integracion PostgreSQL aprobada.
 - [ ] E2E multicanal aprobado.
