@@ -27,7 +27,7 @@ Manual principal:
 - [x] Propietario creado como administrador y usuario de agencia.
 - [x] Migracion `012` aplicada en Supabase.
 - [x] Checkout bloqueado si faltan credenciales de la pasarela.
-- [ ] Desplegar portada publica y onboarding en Vercel Production.
+- [x] Desplegar portada publica y onboarding en Vercel Production.
 - [ ] Configurar credenciales ePayco sandbox en Vercel.
 - [ ] Completar un pago sandbox desde el onboarding publico.
 - [ ] Funcion PostgreSQL transaccional validada en staging.

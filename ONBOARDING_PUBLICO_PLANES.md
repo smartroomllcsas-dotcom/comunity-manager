@@ -2,7 +2,7 @@
 
 Proyecto: CommunityManager
 Fecha: 2026-07-30
-Estado: implementado localmente, migracion aplicada, pendiente despliegue Vercel
+Estado: desplegado en Vercel Production
 
 ## Objetivo
 
@@ -87,6 +87,8 @@ Tambien crea:
 - `npm run lint -- --quiet`: aprobado.
 - `npx tsc --noEmit`: aprobado.
 - `npm run build`: aprobado.
+- Deployment Vercel Production: `Ready`.
+- Dominio: `https://www.comunitymanager.io`.
 - `/`: HTTP 200 y muestra Inicial, Crecimiento y Escala.
 - Registro Inicial: HTTP 200.
 - Usuario creado como `admin` y `agency_user`.
@@ -116,12 +118,12 @@ valores validos. Esto es intencional.
 
 ## Orden de despliegue
 
-1. Confirmar que la migracion `012` existe en Supabase. Ya fue aplicada.
-2. Ejecutar pruebas locales.
-3. Subir el codigo a GitHub.
-4. Agregar credenciales ePayco sandbox en Vercel sin borrar variables.
-5. Desplegar a Production.
-6. Verificar `/`, `/register`, `/login`, `/app` y `/checkout`.
+1. Confirmar que la migracion `012` existe en Supabase. Completado.
+2. Ejecutar pruebas locales. Completado.
+3. Subir el codigo a GitHub. Completado en `699e807`.
+4. Desplegar a Production. Completado.
+5. Verificar `/`, `/register`, `/login`, `/app` y `/checkout`. Completado.
+6. Agregar credenciales ePayco sandbox en Vercel sin borrar variables.
 7. Ejecutar un pago sandbox aprobado.
 8. Confirmar una sola suscripcion activa y un solo periodo.
 9. Repetir el webhook y comprobar idempotencia.
