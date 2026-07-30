@@ -6,6 +6,7 @@ import {
   checkBillingFeature,
 } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
+import { getBrandInOrganization } from "@/lib/smarttalk/brand-scope";
 
 export async function GET() {
   const supabase = await createClient();
@@ -59,20 +60,27 @@ export async function POST(request: NextRequest) {
   if (!billingDecision.allowed) return billingDeniedResponse(billingDecision);
 
   const body = await request.json();
-  const { type, name, config } = body as {
+  const { type, name, brandId, config } = body as {
     type: string;
     name: string;
+    brandId: string;
     config?: Record<string, unknown>;
   };
 
-  if (!type || !name) {
-    return Response.json({ error: "type y name son requeridos" }, { status: 400 });
+  if (!type || !name || !brandId) {
+    return Response.json({ error: "type, name y brandId son requeridos" }, { status: 400 });
+  }
+
+  const brand = await getBrandInOrganization(brandId, agent.organization_id);
+  if (!brand) {
+    return Response.json({ error: "La marca no pertenece a esta organización" }, { status: 403 });
   }
 
   const { data: channel, error } = await admin
     .from("channels")
     .insert({
       organization_id: agent.organization_id,
+      brand_id: brand.id,
       type,
       name,
       status: "pending",

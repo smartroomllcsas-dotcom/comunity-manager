@@ -47,6 +47,8 @@ function getTagColor(index: number) {
 }
 
 export default function ContactsPage() {
+  const [brands, setBrands] = useState<Array<{ id: string; name: string }>>([]);
+  const [brandId, setBrandId] = useState("");
   const [search, setSearch] = useState("");
   const [activeSegment, setActiveSegment] = useState("all");
   const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set());
@@ -57,12 +59,23 @@ export default function ContactsPage() {
 
   const { data: segments } = useSegments();
 
+  useEffect(() => {
+    void fetch("/api/cm/clients")
+      .then((response) => response.json())
+      .then((payload) => {
+        const rows = Array.isArray(payload.clients) ? payload.clients : [];
+        setBrands(rows);
+        setBrandId((current) => current || rows[0]?.id || "");
+      });
+  }, []);
+
   // Reset to page 0 when search changes
   useEffect(() => {
     setPage(0);
   }, [search, activeSegment]);
 
   const { data: contactsData, isLoading } = useContacts({
+    brandId,
     searchQuery: search,
     page,
     pageSize: PAGE_SIZE,
@@ -96,6 +109,7 @@ export default function ContactsPage() {
     setExporting(true);
     try {
       const params = new URLSearchParams();
+      if (brandId) params.set("brandId", brandId);
       if (activeSegment !== "all" && activeSegment !== "blocked") {
         params.set("segment_id", activeSegment);
       }
@@ -199,6 +213,21 @@ export default function ContactsPage() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Bar */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-[#2d333b] bg-[#161b22]">
+          <select
+            aria-label="Marca"
+            value={brandId}
+            onChange={(event) => {
+              setBrandId(event.target.value);
+              setPage(0);
+              setSelectedContacts(new Set());
+            }}
+            className="h-9 max-w-52 rounded-md border border-[#2d333b] bg-[#0d1117] px-3 text-sm text-white"
+          >
+            {brands.length === 0 && <option value="">Sin marcas disponibles</option>}
+            {brands.map((brand) => (
+              <option key={brand.id} value={brand.id}>{brand.name}</option>
+            ))}
+          </select>
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#8b949e]" />
             <Input
@@ -217,6 +246,7 @@ export default function ContactsPage() {
             variant="outline"
             size="sm"
             onClick={() => setImportDialogOpen(true)}
+            disabled={!brandId}
             className="bg-transparent border-[#2d333b] text-[#8b949e] hover:bg-[#1a1f2e] hover:text-white"
           >
             <Upload className="h-4 w-4 mr-1.5" />
@@ -415,6 +445,7 @@ export default function ContactsPage() {
       <ImportDialog
         open={importDialogOpen}
         onOpenChange={setImportDialogOpen}
+        brandId={brandId}
       />
     </div>
   );

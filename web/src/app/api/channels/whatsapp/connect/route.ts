@@ -7,6 +7,7 @@ import {
   registerPhoneNumber,
 } from "@/lib/whatsapp/token-manager";
 import { encryptToken } from "@/lib/auth/token-crypto";
+import { getBrandInOrganization } from "@/lib/smarttalk/brand-scope";
 
 const FB_APP_ID = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID!;
 const FB_APP_SECRET = process.env.FACEBOOK_APP_SECRET!;
@@ -31,9 +32,14 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Solo los administradores pueden conectar canales" }, { status: 403 });
   }
 
-  const { code } = (await request.json()) as { code: string };
-  if (!code) {
-    return Response.json({ error: "El código de autorización es requerido" }, { status: 400 });
+  const { code, brandId } = (await request.json()) as { code: string; brandId: string };
+  if (!code || !brandId) {
+    return Response.json({ error: "El código y brandId son requeridos" }, { status: 400 });
+  }
+
+  const brand = await getBrandInOrganization(brandId, agent.organization_id);
+  if (!brand) {
+    return Response.json({ error: "La marca no pertenece a esta organización" }, { status: 403 });
   }
 
   try {
@@ -148,6 +154,7 @@ export async function POST(request: NextRequest) {
       .from("channels")
       .insert({
         organization_id: agent.organization_id,
+        brand_id: brand.id,
         type: "whatsapp_business_api",
         name: phoneNumber
           ? `WhatsApp ${phoneNumber}`

@@ -20,6 +20,7 @@ type LegacySocialAccount = {
 type SmarttalkChannel = {
   id: string;
   organization_id: string;
+  brand_id: string;
   type: string;
   name: string;
   status: string;
@@ -102,9 +103,30 @@ export async function POST(_request: NextRequest) {
   let synced = 0;
   const results: Array<{ type: string; action: "inserted" | "updated" | "skipped"; name: string }> = [];
 
+  const { data: brands, error: brandsError } = await publicAdmin
+    .from("cm_clients")
+    .select("id")
+    .eq("smarttalk_organization_id", org.organizationId);
+
+  if (brandsError) {
+    return NextResponse.json({ error: brandsError.message }, { status: 500 });
+  }
+
+  const brandIds = (brands || []).map((brand) => brand.id as string);
+  if (brandIds.length === 0) {
+    return NextResponse.json({
+      success: true,
+      synced: 0,
+      organization_id: org.organizationId,
+      channels: currentChannels,
+      results,
+    });
+  }
+
   const { data: socialRows, error: socialError } = await publicAdmin
     .from("cm_social_accounts")
-    .select("id,client_id,meta_user_id,access_token,page_id,page_name,page_access_token,instagram_id,instagram_username,business_id,connected_at,updated_at");
+    .select("id,client_id,meta_user_id,access_token,page_id,page_name,page_access_token,instagram_id,instagram_username,business_id,connected_at,updated_at")
+    .in("client_id", brandIds);
 
   if (socialError) {
     return NextResponse.json({ error: socialError.message }, { status: 500 });
@@ -113,12 +135,14 @@ export async function POST(_request: NextRequest) {
   for (const account of (socialRows || []) as LegacySocialAccount[]) {
     if (account.page_id) {
       const existing = currentChannels.find((channel) =>
+        channel.brand_id === account.client_id &&
         channel.type === "facebook_messenger" &&
         (channel.meta_business_id === account.page_id ||
           (channel.config as Record<string, unknown> | null)?.legacy_id === account.page_id)
       );
       const payload = {
         organization_id: org.organizationId,
+        brand_id: account.client_id,
         type: "facebook_messenger",
         name: buildFacebookName(account),
         status: "active",
@@ -159,11 +183,13 @@ export async function POST(_request: NextRequest) {
     if (account.instagram_id || account.instagram_username) {
       const instagramLegacyId = account.instagram_id || account.instagram_username || account.id;
       const existing = currentChannels.find((channel) =>
+        channel.brand_id === account.client_id &&
         channel.type === "instagram" &&
         ((channel.config as Record<string, unknown> | null)?.legacy_id === instagramLegacyId)
       );
       const payload = {
         organization_id: org.organizationId,
+        brand_id: account.client_id,
         type: "instagram",
         name: buildInstagramName(account),
         status: "active",

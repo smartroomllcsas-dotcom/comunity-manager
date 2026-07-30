@@ -5,6 +5,7 @@ import { useCurrentAgent } from "./useCurrentAgent";
 import type { Contact } from "@/types/database";
 
 interface UseContactsOptions {
+  brandId?: string;
   searchQuery?: string;
   tags?: string[];
   page?: number;
@@ -28,6 +29,7 @@ export function useContacts(searchQueryOrOptions?: string | UseContactsOptions, 
 
   const {
     searchQuery,
+    brandId,
     tags: optionTags,
     page = 0,
     pageSize = 100,
@@ -36,7 +38,7 @@ export function useContacts(searchQueryOrOptions?: string | UseContactsOptions, 
   const effectiveTags = optionTags ?? tags;
 
   return useQuery<UseContactsResult>({
-    queryKey: ["contacts", agent?.organization_id, searchQuery, effectiveTags, page, pageSize],
+    queryKey: ["contacts", agent?.organization_id, brandId, searchQuery, effectiveTags, page, pageSize],
     queryFn: async () => {
       const from = page * pageSize;
       const to = from + pageSize - 1;
@@ -45,6 +47,7 @@ export function useContacts(searchQueryOrOptions?: string | UseContactsOptions, 
         .from("contacts")
         .select("*", { count: "exact" })
         .eq("organization_id", agent!.organization_id)
+        .eq("brand_id", brandId!)
         .order("last_message_at", { ascending: false, nullsFirst: false })
         .range(from, to);
 
@@ -58,6 +61,6 @@ export function useContacts(searchQueryOrOptions?: string | UseContactsOptions, 
         totalCount: count ?? 0,
       };
     },
-    enabled: !!agent,
+    enabled: !!agent && !!brandId,
   });
 }

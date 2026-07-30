@@ -13,7 +13,7 @@ export async function processIncomingMessage(
   // 1. Find channel by phone_number_id
   const { data: channel } = await admin
     .from("channels")
-    .select("id, organization_id, access_token")
+    .select("id, organization_id, brand_id, access_token")
     .eq("whatsapp_phone_number_id", phoneNumberId)
     .eq("status", "active")
     .single();
@@ -37,11 +37,12 @@ export async function processIncomingMessage(
     .upsert(
       {
         organization_id: org.id,
+        brand_id: channel.brand_id,
         wa_id: contact.wa_id,
         name: contact.profile.name,
         last_message_at: new Date().toISOString(),
       },
-      { onConflict: "organization_id,wa_id" }
+      { onConflict: "organization_id,brand_id,wa_id" }
     )
     .select("id")
     .single();
@@ -52,7 +53,10 @@ export async function processIncomingMessage(
   let { data: conversation } = await admin
     .from("conversations")
     .select("id, unread_count")
+    .eq("organization_id", org.id)
+    .eq("brand_id", channel.brand_id)
     .eq("contact_id", dbContact.id)
+    .eq("channel_id", channel.id)
     .in("status", ["open", "pending"])
     .order("created_at", { ascending: false })
     .limit(1)
@@ -63,6 +67,7 @@ export async function processIncomingMessage(
       .from("conversations")
       .insert({
         organization_id: org.id,
+        brand_id: channel.brand_id,
         contact_id: dbContact.id,
         channel_id: channel.id,
         status: "open",
@@ -134,10 +139,28 @@ export async function processIncomingMessage(
   }
 }
 
-export async function processStatusUpdate(status: WebhookStatus) {
+export async function processStatusUpdate(status: WebhookStatus, phoneNumberId: string) {
   const admin = createAdminClient();
   if (!status.id) return;
-  await admin.from("messages").update({ status: status.status }).eq("wa_message_id", status.id);
+  const { data: channel } = await admin
+    .from("channels")
+    .select("id")
+    .eq("whatsapp_phone_number_id", phoneNumberId)
+    .maybeSingle();
+  if (!channel) return;
+
+  const { data: conversations } = await admin
+    .from("conversations")
+    .select("id")
+    .eq("channel_id", channel.id);
+  const conversationIds = (conversations || []).map((conversation) => conversation.id);
+  if (conversationIds.length === 0) return;
+
+  await admin
+    .from("messages")
+    .update({ status: status.status })
+    .eq("wa_message_id", status.id)
+    .in("conversation_id", conversationIds);
 }
 
 function parseMessageContent(message: WebhookMessage): { type: MessageType; content: MessageContent } {

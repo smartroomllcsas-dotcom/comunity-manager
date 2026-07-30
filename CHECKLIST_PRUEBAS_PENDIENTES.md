@@ -28,6 +28,8 @@ Manual principal:
 - [x] Migracion `012` aplicada en Supabase.
 - [x] Checkout bloqueado si faltan credenciales de la pasarela.
 - [x] Desplegar portada publica y onboarding en Vercel Production.
+- [x] Migracion `013` aplicada y aislamiento por marca validado en PostgreSQL.
+- [x] Cuenta `dev@comunitymanager.io` limpiada para repetir onboarding.
 - [ ] Configurar credenciales ePayco sandbox en Vercel.
 - [ ] Completar un pago sandbox desde el onboarding publico.
 - [ ] Funcion PostgreSQL transaccional validada en staging.
@@ -76,7 +78,7 @@ Manual principal:
 - [ ] Constraints e indices creados.
 - [ ] Funcion atomica de consumo ejecutable solo por `service_role`.
 - [ ] RLS validado con dos organizaciones.
-- [ ] Cada marca vinculada a la organizacion correcta.
+- [x] Cada marca vinculada a la organizacion correcta.
 - [ ] Ninguna marca accesible desde otra agencia.
 - [ ] No existen dos suscripciones vigentes para una organizacion.
 - [ ] Planes heredados conservados.
@@ -108,8 +110,20 @@ Manual principal:
 - [ ] Validar limite total de asesores en `observe`.
 - [ ] Validar limite por marca en `observe`.
 - [ ] Confirmar que un asesor no accede a una marca no asignada.
-- [ ] Etiquetar canales y conversaciones por marca antes del aislamiento total
-  del inbox.
+- [x] Etiquetar canales, contactos y conversaciones por marca.
+- [ ] Confirmar con dos asesores reales que RLS oculta marcas no asignadas.
+
+## C.2 Aislamiento de leads por marca
+
+- [x] Canal con `brand_id` obligatorio.
+- [x] Contacto con `brand_id` obligatorio.
+- [x] Conversacion con `brand_id` obligatorio.
+- [x] Rechazo DB de contacto/canal pertenecientes a marcas distintas.
+- [x] Mismo identificador externo separado entre dos marcas.
+- [ ] Crear dos marcas nuevas mediante el onboarding limpio.
+- [ ] Conectar un canal en cada marca.
+- [ ] Enviar desde el mismo usuario externo a las dos marcas.
+- [ ] Confirmar dos contactos y dos historiales independientes en interfaz.
 
 ## D. Regresion Facebook Messenger
 

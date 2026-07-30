@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getAgentBrandIds, getBrandInOrganization } from "@/lib/smarttalk/brand-scope";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -20,9 +21,17 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
     const mappingRaw = formData.get("mapping") as string | null;
+    const brandId = formData.get("brandId");
 
-    if (!file) {
-      return Response.json({ error: "Archivo CSV requerido" }, { status: 400 });
+    if (!file || typeof brandId !== "string" || !brandId) {
+      return Response.json({ error: "Archivo CSV y marca requeridos" }, { status: 400 });
+    }
+    const [brand, assignedBrandIds] = await Promise.all([
+      getBrandInOrganization(brandId, agent.organization_id),
+      getAgentBrandIds(agent),
+    ]);
+    if (!brand || (assignedBrandIds && !assignedBrandIds.includes(brandId))) {
+      return Response.json({ error: "No autorizado para esta marca" }, { status: 403 });
     }
 
     const mapping: Record<string, string> = mappingRaw ? JSON.parse(mappingRaw) : {};
@@ -89,6 +98,7 @@ export async function POST(request: NextRequest) {
           .from("contacts")
           .select("id, custom_fields, tags")
           .eq("organization_id", agent.organization_id)
+          .eq("brand_id", brandId)
           .eq("wa_id", phone)
           .single();
 
@@ -127,6 +137,7 @@ export async function POST(request: NextRequest) {
             .from("contacts")
             .insert({
               organization_id: agent.organization_id,
+              brand_id: brandId,
               wa_id: phone,
               name: record.name || null,
               tags,

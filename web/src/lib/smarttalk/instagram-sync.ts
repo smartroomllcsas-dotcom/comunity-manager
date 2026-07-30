@@ -6,6 +6,7 @@ import type { MessageContent, MessageType } from "@/types/database";
 type SmarttalkChannel = {
   id: string;
   organization_id: string;
+  brand_id: string;
   type: string;
   name: string;
   status: string;
@@ -309,6 +310,7 @@ async function upsertInstagramContact(
     .from("contacts")
     .select("id,name")
     .eq("organization_id", channel.organization_id)
+    .eq("brand_id", channel.brand_id)
     .eq("wa_id", contactId)
     .maybeSingle();
 
@@ -328,6 +330,7 @@ async function upsertInstagramContact(
     .from("contacts")
     .insert({
       organization_id: channel.organization_id,
+      brand_id: channel.brand_id,
       wa_id: contactId,
       name: contact.username || contactId,
       last_message_at: lastMessageAt,
@@ -364,6 +367,7 @@ async function upsertInstagramConversation(
     .from("conversations")
     .insert({
       organization_id: channel.organization_id,
+      brand_id: channel.brand_id,
       contact_id: contactId,
       channel_id: channel.id,
       status: "open",

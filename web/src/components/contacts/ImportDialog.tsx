@@ -23,6 +23,7 @@ import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, X } from "lucide-
 interface ImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  brandId: string;
 }
 
 type Step = "upload" | "mapping" | "importing" | "results";
@@ -35,7 +36,7 @@ const CONTACT_FIELDS = [
   { value: "tags", label: "Etiquetas" },
 ];
 
-export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
+export function ImportDialog({ open, onOpenChange, brandId }: ImportDialogProps) {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -124,6 +125,7 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("mapping", JSON.stringify(cleanMapping));
+      formData.append("brandId", brandId);
 
       const res = await fetch("/api/contacts/import", {
         method: "POST",

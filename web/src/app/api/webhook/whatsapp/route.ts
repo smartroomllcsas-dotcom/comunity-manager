@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
 
         if (value.statuses) {
           for (const status of value.statuses) {
-            await processStatusUpdate(status);
+            await processStatusUpdate(status, phoneNumberId);
           }
         }
       }

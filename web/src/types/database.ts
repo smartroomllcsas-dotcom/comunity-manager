@@ -215,6 +215,7 @@ export interface Invitation {
 export interface Channel {
   id: string;
   organization_id: string;
+  brand_id: string;
   type: ChannelType;
   name: string;
   status: ChannelStatus;
@@ -248,6 +249,7 @@ export interface Agent {
 export interface Contact {
   id: string;
   organization_id: string;
+  brand_id: string;
   wa_id: string;
   name: string | null;
   profile_picture_url: string | null;
@@ -262,6 +264,7 @@ export interface Contact {
 export interface Conversation {
   id: string;
   organization_id: string;
+  brand_id: string;
   contact_id: string;
   assigned_agent_id: string | null;
   status: ConversationStatus;

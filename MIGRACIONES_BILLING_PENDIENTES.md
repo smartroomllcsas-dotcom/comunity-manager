@@ -2,7 +2,7 @@
 
 Fecha de preparacion: 2026-07-29  
 Fecha de aplicacion: 2026-07-30  
-Estado: `009`, `010`, `011` y `012` aplicadas y verificadas en Supabase `smartmedia`
+Estado: `009`, `010`, `011`, `012` y `013` aplicadas y verificadas en Supabase `smartmedia`
 Renovacion inicial: manual
 
 ## Registro de aplicacion
@@ -32,6 +32,8 @@ Resultado verificado:
 - Existen asignaciones de asesor y de invitacion con integridad por agencia.
 - Los agentes existentes quedaron como usuarios de agencia.
 - No se crearon asesores automaticamente.
+- `013` hace obligatorio el aislamiento de canal, contacto y conversacion por
+  marca.
 
 ## Regla de despliegue
 
@@ -50,6 +52,19 @@ aplicados.
 2. `web/supabase/migrations/20260729000200_010_multi_gateway_manual_renewal.sql`
 3. `web/supabase/migrations/20260730000100_011_agency_users_brand_advisors.sql`
 4. `web/supabase/migrations/20260730000200_012_public_plan_onboarding.sql`
+5. `web/supabase/migrations/20260730000300_013_brand_channel_lead_isolation.sql`
+
+## Migracion 013
+
+Objetivo:
+
+- Vincula obligatoriamente canales, contactos y conversaciones a una marca.
+- Migra las conexiones heredadas usando `legacy_client_id` o
+  `phone_number_id`.
+- Rechaza cruces entre organizacion, marca, canal y contacto.
+- Separa la identidad del lead por organizacion y marca.
+- Restringe el inbox de asesores a sus marcas asignadas.
+- Fue aplicada y validada el 2026-07-30.
 
 ## Migracion 012
 

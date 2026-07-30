@@ -51,6 +51,7 @@ type MessengerConversationResponse = {
 type SmarttalkChannel = {
   id: string;
   organization_id: string;
+  brand_id: string;
   type: string;
   name: string;
   status: string;
@@ -211,6 +212,7 @@ async function upsertContactAndConversation(
     .from("contacts")
     .select("id, name, profile_picture_url")
     .eq("organization_id", channel.organization_id)
+    .eq("brand_id", channel.brand_id)
     .eq("wa_id", contactId)
     .maybeSingle();
 
@@ -221,6 +223,7 @@ async function upsertContactAndConversation(
       .from("contacts")
       .insert({
         organization_id: channel.organization_id,
+        brand_id: channel.brand_id,
         wa_id: contactId,
         name: contactIdentity.name,
         profile_picture_url: contactIdentity.profile_picture_url,
@@ -275,6 +278,7 @@ async function upsertContactAndConversation(
       .from("conversations")
       .insert({
         organization_id: channel.organization_id,
+        brand_id: channel.brand_id,
         contact_id: dbContactId,
         channel_id: channel.id,
         status: "open",
@@ -524,12 +528,20 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
       }
 
       const statuses = value.statuses || [];
+      const { data: channelConversations } = await admin
+        .from("conversations")
+        .select("id")
+        .eq("channel_id", channel.id);
+      const channelConversationIds = (channelConversations || []).map(
+        (conversation) => conversation.id
+      );
       for (const status of statuses) {
-        if (!status.id) continue;
+        if (!status.id || channelConversationIds.length === 0) continue;
         await admin
           .from("messages")
           .update({ status: status.status === "read" ? "read" : "delivered" })
-          .eq("wa_message_id", status.id);
+          .eq("wa_message_id", status.id)
+          .in("conversation_id", channelConversationIds);
       }
     }
   }

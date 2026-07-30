@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncInstagramInboxForOrganization } from "@/lib/smarttalk/instagram-sync";
+import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
 
 // Throttle serverless-safe. Persistimos el último sync en smarttalk.inbox_sync_state
 // para que funcione entre workers Vercel (el Map local no basta).
@@ -100,7 +101,7 @@ export async function GET(request: NextRequest) {
   const admin = createAdminClient("smarttalk");
   const { data: agent, error: agentError } = await admin
     .from("agents")
-    .select("id, organization_id")
+    .select("id, organization_id, member_type")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -120,20 +121,35 @@ export async function GET(request: NextRequest) {
   const filter = searchParams.get("filter") || "all";
   const statusParam = searchParams.get("status");
   const channelParam = searchParams.get("channel");
+  const brandParam = searchParams.get("brandId");
   const search = (searchParams.get("search") || "").trim();
   const cursor = parseCursor(searchParams.get("cursor"));
   const rawLimit = Number(searchParams.get("limit"));
   const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 30;
+  const assignedBrandIds = await getAgentBrandIds(agent);
+
+  if (assignedBrandIds && assignedBrandIds.length === 0) {
+    return NextResponse.json({ conversations: [], nextCursor: null });
+  }
+  if (brandParam && assignedBrandIds && !assignedBrandIds.includes(brandParam)) {
+    return NextResponse.json({ error: "No autorizado para esta marca" }, { status: 403 });
+  }
 
   let query = admin
     .from("conversations")
     .select(
-      "*, contact:contacts(*), channel:channels(id,type,name,status,whatsapp_phone_number,whatsapp_phone_number_id,whatsapp_business_account_id,config,connected_at,last_active_at,token_expires_at)"
+      "*, contact:contacts(*), channel:channels(id,brand_id,type,name,status,whatsapp_phone_number,whatsapp_phone_number_id,whatsapp_business_account_id,config,connected_at,last_active_at,token_expires_at)"
     )
     .eq("organization_id", agent.organization_id)
     .order("updated_at", { ascending: false })
     .order("id", { ascending: false })
     .limit(limit + 1); // +1 para detectar si hay siguiente página
+
+  if (brandParam) {
+    query = query.eq("brand_id", brandParam);
+  } else if (assignedBrandIds) {
+    query = query.in("brand_id", assignedBrandIds);
+  }
 
   // Filtro por asignación / estado agrupado
   if (filter === "mine") {

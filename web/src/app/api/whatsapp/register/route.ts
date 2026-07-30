@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { registerWhatsAppNumber } from '@/lib/whatsapp-cm'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getCmClientAccess } from '@/lib/cm-client-access'
+import { resolveToken } from '@/lib/auth/token-crypto'
 
 export async function POST(request: NextRequest) {
   const { clientId, pin } = await request.json()
@@ -21,9 +22,13 @@ export async function POST(request: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   if (!account) return NextResponse.json({ error: 'WhatsApp no conectado' }, { status: 400 })
+  const accessToken = resolveToken(account.access_token_ciphertext, account.access_token)
+  if (!accessToken) {
+    return NextResponse.json({ error: 'Token de WhatsApp no disponible' }, { status: 500 })
+  }
 
   try {
-    const result = await registerWhatsAppNumber(account.phone_number_id, account.access_token, pin)
+    const result = await registerWhatsAppNumber(account.phone_number_id, accessToken, pin)
     return NextResponse.json({ success: true, result })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Error desconocido'

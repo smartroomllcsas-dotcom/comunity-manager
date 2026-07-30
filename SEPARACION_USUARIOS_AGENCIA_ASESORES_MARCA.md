@@ -91,14 +91,15 @@ Validacion registrada:
 - Asesores creados automaticamente: `0`.
 - Beneficios nuevos configurados en los planes demo: `9`.
 
-## Limitacion de transicion
+## Aislamiento del inbox completado
 
-Los recursos del inbox como conversaciones y canales siguen perteneciendo a la
-organizacion. La asignacion por marca ya protege las rutas que reciben un
-`clientId`, pero la segmentacion completa del inbox requiere que cada canal y
-conversacion tenga una marca identificable.
+La migracion `013` elimino la limitacion de transicion:
 
-No se debe activar enforcement estricto de acceso por marca en todo el inbox
-hasta completar ese etiquetado y ejecutar una regresion de Messenger,
-WhatsApp e Instagram.
+- Canales, contactos y conversaciones tienen `brand_id` obligatorio.
+- PostgreSQL valida que organizacion, marca, canal y contacto coincidan.
+- RLS y la API del inbox filtran las marcas asignadas al asesor.
+- La regresion manual de Messenger, WhatsApp e Instagram permanece en la lista
+  de pruebas antes de activar controles comerciales estrictos.
 
+Detalle tecnico y evidencia:
+`AISLAMIENTO_MARCAS_CANALES_LEADS.md`.

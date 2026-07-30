@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { verifyRespondIoToken } from "@/lib/respond-io/api";
 import type { RespondIoChannelSource } from "@/lib/respond-io/types";
+import { getBrandInOrganization } from "@/lib/smarttalk/brand-scope";
 
 interface ConnectBody {
   name: string;
@@ -12,6 +13,7 @@ interface ConnectBody {
   workspaceId?: string;
   displayName?: string;
   webhookSecret?: string;
+  brandId: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -36,13 +38,18 @@ export async function POST(request: NextRequest) {
     workspaceId,
     displayName,
     webhookSecret,
+    brandId,
   } = body;
 
-  if (!name || !apiToken || !respondChannelId || !respondChannelType) {
+  if (!name || !apiToken || !respondChannelId || !respondChannelType || !brandId) {
     return NextResponse.json(
-      { error: "name, apiToken, respondChannelId y respondChannelType son requeridos" },
+      { error: "name, apiToken, respondChannelId, respondChannelType y brandId son requeridos" },
       { status: 400 },
     );
+  }
+  const brand = await getBrandInOrganization(brandId, agent.organization_id);
+  if (!brand) {
+    return NextResponse.json({ error: "La marca no pertenece a esta organización" }, { status: 403 });
   }
 
   const verification = await verifyRespondIoToken(apiToken);
@@ -66,6 +73,7 @@ export async function POST(request: NextRequest) {
     .from("channels")
     .insert({
       organization_id: agent.organization_id,
+      brand_id: brand.id,
       type: "respond_io",
       name,
       status: "active",

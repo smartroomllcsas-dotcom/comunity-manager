@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
 
   const { data: channel } = await admin
     .from("channels")
-    .select("id, organization_id, config, type, status")
+    .select("id, organization_id, brand_id, config, type, status")
     .eq("type", "respond_io")
     .eq("respond_io_channel_id", channelIdHint ?? "")
     .maybeSingle();
@@ -69,6 +69,7 @@ export async function POST(request: NextRequest) {
     .from("contacts")
     .select("id")
     .eq("organization_id", channel.organization_id)
+    .eq("brand_id", channel.brand_id)
     .eq("respond_io_id", contact.id)
     .maybeSingle();
 
@@ -79,6 +80,7 @@ export async function POST(request: NextRequest) {
       .from("contacts")
       .select("id")
       .eq("organization_id", channel.organization_id)
+      .eq("brand_id", channel.brand_id)
       .eq("wa_id", waId)
       .maybeSingle();
     contactRowId = byWaId?.id as string | undefined;
@@ -91,6 +93,7 @@ export async function POST(request: NextRequest) {
       .from("contacts")
       .insert({
         organization_id: channel.organization_id,
+        brand_id: channel.brand_id,
         wa_id: waId,
         name: fullName,
         phone: contact.phone || null,
@@ -120,6 +123,7 @@ export async function POST(request: NextRequest) {
     .from("conversations")
     .select("id")
     .eq("organization_id", channel.organization_id)
+    .eq("brand_id", channel.brand_id)
     .eq("contact_id", contactRowId)
     .eq("channel_id", channel.id)
     .maybeSingle();
@@ -130,6 +134,7 @@ export async function POST(request: NextRequest) {
       .from("conversations")
       .insert({
         organization_id: channel.organization_id,
+        brand_id: channel.brand_id,
         contact_id: contactRowId,
         channel_id: channel.id,
         status: "open",

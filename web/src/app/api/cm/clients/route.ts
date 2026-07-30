@@ -8,6 +8,7 @@ import {
 import { mysqlQuery, quoteId } from "@/lib/mysql";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
 
 const ALLOWED_PLATFORMS = new Set([
   "Instagram",
@@ -50,6 +51,43 @@ function normalizeBody(body: unknown) {
     : [];
 
   return { name, industry, language, platforms };
+}
+
+export async function GET() {
+  if (isLocalMysql()) {
+    return Response.json({ error: "No disponible con el proveedor local." }, { status: 501 });
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return Response.json({ error: "No autorizado." }, { status: 401 });
+
+  const smarttalkAdmin = createAdminClient();
+  const publicAdmin = createAdminClient("public");
+  const { data: agent } = await smarttalkAdmin
+    .from("agents")
+    .select("id, organization_id, member_type")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (!agent) return Response.json({ error: "Agente no encontrado." }, { status: 404 });
+
+  const assignedBrandIds = await getAgentBrandIds(agent);
+  if (assignedBrandIds && assignedBrandIds.length === 0) {
+    return Response.json({ clients: [] });
+  }
+
+  let query = publicAdmin
+    .from("cm_clients")
+    .select("id, name, industry, platforms, status, smarttalk_organization_id")
+    .eq("smarttalk_organization_id", agent.organization_id)
+    .order("name");
+  if (assignedBrandIds) query = query.in("id", assignedBrandIds);
+
+  const { data, error } = await query;
+  if (error) return Response.json({ error: "No fue posible cargar las marcas." }, { status: 500 });
+  return Response.json({ clients: data || [] });
 }
 
 export async function POST(request: NextRequest) {

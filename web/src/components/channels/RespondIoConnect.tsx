@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 
 interface RespondIoConnectProps {
+  brandId: string;
   onSuccess?: () => void;
   onError?: (err: unknown) => void;
 }
@@ -25,7 +26,7 @@ const RESPOND_IO_CHANNEL_TYPES = [
   { value: "custom", label: "Canal personalizado" },
 ] as const;
 
-export function RespondIoConnect({ onSuccess, onError }: RespondIoConnectProps) {
+export function RespondIoConnect({ brandId, onSuccess, onError }: RespondIoConnectProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
@@ -45,7 +46,7 @@ export function RespondIoConnect({ onSuccess, onError }: RespondIoConnectProps) 
       const response = await fetch("/api/channels/respond-io/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, brandId }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Error al conectar");

@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -121,6 +121,19 @@ export function AddChannelDialog({
   onChannelAdded,
 }: AddChannelDialogProps) {
   const [, setActiveTab] = useState("todos");
+  const [brands, setBrands] = useState<Array<{ id: string; name: string }>>([]);
+  const [brandId, setBrandId] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    void fetch("/api/cm/clients")
+      .then((response) => response.json())
+      .then((payload) => {
+        const rows = Array.isArray(payload.clients) ? payload.clients : [];
+        setBrands(rows);
+        setBrandId((current) => current || rows[0]?.id || "");
+      });
+  }, [open]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -131,6 +144,21 @@ export function AddChannelDialog({
             Selecciona un canal para conectar con tus clientes.
           </DialogDescription>
         </DialogHeader>
+
+        <div className="space-y-1.5">
+          <label htmlFor="channel-brand" className="text-sm font-medium">Marca propietaria</label>
+          <select
+            id="channel-brand"
+            value={brandId}
+            onChange={(event) => setBrandId(event.target.value)}
+            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+          >
+            {brands.length === 0 && <option value="">Crea una marca antes de conectar canales</option>}
+            {brands.map((brand) => (
+              <option key={brand.id} value={brand.id}>{brand.name}</option>
+            ))}
+          </select>
+        </div>
 
         <Tabs defaultValue="todos" onValueChange={setActiveTab}>
           <TabsList variant="line">
@@ -181,6 +209,7 @@ export function AddChannelDialog({
                           {channel.id === "whatsapp_business_api" &&
                           channel.available ? (
                             <WhatsAppConnect
+                              brandId={brandId}
                               onSuccess={() => {
                                 onChannelAdded?.();
                                 onOpenChange(false);
@@ -192,6 +221,7 @@ export function AddChannelDialog({
                           ) : channel.id === "respond_io" &&
                             channel.available ? (
                             <RespondIoConnect
+                              brandId={brandId}
                               onSuccess={() => {
                                 onChannelAdded?.();
                                 onOpenChange(false);

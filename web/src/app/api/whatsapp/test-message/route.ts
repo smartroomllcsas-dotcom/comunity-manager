@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import { sendWhatsAppTextMessage } from '@/lib/whatsapp-cm'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getCmClientAccess } from '@/lib/cm-client-access'
+import { resolveToken } from '@/lib/auth/token-crypto'
 
 export async function POST(request: NextRequest) {
   const { clientId, to, text } = await request.json()
@@ -20,6 +21,10 @@ export async function POST(request: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   if (!account) return NextResponse.json({ error: 'WhatsApp no conectado' }, { status: 400 })
+  const accessToken = resolveToken(account.access_token_ciphertext, account.access_token)
+  if (!accessToken) {
+    return NextResponse.json({ error: 'Token de WhatsApp no disponible' }, { status: 500 })
+  }
 
   try {
     let ownerUserId = account.user_id
@@ -42,7 +47,7 @@ export async function POST(request: NextRequest) {
 
     const result = await sendWhatsAppTextMessage(
       account.phone_number_id,
-      account.access_token,
+      accessToken,
       to,
       text || 'Mensaje de prueba desde Community Manager'
     )

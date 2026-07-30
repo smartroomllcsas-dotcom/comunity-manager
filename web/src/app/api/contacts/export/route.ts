@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getAgentBrandIds, getBrandInOrganization } from "@/lib/smarttalk/brand-scope";
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -17,6 +18,16 @@ export async function GET(request: NextRequest) {
   if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
 
   const segmentId = request.nextUrl.searchParams.get("segment_id");
+  const brandId = request.nextUrl.searchParams.get("brandId");
+  if (!brandId) return Response.json({ error: "brandId requerido" }, { status: 400 });
+
+  const [brand, assignedBrandIds] = await Promise.all([
+    getBrandInOrganization(brandId, agent.organization_id),
+    getAgentBrandIds(agent),
+  ]);
+  if (!brand || (assignedBrandIds && !assignedBrandIds.includes(brandId))) {
+    return Response.json({ error: "No autorizado para esta marca" }, { status: 403 });
+  }
 
   let contactIds: string[] | null = null;
 
@@ -34,7 +45,8 @@ export async function GET(request: NextRequest) {
       let query = admin
         .from("contacts")
         .select("id")
-        .eq("organization_id", agent.organization_id);
+        .eq("organization_id", agent.organization_id)
+        .eq("brand_id", brandId);
 
       for (const condition of conditions) {
         const { field, operator, value } = condition;
@@ -65,6 +77,7 @@ export async function GET(request: NextRequest) {
     .from("contacts")
     .select("*, lifecycle_stage:lifecycle_stages(*)")
     .eq("organization_id", agent.organization_id)
+    .eq("brand_id", brandId)
     .order("created_at", { ascending: false });
 
   if (contactIds !== null) {

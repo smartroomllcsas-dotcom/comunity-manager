@@ -6,6 +6,7 @@ import { MessageSquare, Loader2, CheckCircle2, XCircle, RefreshCw } from "lucide
 type ConnectionState = "idle" | "connecting" | "registering" | "syncing" | "success" | "error";
 
 interface WhatsAppConnectProps {
+  brandId: string;
   onSuccess?: () => void;
   onError?: (error: string) => void;
 }
@@ -19,7 +20,7 @@ const stateConfig: Record<ConnectionState, { label: string; icon?: React.ReactNo
   error: { label: "Error al conectar" },
 };
 
-export function WhatsAppConnect({ onSuccess, onError }: WhatsAppConnectProps) {
+export function WhatsAppConnect({ brandId, onSuccess, onError }: WhatsAppConnectProps) {
   const [state, setState] = useState<ConnectionState>("idle");
   const [sdkReady, setSdkReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -71,7 +72,7 @@ export function WhatsAppConnect({ onSuccess, onError }: WhatsAppConnectProps) {
           fetch("/api/channels/whatsapp/connect", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code }),
+            body: JSON.stringify({ code, brandId }),
           })
             .then((res) => res.json())
             .then((data) => {
@@ -126,7 +127,7 @@ export function WhatsAppConnect({ onSuccess, onError }: WhatsAppConnectProps) {
         },
       }
     );
-  }, [sdkReady, onSuccess, onError]);
+  }, [brandId, sdkReady, onSuccess, onError]);
 
   const handleRetry = useCallback(() => {
     setState("idle");
