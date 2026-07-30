@@ -1,6 +1,7 @@
 import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getCmClientAccess } from '@/lib/cm-client-access'
 
 function getInstagramAppId() {
   return process.env.INSTAGRAM_APP_ID || process.env.META_IG_APP_ID || ''
@@ -10,6 +11,9 @@ export async function GET(request: NextRequest) {
   const clientId = request.nextUrl.searchParams.get('clientId')
   if (!clientId) {
     return NextResponse.json({ error: 'clientId requerido' }, { status: 400 })
+  }
+  if (!(await getCmClientAccess(request, clientId))) {
+    return NextResponse.json({ error: 'No autorizado para este cliente' }, { status: 403 })
   }
 
   const appId = getInstagramAppId()

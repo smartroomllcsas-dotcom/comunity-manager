@@ -1,6 +1,11 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  billingDeniedResponse,
+  checkBillingFeature,
+} from "@/lib/billing/service";
+import { BILLING_FEATURES } from "@/lib/billing/features";
 
 export async function GET() {
   const supabase = await createClient();
@@ -45,6 +50,14 @@ export async function POST(request: NextRequest) {
   if (agent.role !== "admin") {
     return Response.json({ error: "Only admins can invite team members" }, { status: 403 });
   }
+
+  const billingDecision = await checkBillingFeature({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.TEAM_MEMBERS,
+    requestedUnits: 1,
+    source: "api/invitations",
+  });
+  if (!billingDecision.allowed) return billingDeniedResponse(billingDecision);
 
   const { email, role } = (await request.json()) as { email: string; role: string };
 

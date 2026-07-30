@@ -10,6 +10,7 @@ import {
   CreditCard,
   Receipt,
   PackageOpen,
+  Landmark,
   Server,
   Shield,
   Loader2,
@@ -28,6 +29,7 @@ const adminNav = [
   { href: "/admin/subscriptions", label: "Suscripciones", icon: CreditCard },
   { href: "/admin/payments", label: "Pagos", icon: Receipt },
   { href: "/admin/plans", label: "Planes", icon: PackageOpen },
+  { href: "/admin/payment-gateways", label: "Pasarelas", icon: Landmark },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

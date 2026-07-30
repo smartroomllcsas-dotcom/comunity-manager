@@ -185,27 +185,35 @@ export default function ClientsPage() {
     e.preventDefault()
     if (!user || !form.name.trim()) return
     setSaving(true)
+    setNotification(null)
 
-    const { error } = await supabase.from('cm_clients').insert({
-      user_id: user.id,
-      name: form.name.trim(),
-      industry: form.industry.trim() || null,
-      platforms: form.platforms,
-      language: form.language,
-      status: 'onboarding',
-    })
-
-    if (!error) {
-      await supabase.from('cm_activity_log').insert({
-        user_id: user.id,
-        action: `Nuevo cliente agregado: ${form.name.trim()}`,
-        status: 'success',
+    try {
+      const response = await fetch('/api/cm/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
       })
+      const payload = await response.json()
+      if (!response.ok) {
+        setNotification({
+          type: 'error',
+          message: payload.error || 'No fue posible crear la marca.',
+        })
+        return
+      }
+
       setForm({ name: '', industry: '', platforms: [], language: 'es' })
       setShowAddModal(false)
+      setNotification({ type: 'success', message: 'Marca creada correctamente.' })
       await loadData()
+    } catch {
+      setNotification({
+        type: 'error',
+        message: 'No fue posible conectar con el servidor.',
+      })
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
 
   function togglePlatform(p: string) {
@@ -393,7 +401,7 @@ export default function ClientsPage() {
       {clients.length === 0 ? (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
           <p className="text-slate-400 mb-2">Sin clientes aún</p>
-          <p className="text-sm text-slate-500">Haz clic en "Agregar Cliente" para vincular tu primera marca.</p>
+          <p className="text-sm text-slate-500">Haz clic en &quot;Agregar Cliente&quot; para vincular tu primera marca.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

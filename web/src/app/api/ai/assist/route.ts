@@ -1,6 +1,13 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  billingDeniedResponse,
+  checkBillingFeature,
+  recordBillingUsage,
+} from "@/lib/billing/service";
+import { BILLING_FEATURES } from "@/lib/billing/features";
+import { randomUUID } from "node:crypto";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -15,6 +22,21 @@ export async function POST(request: NextRequest) {
     .eq("id", user.id)
     .single();
   if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
+
+  const accessDecision = await checkBillingFeature({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.AI_ACCESS,
+    source: "api/ai/assist",
+  });
+  if (!accessDecision.allowed) return billingDeniedResponse(accessDecision);
+
+  const usageDecision = await checkBillingFeature({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.AI_REQUESTS_MONTH,
+    requestedUnits: 1,
+    source: "api/ai/assist",
+  });
+  if (!usageDecision.allowed) return billingDeniedResponse(usageDecision);
 
   const { conversationId, messages } = await request.json();
   if (!conversationId || !messages?.length) {
@@ -82,6 +104,16 @@ export async function POST(request: NextRequest) {
     const result = await response.json();
     const suggestion = result.content?.[0]?.text || "";
 
+    await recordBillingUsage({
+      organizationId: agent.organization_id,
+      featureCode: BILLING_FEATURES.AI_REQUESTS_MONTH,
+      quantity: 1,
+      idempotencyKey: `ai-assist:${randomUUID()}`,
+      sourceType: "ai_assist",
+      sourceId: conversationId,
+      periodStart: usageDecision.periodStart,
+      periodEnd: usageDecision.periodEnd,
+    });
     return Response.json({ suggestion });
   } catch (error) {
     console.error("AI assist error:", error);

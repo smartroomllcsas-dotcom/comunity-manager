@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { publishToFacebook, publishToInstagram } from '@/lib/meta'
 import { supabase } from '@/lib/supabase'
+import { getCmClientAccess } from '@/lib/cm-client-access'
+import { BILLING_FEATURES } from '@/lib/billing/features'
+import {
+  billingDeniedResponse,
+  checkBillingFeature,
+  recordBillingUsage,
+} from '@/lib/billing/service'
+import { randomUUID } from 'node:crypto'
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
@@ -8,6 +16,27 @@ export async function POST(req: NextRequest) {
 
   if (!clientId || !message) {
     return NextResponse.json({ error: 'clientId y message son requeridos' }, { status: 400 })
+  }
+  const targetPlatforms = Array.isArray(platforms)
+    ? [...new Set(platforms.filter((platform) => platform === 'facebook' || platform === 'instagram'))]
+    : ['facebook', 'instagram']
+  if (targetPlatforms.length === 0) {
+    return NextResponse.json({ error: 'Debes seleccionar una plataforma compatible' }, { status: 400 })
+  }
+  const access = await getCmClientAccess(req, clientId)
+  if (!access) {
+    return NextResponse.json({ error: 'No autorizado para este cliente' }, { status: 403 })
+  }
+  const billingDecision = access.organizationId
+    ? await checkBillingFeature({
+        organizationId: access.organizationId,
+        featureCode: BILLING_FEATURES.POSTS_MONTH,
+        requestedUnits: targetPlatforms.length,
+        source: 'api/social/publish',
+      })
+    : null
+  if (billingDecision && !billingDecision.allowed) {
+    return billingDeniedResponse(billingDecision)
   }
 
   // Get social account for this client
@@ -22,7 +51,6 @@ export async function POST(req: NextRequest) {
   }
 
   const results: Record<string, any> = {}
-  const targetPlatforms = platforms || ['facebook', 'instagram']
 
   // Publish to Facebook
   if (targetPlatforms.includes('facebook') && social.page_id) {
@@ -64,6 +92,28 @@ export async function POST(req: NextRequest) {
         user_id: client.user_id,
         action: `Contenido publicado en ${successPlatforms.join(' + ')} para ${client.name}`,
         status: 'success',
+      })
+    }
+  }
+
+  if (access.organizationId && billingDecision) {
+    const successfulPosts = Object.values(results).filter(
+      (result: any) => result.success
+    ).length
+    if (successfulPosts > 0) {
+      const providerPostIds = Object.values(results)
+        .filter((result: any) => result.success && result.postId)
+        .map((result: any) => String(result.postId))
+        .sort()
+      await recordBillingUsage({
+        organizationId: access.organizationId,
+        featureCode: BILLING_FEATURES.POSTS_MONTH,
+        quantity: successfulPosts,
+        idempotencyKey: `social:${clientId}:${providerPostIds.join(':') || randomUUID()}`,
+        sourceType: 'social_publish',
+        sourceId: clientId,
+        periodStart: billingDecision.periodStart,
+        periodEnd: billingDecision.periodEnd,
       })
     }
   }

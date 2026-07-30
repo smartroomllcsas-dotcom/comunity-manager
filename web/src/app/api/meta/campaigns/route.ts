@@ -2,11 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdCampaigns } from '@/lib/meta'
 import { DEFAULT_CAMPAIGNS } from '@/lib/meta-fallbacks'
 import { supabase } from '@/lib/supabase'
+import { getCmClientAccess } from '@/lib/cm-client-access'
 
 export async function GET(request: NextRequest) {
   const clientId = request.nextUrl.searchParams.get('clientId')
   if (!clientId) {
     return NextResponse.json({ error: 'clientId requerido' }, { status: 400 })
+  }
+  if (!(await getCmClientAccess(request, clientId))) {
+    return NextResponse.json({ error: 'No autorizado para este cliente' }, { status: 403 })
   }
 
   const { data: social } = await supabase

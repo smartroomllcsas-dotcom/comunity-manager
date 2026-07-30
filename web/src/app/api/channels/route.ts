@@ -1,6 +1,11 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  billingDeniedResponse,
+  checkBillingFeature,
+} from "@/lib/billing/service";
+import { BILLING_FEATURES } from "@/lib/billing/features";
 
 export async function GET() {
   const supabase = await createClient();
@@ -44,6 +49,14 @@ export async function POST(request: NextRequest) {
   if (agent.role !== "admin") {
     return Response.json({ error: "Solo los administradores pueden crear canales" }, { status: 403 });
   }
+
+  const billingDecision = await checkBillingFeature({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.CHANNELS_ACTIVE,
+    requestedUnits: 1,
+    source: "api/channels",
+  });
+  if (!billingDecision.allowed) return billingDeniedResponse(billingDecision);
 
   const body = await request.json();
   const { type, name, config } = body as {

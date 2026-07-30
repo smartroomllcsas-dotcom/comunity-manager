@@ -11,11 +11,15 @@ import {
   subscribeInstagramAccountToApp,
 } from '@/lib/meta'
 import { supabaseAdmin } from '@/lib/supabase'
+import { getCmClientAccess } from '@/lib/cm-client-access'
 
 export async function initiateMetaOAuth(request: NextRequest, callbackPath: string) {
   const clientId = request.nextUrl.searchParams.get('clientId')
   if (!clientId) {
     return NextResponse.json({ error: 'clientId requerido' }, { status: 400 })
+  }
+  if (!(await getCmClientAccess(request, clientId))) {
+    return NextResponse.json({ error: 'No autorizado para este cliente' }, { status: 403 })
   }
   if (!process.env.META_APP_ID || !process.env.META_APP_SECRET) {
     return NextResponse.json({ error: 'Meta API no configurada' }, { status: 500 })

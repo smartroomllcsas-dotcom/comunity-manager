@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { registerWhatsAppNumber } from '@/lib/whatsapp-cm'
 import { supabaseAdmin } from '@/lib/supabase'
+import { getCmClientAccess } from '@/lib/cm-client-access'
 
 export async function POST(request: NextRequest) {
   const { clientId, pin } = await request.json()
   if (!clientId) return NextResponse.json({ error: 'clientId requerido' }, { status: 400 })
+  if (!(await getCmClientAccess(request, clientId))) {
+    return NextResponse.json({ error: 'No autorizado para este cliente' }, { status: 403 })
+  }
   if (!pin || !/^\d{6}$/.test(pin)) {
     return NextResponse.json({ error: 'PIN de 6 digitos requerido' }, { status: 400 })
   }

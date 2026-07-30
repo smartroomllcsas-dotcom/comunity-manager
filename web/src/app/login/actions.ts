@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
+import { hashPassword, verifyPassword } from "@/lib/auth/password";
 
 type LoginResult = { error?: string; cmUserId?: string };
 
@@ -20,13 +21,23 @@ export async function loginAction(formData: FormData): Promise<LoginResult> {
 
   const { data: cmUser, error: cmErr } = await pub
     .from("cm_users")
-    .select("id, email, password_hash, name, role, plan, cm_client_id")
+    .select("id, email, password_hash, name, role, plan")
     .eq("email", email)
     .maybeSingle();
 
   if (cmErr) return { error: "Error consultando usuarios" };
-  if (!cmUser || cmUser.password_hash !== password) {
+  if (!cmUser?.password_hash) {
     return { error: "Email o contraseña inválidos" };
+  }
+  const passwordCheck = await verifyPassword(password, cmUser.password_hash);
+  if (!passwordCheck.ok) {
+    return { error: "Email o contraseña inválidos" };
+  }
+  if (passwordCheck.legacy) {
+    await pub
+      .from("cm_users")
+      .update({ password_hash: await hashPassword(password) })
+      .eq("id", cmUser.id);
   }
 
   let { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
@@ -68,34 +79,42 @@ export async function loginAction(formData: FormData): Promise<LoginResult> {
     .maybeSingle();
 
   if (!agent) {
-    let organizationId: string | null = null;
-
-    if (cmUser.cm_client_id) {
-      const { data: bridged } = await pub
-        .from("cm_clients")
-        .select("smarttalk_organization_id")
-        .eq("id", cmUser.cm_client_id)
-        .maybeSingle();
-      organizationId = bridged?.smarttalk_organization_id ?? null;
-    }
+    const { data: firstClient } = await pub
+      .from("cm_clients")
+      .select("id, smarttalk_organization_id")
+      .eq("user_id", cmUser.id)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    let organizationId = firstClient?.smarttalk_organization_id ?? null;
 
     if (!organizationId) {
       const orgName = cmUser.name ? `${cmUser.name} Workspace` : `${email} Workspace`;
+      const { data: freePlan } = await st
+        .from("plans")
+        .select("id")
+        .eq("name", "free")
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
       const { data: org, error: orgErr } = await st
         .from("organizations")
-        .insert({ name: orgName, cm_client_id: cmUser.cm_client_id ?? null })
+        .insert({
+          name: orgName,
+          cm_client_id: firstClient?.id ?? null,
+          plan_id: freePlan?.id || null,
+        })
         .select("id")
         .single();
       if (orgErr || !org) return { error: `No pude crear organization: ${orgErr?.message}` };
       organizationId = org.id;
-
-      if (cmUser.cm_client_id) {
-        await pub
-          .from("cm_clients")
-          .update({ smarttalk_organization_id: organizationId })
-          .eq("id", cmUser.cm_client_id);
-      }
     }
+
+    await pub
+      .from("cm_clients")
+      .update({ smarttalk_organization_id: organizationId })
+      .eq("user_id", cmUser.id)
+      .is("smarttalk_organization_id", null);
 
     const role = cmUser.role === "admin" ? "admin" : "agent";
     const { error: agentErr } = await st.from("agents").insert({
@@ -111,7 +130,7 @@ export async function loginAction(formData: FormData): Promise<LoginResult> {
 
   const cookieStore = await cookies();
   cookieStore.set(SESSION_KEY, cmUser.id, {
-    httpOnly: false,
+    httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",

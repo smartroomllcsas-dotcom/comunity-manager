@@ -17,16 +17,16 @@ declare global {
 
 interface EpaycoCheckoutProps {
   planId: string;
-  planName: string;
-  amount: number;
+  amount: number | null;
+  currency?: string;
   currentPlanId?: string | null;
   className?: string;
 }
 
 export function EpaycoCheckout({
   planId,
-  planName,
   amount,
+  currency = "COP",
   currentPlanId,
   className,
 }: EpaycoCheckoutProps) {
@@ -34,7 +34,7 @@ export function EpaycoCheckout({
   const isCurrent = currentPlanId === planId;
 
   async function handleCheckout() {
-    if (isCurrent || amount === 0) return;
+    if (isCurrent || amount === 0 || amount === null) return;
     setLoading(true);
 
     try {
@@ -53,7 +53,7 @@ export function EpaycoCheckout({
       const res = await fetch("/api/epayco/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planId }),
+        body: JSON.stringify({ planId, currency }),
       });
 
       if (!res.ok) throw new Error("Error al crear checkout");
@@ -88,6 +88,14 @@ export function EpaycoCheckout({
     return (
       <span className={`w-full text-center py-2 text-xs font-medium rounded-md bg-[#1e2433] text-[#8b949e] inline-block ${className || ""}`}>
         Gratis
+      </span>
+    );
+  }
+
+  if (amount === null) {
+    return (
+      <span className={`w-full text-center py-2 text-xs font-medium rounded-md bg-[#1e2433] text-[#8b949e] inline-block ${className || ""}`}>
+        Precio no configurado
       </span>
     );
   }

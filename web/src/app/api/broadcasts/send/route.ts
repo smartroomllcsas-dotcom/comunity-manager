@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendTemplate, getOrgWhatsAppCredentials } from "@/lib/whatsapp/api";
+import {
+  billingDeniedResponse,
+  checkBillingFeature,
+  recordBillingUsage,
+} from "@/lib/billing/service";
+import { BILLING_FEATURES } from "@/lib/billing/features";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -17,6 +23,14 @@ export async function POST(request: NextRequest) {
 
   const { data: broadcast } = await admin.from("broadcasts").select("*, template:message_templates(*)").eq("id", broadcastId).eq("organization_id", agent.organization_id).single();
   if (!broadcast || !broadcast.template) return NextResponse.json({ error: "Broadcast not found" }, { status: 404 });
+
+  const billingDecision = await checkBillingFeature({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.BROADCASTS_MONTH,
+    requestedUnits: 1,
+    source: "api/broadcasts/send",
+  });
+  if (!billingDecision.allowed) return billingDeniedResponse(billingDecision);
 
   let contactQuery = admin.from("contacts").select("id, wa_id").eq("organization_id", agent.organization_id);
   const filter = broadcast.contact_filter as { tags?: string[] };
@@ -49,5 +63,16 @@ export async function POST(request: NextRequest) {
   }
 
   await admin.from("broadcasts").update({ status: "completed", sent_count: sentCount, failed_count: failedCount }).eq("id", broadcastId);
+  await recordBillingUsage({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.BROADCASTS_MONTH,
+    quantity: 1,
+    idempotencyKey: `broadcast:${broadcastId}`,
+    sourceType: "broadcast",
+    sourceId: broadcastId,
+    periodStart: billingDecision.periodStart,
+    periodEnd: billingDecision.periodEnd,
+    metadata: { sent: sentCount, failed: failedCount },
+  });
   return NextResponse.json({ sent: sentCount, failed: failedCount });
 }

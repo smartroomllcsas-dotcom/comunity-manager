@@ -16,8 +16,18 @@ export async function register(formData: FormData) {
     return { error: authError?.message || "Error al crear usuario" };
   }
 
+  const { data: freePlan } = await admin
+    .from("plans")
+    .select("id")
+    .eq("name", "free")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
   const { data: org, error: orgError } = await admin
-    .from("organizations").insert({ name: orgName }).select("id").single();
+    .from("organizations")
+    .insert({ name: orgName, plan_id: freePlan?.id || null })
+    .select("id")
+    .single();
   if (orgError || !org) {
     return { error: "Error al crear organización" };
   }

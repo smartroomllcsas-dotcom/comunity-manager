@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { subscribeWabaToWebhook } from '@/lib/whatsapp-cm'
 import { supabaseAdmin } from '@/lib/supabase'
+import { getCmClientAccess } from '@/lib/cm-client-access'
 
 export async function POST(request: NextRequest) {
   const { clientId } = await request.json()
   if (!clientId) return NextResponse.json({ error: 'clientId requerido' }, { status: 400 })
+  if (!(await getCmClientAccess(request, clientId))) {
+    return NextResponse.json({ error: 'No autorizado para este cliente' }, { status: 403 })
+  }
 
   const { data: account, error } = await supabaseAdmin
     .from('cm_whatsapp_accounts')

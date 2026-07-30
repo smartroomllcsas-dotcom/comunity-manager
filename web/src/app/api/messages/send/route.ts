@@ -11,6 +11,12 @@ import {
 import { resolveToken } from "@/lib/auth/token-crypto";
 import { sendMessageSchema } from "@/lib/validation/message";
 import type { MessageContent, MessageType } from "@/types/database";
+import {
+  billingDeniedResponse,
+  checkBillingFeature,
+  recordBillingUsage,
+} from "@/lib/billing/service";
+import { BILLING_FEATURES } from "@/lib/billing/features";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -57,6 +63,14 @@ export async function POST(request: NextRequest) {
   if (!conversation || !conversation.contact) {
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
   }
+
+  const billingDecision = await checkBillingFeature({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.MESSAGES_OUTBOUND_MONTH,
+    requestedUnits: 1,
+    source: "api/messages/send",
+  });
+  if (!billingDecision.allowed) return billingDeniedResponse(billingDecision);
 
   const channelType = (conversation.channel as { type?: string } | null)?.type;
 
@@ -241,6 +255,16 @@ export async function POST(request: NextRequest) {
         .update({ last_message_preview: preview, unread_count: 0 })
         .eq("id", conversationId);
 
+      await recordBillingUsage({
+        organizationId: agent.organization_id,
+        featureCode: BILLING_FEATURES.MESSAGES_OUTBOUND_MONTH,
+        quantity: 1,
+        idempotencyKey: `message:${existingMessage.id}`,
+        sourceType: "message",
+        sourceId: existingMessage.id,
+        periodStart: billingDecision.periodStart,
+        periodEnd: billingDecision.periodEnd,
+      });
       return NextResponse.json({ message: existingMessage });
     }
   }
@@ -274,5 +298,15 @@ export async function POST(request: NextRequest) {
     .update({ last_message_preview: preview, unread_count: 0 })
     .eq("id", conversationId);
 
+  await recordBillingUsage({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.MESSAGES_OUTBOUND_MONTH,
+    quantity: 1,
+    idempotencyKey: `message:${message.id}`,
+    sourceType: "message",
+    sourceId: message.id,
+    periodStart: billingDecision.periodStart,
+    periodEnd: billingDecision.periodEnd,
+  });
   return NextResponse.json({ message });
 }

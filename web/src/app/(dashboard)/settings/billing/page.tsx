@@ -6,7 +6,8 @@ import { ArrowLeft, CreditCard, Check, Crown, Loader2, Receipt, Calendar } from 
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import type { Organization, Plan, Subscription, Payment } from "@/types/database";
-import { EpaycoCheckout } from "@/components/billing/EpaycoCheckout";
+import { PaymentCheckout } from "@/components/billing/PaymentCheckout";
+import type { PaymentGatewayCode } from "@/lib/payments/types";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,7 @@ export default function BillingSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [enabledGateways, setEnabledGateways] = useState<PaymentGatewayCode[]>([]);
   const [usage, setUsage] = useState({
     agents: 0,
     contacts: 0,
@@ -54,10 +56,15 @@ export default function BillingSettingsPage() {
       setLoading(true);
       const orgId = currentAgent!.organization_id;
 
-      const [orgRes, plansRes, agentsRes, contactsRes, broadcastsRes, flowsRes, subRes, paymentsRes] =
+      const [orgRes, plansRes, agentsRes, contactsRes, broadcastsRes, flowsRes, subRes, paymentsRes, gatewaysRes] =
         await Promise.all([
           supabase.from("organizations").select("*, plan:plans(*)").eq("id", orgId).single(),
-          supabase.from("plans").select("*").order("price_monthly", { ascending: true }),
+          supabase
+            .from("plans")
+            .select("*, prices:plan_prices(*)")
+            .eq("status", "active")
+            .eq("is_public", true)
+            .order("price_monthly", { ascending: true }),
           supabase.from("agents").select("id", { count: "exact", head: true }).eq("organization_id", orgId),
           supabase.from("contacts").select("id", { count: "exact", head: true }).eq("organization_id", orgId),
           supabase
@@ -68,12 +75,25 @@ export default function BillingSettingsPage() {
           supabase.from("chatbot_flows").select("id", { count: "exact", head: true }).eq("organization_id", orgId),
           supabase.from("subscriptions").select("*, plan:plans(name)").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
           supabase.from("payments").select("*").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(10),
+          supabase
+            .from("payment_gateway_settings")
+            .select("gateway")
+            .eq("is_enabled", true)
+            .eq("checkout_enabled", true)
+            .order("priority"),
         ]);
 
       if (orgRes.data) setOrg(orgRes.data as unknown as Organization);
       if (plansRes.data) setPlans(plansRes.data as Plan[]);
       if (subRes.data) setSubscription(subRes.data as unknown as Subscription);
       if (paymentsRes.data) setPayments(paymentsRes.data as Payment[]);
+      if (gatewaysRes.data) {
+        setEnabledGateways(
+          (gatewaysRes.data as Array<{ gateway: PaymentGatewayCode }>).map(
+            (item) => item.gateway
+          )
+        );
+      }
       setUsage({
         agents: agentsRes.count ?? 0,
         contacts: contactsRes.count ?? 0,
@@ -237,6 +257,18 @@ export default function BillingSettingsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {plans.map((plan) => {
               const isCurrent = currentPlan?.id === plan.id;
+              const activePrices = (plan.prices || []).filter(
+                (item) =>
+                  item.is_active &&
+                  item.billing_interval === "month" &&
+                  enabledGateways.includes(item.provider as PaymentGatewayCode)
+              );
+              const price = activePrices[0];
+              const displayAmount = price
+                ? Number(price.amount_minor) / 100
+                : plan.price_monthly === 0
+                  ? 0
+                  : null;
               return (
                 <div
                   key={plan.id}
@@ -248,11 +280,16 @@ export default function BillingSettingsPage() {
                 >
                   <h3 className="text-base font-bold text-white mb-1 capitalize">{plan.name}</h3>
                   <p className="text-2xl font-bold text-white mb-4">
-                    {plan.price_monthly === 0 ? (
+                    {displayAmount === 0 ? (
                       "Gratis"
+                    ) : displayAmount === null ? (
+                      "No disponible"
                     ) : (
                       <>
-                        ${plan.price_monthly.toLocaleString("es-CO")}
+                        ${displayAmount.toLocaleString("es-CO")}{" "}
+                        <span className="text-xs font-normal text-[#8b949e]">
+                          {price?.currency}
+                        </span>
                         <span className="text-sm font-normal text-[#8b949e]">/mes</span>
                       </>
                     )}
@@ -281,12 +318,28 @@ export default function BillingSettingsPage() {
                       </div>
                     )}
                   </div>
-                  <EpaycoCheckout
-                    planId={plan.id}
-                    planName={plan.name}
-                    amount={plan.price_monthly}
-                    currentPlanId={currentPlan?.id}
-                  />
+                  {displayAmount === 0 ? (
+                    <span className="w-full text-center py-2 text-xs rounded-md bg-[#1e2433] text-[#8b949e]">
+                      Gratis
+                    </span>
+                  ) : activePrices.length === 0 ? (
+                    <span className="w-full text-center py-2 text-xs rounded-md bg-[#1e2433] text-[#8b949e]">
+                      Precio no configurado
+                    </span>
+                  ) : (
+                    <div className="space-y-2">
+                      {activePrices.map((gatewayPrice) => (
+                        <PaymentCheckout
+                          key={gatewayPrice.id}
+                          planId={plan.id}
+                          amount={Number(gatewayPrice.amount_minor) / 100}
+                          currency={gatewayPrice.currency}
+                          gateway={gatewayPrice.provider as PaymentGatewayCode}
+                          currentPlanId={currentPlan?.id}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}

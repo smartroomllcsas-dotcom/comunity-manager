@@ -1,7 +1,7 @@
 export interface CMUser {
   id: string
   email: string
-  password_hash: string
+  password_hash?: string
   name: string
   role: string
   plan: string
@@ -149,6 +149,7 @@ export interface Organization {
   plan_id: string | null;
   trial_ends_at: string | null;
   is_active: boolean;
+  billing_enforcement_mode?: "off" | "observe" | "soft" | "hard";
   created_at: string;
   plan?: Plan;
   cm_client_id?: string | null;
@@ -163,7 +164,39 @@ export interface Plan {
   max_chatbot_flows: number;
   ai_enabled: boolean;
   price_monthly: number;
+  code?: string;
+  description?: string | null;
+  status?: "draft" | "active" | "archived";
+  is_public?: boolean;
+  version?: number;
   created_at: string;
+  updated_at?: string;
+  prices?: PlanPrice[];
+  entitlements?: PlanEntitlement[];
+}
+
+export interface PlanPrice {
+  id: string;
+  plan_id: string;
+  currency: string;
+  amount_minor: number;
+  billing_interval: "month" | "year";
+  interval_count: number;
+  provider: string;
+  provider_plan_id: string | null;
+  is_active: boolean;
+  active_from: string;
+  active_to: string | null;
+}
+
+export interface PlanEntitlement {
+  id: string;
+  plan_id: string;
+  feature_code: string;
+  enabled: boolean;
+  limit_value: number | null;
+  reset_interval: "none" | "billing_period" | "day" | "month";
+  overage_policy: "block" | "allow" | "notify";
 }
 
 export interface Invitation {
@@ -507,6 +540,11 @@ export interface Subscription {
   last_payment_amount: number | null;
   created_at: string;
   updated_at: string;
+  provider?: string;
+  plan_price_id?: string | null;
+  trial_ends_at?: string | null;
+  grace_ends_at?: string | null;
+  status_reason?: string | null;
   organization?: Organization;
   plan?: Plan;
 }
@@ -523,6 +561,10 @@ export interface Payment {
   description: string | null;
   epayco_response: Record<string, unknown>;
   created_at: string;
+  provider?: string;
+  provider_transaction_id?: string | null;
+  checkout_session_id?: string | null;
+  test_mode?: boolean;
   organization?: Organization;
 }
 

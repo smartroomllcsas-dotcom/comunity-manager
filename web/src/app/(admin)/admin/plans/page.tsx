@@ -1,6 +1,5 @@
 "use client";
 import { useState, useEffect } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { Loader2, Plus, Save, X, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Plan } from "@/types/database";
@@ -13,10 +12,16 @@ const emptyPlan = {
   max_chatbot_flows: 3,
   ai_enabled: false,
   price_monthly: 0,
+  currency: "COP",
+  provider: "epayco",
+  max_brands: 1,
+  max_channels: 3,
+  max_messages_per_month: 1000,
+  status: "draft",
+  is_public: false,
 };
 
 export default function AdminPlansPage() {
-  const supabase = createClient();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<string | null>(null);
@@ -25,14 +30,26 @@ export default function AdminPlansPage() {
   const [saving, setSaving] = useState(false);
 
   async function loadPlans() {
-    const { data } = await supabase.from("plans").select("*").order("price_monthly", { ascending: true });
-    setPlans((data as Plan[]) || []);
+    const response = await fetch("/api/admin/plans", { cache: "no-store" });
+    const payload = await response.json();
+    setPlans(response.ok ? (payload.plans as Plan[]) || [] : []);
     setLoading(false);
   }
 
   useEffect(() => { loadPlans(); }, []);
 
   function startEdit(plan: Plan) {
+    const limitFor = (featureCode: string, fallback: number) => {
+      const entitlement = plan.entitlements?.find(
+        (item) => item.feature_code === featureCode
+      );
+      return entitlement
+        ? entitlement.limit_value ?? -1
+        : fallback;
+    };
+    const activePrice = plan.prices?.find(
+      (price) => price.is_active && price.billing_interval === "month"
+    );
     setEditing(plan.id);
     setCreating(false);
     setForm({
@@ -42,7 +59,19 @@ export default function AdminPlansPage() {
       max_broadcasts_per_month: plan.max_broadcasts_per_month,
       max_chatbot_flows: plan.max_chatbot_flows,
       ai_enabled: plan.ai_enabled,
-      price_monthly: plan.price_monthly,
+      price_monthly: activePrice
+        ? Number(activePrice.amount_minor) / 100
+        : plan.price_monthly,
+      currency: activePrice?.currency || "COP",
+      provider: activePrice?.provider || "epayco",
+      max_brands: limitFor("brands.total", 1),
+      max_channels: limitFor("channels.active", 3),
+      max_messages_per_month: limitFor(
+        "messages.outbound_month",
+        1000
+      ),
+      status: plan.status || "draft",
+      is_public: plan.is_public || false,
     });
   }
 
@@ -60,10 +89,17 @@ export default function AdminPlansPage() {
 
   async function savePlan() {
     setSaving(true);
-    if (creating) {
-      await supabase.from("plans").insert(form);
-    } else if (editing) {
-      await supabase.from("plans").update(form).eq("id", editing);
+    const endpoint = creating ? "/api/admin/plans" : `/api/admin/plans/${editing}`;
+    const response = await fetch(endpoint, {
+      method: creating ? "POST" : "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      alert(payload?.error || "No se pudo guardar el plan");
+      setSaving(false);
+      return;
     }
     setSaving(false);
     cancel();
@@ -71,8 +107,12 @@ export default function AdminPlansPage() {
   }
 
   async function deletePlan(id: string) {
-    if (!confirm("Eliminar este plan? Las organizaciones que lo usan se quedaran sin plan.")) return;
-    await supabase.from("plans").delete().eq("id", id);
+    if (!confirm("Archivar este plan? Las suscripciones existentes conservaran su historial.")) return;
+    await fetch(`/api/admin/plans/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "archived", is_public: false }),
+    });
     loadPlans();
   }
 
@@ -122,13 +162,36 @@ export default function AdminPlansPage() {
               />
             </div>
             <div>
-              <label className="block text-xs text-[#8b949e] mb-1">Precio Mensual (COP)</label>
+              <label className="block text-xs text-[#8b949e] mb-1">Precio mensual</label>
               <input
                 type="number"
                 value={form.price_monthly}
                 onChange={(e) => setForm((f) => ({ ...f, price_monthly: Number(e.target.value) }))}
                 className="w-full px-3 py-2 bg-[#161b22] border border-[#2d333b] rounded-md text-sm text-white focus:outline-none focus:border-[#3b82f6]"
               />
+            </div>
+            <div>
+              <label className="block text-xs text-[#8b949e] mb-1">Moneda</label>
+              <select
+                value={form.currency}
+                onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
+                className="w-full px-3 py-2 bg-[#161b22] border border-[#2d333b] rounded-md text-sm text-white focus:outline-none focus:border-[#3b82f6]"
+              >
+                <option value="COP">COP</option>
+                <option value="USD">USD</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-[#8b949e] mb-1">Pasarela del precio</label>
+              <select
+                value={form.provider}
+                onChange={(e) => setForm((f) => ({ ...f, provider: e.target.value }))}
+                className="w-full px-3 py-2 bg-[#161b22] border border-[#2d333b] rounded-md text-sm text-white focus:outline-none focus:border-[#3b82f6]"
+              >
+                <option value="epayco">ePayco</option>
+                <option value="wompi">Wompi</option>
+                <option value="payu">PayU</option>
+              </select>
             </div>
             <div>
               <label className="block text-xs text-[#8b949e] mb-1">Max Agentes (-1 = ilimitado)</label>
@@ -166,6 +229,33 @@ export default function AdminPlansPage() {
                 className="w-full px-3 py-2 bg-[#161b22] border border-[#2d333b] rounded-md text-sm text-white focus:outline-none focus:border-[#3b82f6]"
               />
             </div>
+            <div>
+              <label className="block text-xs text-[#8b949e] mb-1">Max Marcas (-1 = ilimitado)</label>
+              <input
+                type="number"
+                value={form.max_brands}
+                onChange={(e) => setForm((f) => ({ ...f, max_brands: Number(e.target.value) }))}
+                className="w-full px-3 py-2 bg-[#161b22] border border-[#2d333b] rounded-md text-sm text-white focus:outline-none focus:border-[#3b82f6]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-[#8b949e] mb-1">Max Canales (-1 = ilimitado)</label>
+              <input
+                type="number"
+                value={form.max_channels}
+                onChange={(e) => setForm((f) => ({ ...f, max_channels: Number(e.target.value) }))}
+                className="w-full px-3 py-2 bg-[#161b22] border border-[#2d333b] rounded-md text-sm text-white focus:outline-none focus:border-[#3b82f6]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-[#8b949e] mb-1">Mensajes salientes/mes</label>
+              <input
+                type="number"
+                value={form.max_messages_per_month}
+                onChange={(e) => setForm((f) => ({ ...f, max_messages_per_month: Number(e.target.value) }))}
+                className="w-full px-3 py-2 bg-[#161b22] border border-[#2d333b] rounded-md text-sm text-white focus:outline-none focus:border-[#3b82f6]"
+              />
+            </div>
             <div className="flex items-end">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -175,6 +265,28 @@ export default function AdminPlansPage() {
                   className="rounded border-[#2d333b] bg-[#161b22]"
                 />
                 <span className="text-sm text-white">IA habilitada</span>
+              </label>
+            </div>
+            <div className="flex items-end">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.status === "active"}
+                  onChange={(e) => setForm((f) => ({ ...f, status: e.target.checked ? "active" : "draft" }))}
+                  className="rounded border-[#2d333b] bg-[#161b22]"
+                />
+                <span className="text-sm text-white">Plan activo</span>
+              </label>
+            </div>
+            <div className="flex items-end">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.is_public}
+                  onChange={(e) => setForm((f) => ({ ...f, is_public: e.target.checked }))}
+                  className="rounded border-[#2d333b] bg-[#161b22]"
+                />
+                <span className="text-sm text-white">Visible para clientes</span>
               </label>
             </div>
             <div className="flex items-end">
@@ -196,7 +308,12 @@ export default function AdminPlansPage() {
         {plans.map((plan) => (
           <div key={plan.id} className="bg-[#0d1117] border border-[#1e2433] rounded-lg p-5 flex flex-col">
             <div className="flex items-start justify-between mb-3">
-              <h3 className="text-base font-bold text-white capitalize">{plan.name}</h3>
+              <div>
+                <h3 className="text-base font-bold text-white capitalize">{plan.name}</h3>
+                <span className="text-[10px] uppercase tracking-wide text-[#8b949e]">
+                  {plan.status || "legacy"}{plan.is_public ? " · publico" : ""}
+                </span>
+              </div>
               <button
                 onClick={() => startEdit(plan)}
                 className="p-1 rounded hover:bg-[#1e2433] text-[#8b949e] hover:text-white transition-colors"
@@ -220,6 +337,13 @@ export default function AdminPlansPage() {
               <div>{plan.max_broadcasts_per_month === -1 ? "Broadcasts ilimitados" : `${plan.max_broadcasts_per_month} broadcasts/mes`}</div>
               <div>{plan.max_chatbot_flows === -1 ? "Flujos ilimitados" : `${plan.max_chatbot_flows} flujos`}</div>
               {plan.ai_enabled && <div className="text-blue-400">IA habilitada</div>}
+              {plan.entitlements?.filter((item) =>
+                ["brands.total", "channels.active", "messages.outbound_month"].includes(item.feature_code)
+              ).map((item) => (
+                <div key={item.feature_code}>
+                  {item.feature_code}: {item.limit_value ?? "ilimitado"}
+                </div>
+              ))}
             </div>
           </div>
         ))}

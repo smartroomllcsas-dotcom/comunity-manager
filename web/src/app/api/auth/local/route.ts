@@ -130,6 +130,12 @@ function nowSql() {
   return new Date().toISOString().slice(0, 19).replace('T', ' ')
 }
 
+function sanitizeUser(user: CMUser | null) {
+  if (!user) return null
+  const { password_hash: _passwordHash, ...safeUser } = user
+  return safeUser
+}
+
 async function bridgeSmarttalkSession(
   request: NextRequest,
   response: NextResponse,
@@ -208,23 +214,31 @@ async function bridgeSmarttalkSession(
     .maybeSingle()
 
   if (!agent) {
-    let organizationId: string | null = null
-
-    if (cmUser.cm_client_id) {
-      const { data: bridged } = await publicAdmin
-        .from('cm_clients')
-        .select('smarttalk_organization_id')
-        .eq('id', cmUser.cm_client_id)
-        .maybeSingle()
-
-      organizationId = bridged?.smarttalk_organization_id ?? null
-    }
+    const { data: firstClient } = await publicAdmin
+      .from('cm_clients')
+      .select('id, smarttalk_organization_id')
+      .eq('user_id', cmUser.id)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+    let organizationId = firstClient?.smarttalk_organization_id ?? null
 
     if (!organizationId) {
       const orgName = cmUser.name ? `${cmUser.name} Workspace` : `${email} Workspace`
+      const { data: freePlan } = await smarttalkAdmin
+        .from('plans')
+        .select('id')
+        .eq('name', 'free')
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle()
       const { data: org, error: orgErr } = await smarttalkAdmin
         .from('organizations')
-        .insert({ name: orgName, cm_client_id: cmUser.cm_client_id ?? null })
+        .insert({
+          name: orgName,
+          cm_client_id: firstClient?.id ?? null,
+          plan_id: freePlan?.id || null,
+        })
         .select('id')
         .single()
 
@@ -233,14 +247,13 @@ async function bridgeSmarttalkSession(
       }
 
       organizationId = org.id
-
-      if (cmUser.cm_client_id) {
-        await publicAdmin
-          .from('cm_clients')
-          .update({ smarttalk_organization_id: organizationId })
-          .eq('id', cmUser.cm_client_id)
-      }
     }
+
+    await publicAdmin
+      .from('cm_clients')
+      .update({ smarttalk_organization_id: organizationId })
+      .eq('user_id', cmUser.id)
+      .is('smarttalk_organization_id', null)
 
     const role = cmUser.role === 'admin' ? 'admin' : 'agent'
     const { error: agentErr } = await smarttalkAdmin.from('agents').insert({
@@ -318,7 +331,7 @@ async function handleMysqlAuth(request: NextRequest, body: any) {
       return response
     }
 
-    return NextResponse.json({ user, error: null })
+    return NextResponse.json({ user: sanitizeUser(user), error: null })
   }
 
   if (action === 'register') {
@@ -362,7 +375,7 @@ async function handleMysqlAuth(request: NextRequest, body: any) {
       return response
     }
 
-    return NextResponse.json({ user, error: null })
+    return NextResponse.json({ user: sanitizeUser(user), error: null })
   }
 
   if (action === 'getCurrentUser') {
@@ -372,7 +385,7 @@ async function handleMysqlAuth(request: NextRequest, body: any) {
     }
 
     const user = await mysqlGetUserById(userId)
-    return NextResponse.json({ user, error: null })
+    return NextResponse.json({ user: sanitizeUser(user), error: null })
   }
 
   return NextResponse.json({ user: null, error: 'Unsupported action' }, { status: 400 })
@@ -425,7 +438,7 @@ export async function POST(request: NextRequest) {
 
       const response = wantsHtmlRedirect
         ? NextResponse.redirect(new URL('/', request.url), { status: 303 })
-        : NextResponse.json({ user, error: null })
+        : NextResponse.json({ user: sanitizeUser(user), error: null })
 
       const bridgeError = await bridgeSmarttalkSession(request, response, user, email, password)
       if (bridgeError) {
@@ -480,7 +493,7 @@ export async function POST(request: NextRequest) {
 
       const response = wantsHtmlRedirect
         ? NextResponse.redirect(new URL('/', request.url), { status: 303 })
-        : NextResponse.json({ user, error: null })
+        : NextResponse.json({ user: sanitizeUser(user), error: null })
 
       const bridgeError = await bridgeSmarttalkSession(request, response, user, email, password)
       if (bridgeError) {
@@ -504,7 +517,10 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ user: null, error: error.message }, { status: 500 })
       }
 
-      return NextResponse.json({ user: Array.isArray(data) ? data[0] ?? null : null, error: null })
+      return NextResponse.json({
+        user: sanitizeUser(Array.isArray(data) ? data[0] ?? null : null),
+        error: null,
+      })
     }
 
     return NextResponse.json({ user: null, error: 'Unsupported action' }, { status: 400 })
