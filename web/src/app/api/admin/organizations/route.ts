@@ -26,5 +26,18 @@ export async function GET() {
     .order("created_at", { ascending: false });
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
-  return Response.json(data);
+  const enriched = await Promise.all((data || []).map(async (org: any) => {
+    const [agents, contacts, whatsapp] = await Promise.all([
+      supabase.from("agents").select("id", { count: "exact", head: true }).eq("organization_id", org.id),
+      supabase.from("contacts").select("id", { count: "exact", head: true }).eq("organization_id", org.id),
+      supabase.from("channels").select("id").eq("organization_id", org.id).eq("type", "whatsapp_cloud_api").eq("status", "active").limit(1),
+    ]);
+    return {
+      ...org,
+      _agents_count: agents.count ?? 0,
+      _contacts_count: contacts.count ?? 0,
+      _has_whatsapp: (whatsapp.data || []).length > 0,
+    };
+  }));
+  return Response.json(enriched);
 }

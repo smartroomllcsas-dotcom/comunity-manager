@@ -1,6 +1,5 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
-import { createClient } from "@/lib/supabase/client";
 import {
   Search,
   Loader2,
@@ -26,7 +25,6 @@ interface OrgRow {
 }
 
 export default function AdminOrganizationsPage() {
-  const supabase = createClient();
   const [orgs, setOrgs] = useState<OrgRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -37,29 +35,9 @@ export default function AdminOrganizationsPage() {
 
   async function loadOrgs() {
     setLoading(true);
-    const { data } = await supabase
-      .from("organizations")
-      .select("id, name, is_active, created_at, trial_ends_at, plan:plans(name)")
-      .order("created_at", { ascending: false });
-
-    if (data) {
-      // Enrich with counts
-      const enriched: OrgRow[] = [];
-      for (const org of data as any[]) {
-        const [agentsRes, contactsRes, channelsRes] = await Promise.all([
-          supabase.from("agents").select("id", { count: "exact", head: true }).eq("organization_id", org.id),
-          supabase.from("contacts").select("id", { count: "exact", head: true }).eq("organization_id", org.id),
-          supabase.from("channels").select("id").eq("organization_id", org.id).eq("type", "whatsapp_cloud_api").eq("status", "active").limit(1),
-        ]);
-        enriched.push({
-          ...org,
-          _agents_count: agentsRes.count ?? 0,
-          _contacts_count: contactsRes.count ?? 0,
-          _has_whatsapp: (channelsRes.data?.length ?? 0) > 0,
-        });
-      }
-      setOrgs(enriched);
-    }
+    const response = await fetch("/api/admin/organizations", { cache: "no-store" });
+    const data = response.ok ? await response.json() : [];
+    setOrgs((data as OrgRow[]) || []);
     setLoading(false);
   }
 
@@ -80,15 +58,19 @@ export default function AdminOrganizationsPage() {
   const totalPages = Math.ceil(filtered.length / pageSize);
 
   async function toggleActive(orgId: string, current: boolean) {
-    await supabase.from("organizations").update({ is_active: !current }).eq("id", orgId);
-    setOrgs((prev) => prev.map((o) => (o.id === orgId ? { ...o, is_active: !current } : o)));
+    const response = await fetch(`/api/admin/organizations/${orgId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_active: !current }),
+    });
+    if (response.ok) setOrgs((prev) => prev.map((o) => (o.id === orgId ? { ...o, is_active: !current } : o)));
     setActionMenu(null);
   }
 
   async function deleteOrg(orgId: string) {
     if (!confirm("Estas seguro de eliminar esta organizacion? Esta accion es irreversible.")) return;
-    await supabase.from("organizations").delete().eq("id", orgId);
-    setOrgs((prev) => prev.filter((o) => o.id !== orgId));
+    const response = await fetch(`/api/admin/organizations/${orgId}`, { method: "DELETE" });
+    if (response.ok) setOrgs((prev) => prev.filter((o) => o.id !== orgId));
     setActionMenu(null);
   }
 
