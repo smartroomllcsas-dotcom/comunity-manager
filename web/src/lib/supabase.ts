@@ -31,7 +31,14 @@ export const supabase: any = isPostgrest
     })
     : isMysql
     ? localQueryClient
-    : createClient(supabaseUrl, supabaseAnonKey)
+    : createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+          detectSessionInUrl: false,
+          storageKey: 'cm-legacy-public',
+        },
+      })
 
 export const supabaseAdmin: any = isMysql
   ? localQueryClient
@@ -42,6 +49,8 @@ export const supabaseAdmin: any = isMysql
         auth: {
           autoRefreshToken: false,
           persistSession: false,
+          detectSessionInUrl: false,
+          storageKey: 'cm-legacy-admin',
         },
       }
     )
