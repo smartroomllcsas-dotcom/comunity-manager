@@ -42,7 +42,7 @@ export default function Sidebar() {
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`)
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-60 bg-slate-950 border-r border-slate-800 flex flex-col z-50">
+    <aside className="fixed left-0 top-0 z-50 flex h-screen w-60 flex-col overflow-hidden border-r border-slate-800 bg-slate-950">
       <div className="p-6 border-b border-slate-800">
         <div className="flex items-center gap-3">
           <img
@@ -59,7 +59,7 @@ export default function Sidebar() {
         </div>
       </div>
 
-      <nav className="flex-1 py-4 px-3 space-y-1">
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4">
         {[...navItems, ...(isSuperAdmin ? [{ href: '/admin', label: 'Administración', icon: ShieldIcon }] : [])].map((item) => {
           const active = isActive(item.href)
           const Icon = item.icon
@@ -80,7 +80,7 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="border-t border-slate-800/80 bg-slate-950/70 p-3">
+      <div className="shrink-0 border-t border-slate-800/80 bg-slate-950/70 p-3">
         <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3 shadow-inner shadow-black/20">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-cyan-500 shadow-lg shadow-violet-950/40">
