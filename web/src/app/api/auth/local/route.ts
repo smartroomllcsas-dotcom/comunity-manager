@@ -266,8 +266,12 @@ async function bridgeSmarttalkSession(
                 billing_email: email,
                 billing_phone: registration.billingPhone,
                 billing_country_code: registration.billingCountryCode,
-                onboarding_plan_id: registration.selectedPlanId,
-                onboarding_status: 'pending_payment',
+                ...(registration.selectedPlanId
+                  ? {
+                      onboarding_plan_id: registration.selectedPlanId,
+                      onboarding_status: 'pending_payment',
+                    }
+                  : { onboarding_status: 'active' }),
               }
             : {}),
         })
