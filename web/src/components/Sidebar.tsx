@@ -1,9 +1,11 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from './AuthProvider'
 import LegalLinks from './LegalLinks'
+import { createClient as createSupabaseClient } from '@/lib/supabase/client'
 
 const navItems = [
   { href: '/app', label: 'Panel', icon: LayoutIcon },
@@ -20,6 +22,22 @@ const navItems = [
 export default function Sidebar() {
   const pathname = usePathname()
   const { user, logout } = useAuth()
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
+
+  useEffect(() => {
+    const supabase = createSupabaseClient()
+    void (async () => {
+      const { data } = await supabase.auth.getUser()
+      const authUser = data.user
+      if (!authUser) return
+      const { data: agent } = await supabase
+        .from('agents')
+        .select('is_super_admin')
+        .eq('id', authUser.id)
+        .maybeSingle()
+      setIsSuperAdmin(agent?.is_super_admin === true)
+    })()
+  }, [])
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`)
 
@@ -42,7 +60,7 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex-1 py-4 px-3 space-y-1">
-        {navItems.map((item) => {
+        {[...navItems, ...(isSuperAdmin ? [{ href: '/admin', label: 'Administración', icon: ShieldIcon }] : [])].map((item) => {
           const active = isActive(item.href)
           const Icon = item.icon
           return (
@@ -148,6 +166,15 @@ function CreditCardIcon({ className }: { className?: string }) {
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <rect x="3" y="5" width="18" height="14" rx="2" />
       <path d="M3 10h18M7 15h3" />
+    </svg>
+  )
+}
+
+function ShieldIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z" />
+      <path d="M9 12l2 2 4-4" />
     </svg>
   )
 }

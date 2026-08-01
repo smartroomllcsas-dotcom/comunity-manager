@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import type {
   BillingEnforcementMode,
@@ -94,6 +95,26 @@ function subscriptionPeriod(subscription: SubscriptionBillingRow | null) {
     start: subscription?.current_period_start || fallback.start,
     end: subscription?.current_period_end || fallback.end,
   };
+}
+
+async function currentUserIsSuperAdmin() {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return false;
+
+    const admin = createAdminClient();
+    const { data: agent } = await admin
+      .from("agents")
+      .select("is_super_admin")
+      .eq("id", user.id)
+      .maybeSingle();
+    return agent?.is_super_admin === true;
+  } catch {
+    return false;
+  }
 }
 
 function isSubscriptionUsable(
@@ -312,6 +333,17 @@ export async function checkBillingFeature(
   const normalizedInput = { ...input, requestedUnits };
   const fallbackPeriod = defaultPeriod();
   const globalMode = parseMode(process.env.BILLING_ENFORCEMENT_MODE);
+
+  // The platform owner is outside customer plan limits, but the check remains
+  // in the backend so every channel and resource creation path is consistent.
+  if (await currentUserIsSuperAdmin()) {
+    return makeDecision(normalizedInput, "off", fallbackPeriod, {
+      reason: "unlimited",
+      wouldBlock: false,
+      currentUsage: null,
+      limitValue: null,
+    });
+  }
 
   if (globalMode === "off") {
     return makeDecision(normalizedInput, "off", fallbackPeriod, {
