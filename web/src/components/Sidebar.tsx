@@ -67,6 +67,7 @@ export default function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
+              prefetch={false}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                 active
                   ? 'bg-violet-600/20 text-violet-400 border border-violet-500/30'
@@ -97,6 +98,7 @@ export default function Sidebar() {
           </div>
           <Link
             href="/settings/billing"
+            prefetch={false}
             className="mt-3 flex items-center justify-between rounded-xl border border-cyan-400/15 bg-cyan-400/5 px-3 py-2 text-xs font-medium text-cyan-300 transition-colors hover:border-cyan-300/30 hover:bg-cyan-400/10 hover:text-cyan-200"
           >
             <span>Plan y uso</span>

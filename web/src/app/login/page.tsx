@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { login } from '@/lib/auth'
 import LegalLinks from '@/components/LegalLinks'
@@ -11,7 +10,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [pending, setPending] = useState(false)
-  const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -27,7 +25,7 @@ export default function LoginPage() {
         return
       }
 
-      router.push('/app')
+      window.location.assign('/app')
     } finally {
       setPending(false)
     }

@@ -42,7 +42,10 @@ export async function updateSession(request: NextRequest) {
   ) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
-    return NextResponse.redirect(url);
+    const redirectResponse = NextResponse.redirect(url);
+    redirectResponse.headers.set("Cache-Control", "private, no-store, max-age=0");
+    redirectResponse.headers.set("Vary", "Cookie");
+    return redirectResponse;
   }
 
   return supabaseResponse;
