@@ -13,17 +13,10 @@ function clearSessionCookie() {
   document.cookie = `${SESSION_KEY}=; path=/; max-age=0; samesite=lax`
 }
 
-async function persistSupabaseSession(response: Response) {
-  const accessToken = response.headers.get('X-CM-Access-Token')
-  const refreshToken = response.headers.get('X-CM-Refresh-Token')
-
-  if (!accessToken || !refreshToken) {
-    return 'El servidor inició la cuenta, pero no entregó una sesión completa.'
-  }
-
-  const { error } = await createSupabaseClient().auth.setSession({
-    access_token: accessToken,
-    refresh_token: refreshToken,
+async function persistSupabaseSession(email: string, password: string) {
+  const { error } = await createSupabaseClient().auth.signInWithPassword({
+    email,
+    password,
   })
 
   return error
@@ -49,7 +42,7 @@ export async function login(email: string, password: string): Promise<{ user: CM
     return { user: null, error: payload?.error || 'Invalid email or password' }
   }
 
-  const sessionError = await persistSupabaseSession(res)
+  const sessionError = await persistSupabaseSession(email, password)
   if (sessionError) {
     return { user: null, error: sessionError }
   }
@@ -97,7 +90,7 @@ export async function register(
     return { user: null, error: payload?.error || 'Unable to register user' }
   }
 
-  const sessionError = await persistSupabaseSession(res)
+  const sessionError = await persistSupabaseSession(data.email, data.password)
   if (sessionError) {
     return { user: null, error: sessionError }
   }

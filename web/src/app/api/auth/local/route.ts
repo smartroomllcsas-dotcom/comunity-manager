@@ -251,14 +251,6 @@ async function bridgeSmarttalkSession(
     return `No pude iniciar sesión en Supabase Auth: ${signInErr?.message || 'error desconocido'}`
   }
 
-  if (!signInData.session) {
-    return 'Supabase Auth no devolvió una sesión válida'
-  }
-
-  // The browser needs the same session created by the server. Returning the
-  // tokens avoids a second password login and lets supabase-js persist them.
-  response.headers.set('X-CM-Access-Token', signInData.session.access_token)
-  response.headers.set('X-CM-Refresh-Token', signInData.session.refresh_token)
   response.headers.set('Cache-Control', 'no-store')
 
   const authUserId = signInData.user.id
