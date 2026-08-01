@@ -80,29 +80,39 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="p-4 border-t border-slate-800">
-        <div className="flex items-center gap-3 px-2">
-          <div className="w-8 h-8 rounded-full bg-violet-600/30 flex items-center justify-center">
-            <span className="text-xs font-semibold text-violet-400">
-              {user?.name?.charAt(0)?.toUpperCase() || 'U'}
-            </span>
+      <div className="border-t border-slate-800/80 bg-slate-950/70 p-3">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3 shadow-inner shadow-black/20">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-cyan-500 shadow-lg shadow-violet-950/40">
+              <span className="text-sm font-bold text-white">
+                {user?.name?.charAt(0)?.toUpperCase() || 'U'}
+              </span>
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-100">{user?.name || 'Usuario'}</p>
+              <p className="mt-0.5 text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                {user?.role === 'admin' ? 'Administrador' : 'Cuenta activa'}
+              </p>
+            </div>
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-slate-200 truncate">{user?.name || 'Usuario'}</p>
-            <Link href="/settings/billing" className="text-xs text-cyan-400 hover:text-cyan-300">
-              Ver mi plan y uso
-            </Link>
-          </div>
+          <Link
+            href="/settings/billing"
+            className="mt-3 flex items-center justify-between rounded-xl border border-cyan-400/15 bg-cyan-400/5 px-3 py-2 text-xs font-medium text-cyan-300 transition-colors hover:border-cyan-300/30 hover:bg-cyan-400/10 hover:text-cyan-200"
+          >
+            <span>Plan y uso</span>
+            <span aria-hidden="true">&gt;</span>
+          </Link>
         </div>
         <button
           onClick={logout}
-          className="w-full mt-3 text-xs text-slate-500 hover:text-red-400 transition-colors text-left px-2"
+          className="mt-3 flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-slate-400 transition-colors hover:bg-red-400/10 hover:text-red-300"
         >
-          Cerrar sesión
+          <span>Cerrar sesión</span>
+          <span aria-hidden="true">&gt;</span>
         </button>
         <LegalLinks
-          className="mt-4 flex flex-wrap gap-x-3 gap-y-2 px-2 text-[11px] text-slate-500"
-          linkClassName="hover:text-slate-300 transition-colors"
+          className="mt-3 flex flex-wrap gap-x-3 gap-y-1 px-3 text-[10px] text-slate-600"
+          linkClassName="transition-colors hover:text-slate-300"
         />
       </div>
     </aside>
