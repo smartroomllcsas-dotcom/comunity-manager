@@ -1,4 +1,5 @@
 import type { CMUser } from '@/types/database'
+import { createClient as createSupabaseClient } from '@/lib/supabase/client'
 
 const SESSION_KEY = 'cm_user_id'
 
@@ -12,9 +13,28 @@ function clearSessionCookie() {
   document.cookie = `${SESSION_KEY}=; path=/; max-age=0; samesite=lax`
 }
 
+async function persistSupabaseSession(response: Response) {
+  const accessToken = response.headers.get('X-CM-Access-Token')
+  const refreshToken = response.headers.get('X-CM-Refresh-Token')
+
+  if (!accessToken || !refreshToken) {
+    return 'El servidor inició la cuenta, pero no entregó una sesión completa.'
+  }
+
+  const { error } = await createSupabaseClient().auth.setSession({
+    access_token: accessToken,
+    refresh_token: refreshToken,
+  })
+
+  return error
+    ? 'No se pudo guardar la sesión segura en el navegador. Intenta nuevamente.'
+    : null
+}
+
 export async function login(email: string, password: string): Promise<{ user: CMUser | null; error: string | null }> {
   const res = await fetch('/api/auth/local', {
     method: 'POST',
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       action: 'login',
@@ -27,6 +47,11 @@ export async function login(email: string, password: string): Promise<{ user: CM
 
   if (!res.ok) {
     return { user: null, error: payload?.error || 'Invalid email or password' }
+  }
+
+  const sessionError = await persistSupabaseSession(res)
+  if (sessionError) {
+    return { user: null, error: sessionError }
   }
 
   if (typeof window !== 'undefined') {
@@ -58,6 +83,7 @@ export async function register(
       : emailOrData
   const res = await fetch('/api/auth/local', {
     method: 'POST',
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       action: 'register',
@@ -69,6 +95,11 @@ export async function register(
 
   if (!res.ok) {
     return { user: null, error: payload?.error || 'Unable to register user' }
+  }
+
+  const sessionError = await persistSupabaseSession(res)
+  if (sessionError) {
+    return { user: null, error: sessionError }
   }
 
   if (typeof window !== 'undefined') {
