@@ -149,7 +149,7 @@ export async function POST(request: NextRequest) {
   const [{ data: agent }, { data: cmUser }] = await Promise.all([
     smarttalkAdmin
       .from("agents")
-      .select("id, organization_id, role")
+      .select("id, organization_id, role, is_super_admin")
       .eq("id", user.id)
       .maybeSingle(),
     publicAdmin
@@ -165,7 +165,8 @@ export async function POST(request: NextRequest) {
       { status: 403 }
     );
   }
-  if (agent.role !== "admin" || cmUser.role !== "admin") {
+  const isSuperAdmin = agent.is_super_admin === true;
+  if ((!isSuperAdmin && agent.role !== "admin") || (!isSuperAdmin && cmUser.role !== "admin")) {
     return Response.json(
       { error: "Solo un administrador puede crear marcas." },
       { status: 403 }
