@@ -77,6 +77,7 @@ export function PaymentCheckout({
 }) {
   const [loading, setLoading] = useState(false);
   const isCurrent = currentPlanId === planId;
+  const isEpayco = gateway === "epayco";
 
   async function handleCheckout() {
     if (amount <= 0) return;
@@ -125,12 +126,17 @@ export function PaymentCheckout({
       disabled={loading}
       variant="outline"
       size="sm"
-      className="w-full border-[#2d333b] text-white hover:bg-[#0d1117] h-9"
+      aria-label={`${isCurrent ? "Renovar" : "Pagar"} con ${gatewayNames[gateway]}`}
+      className={
+        isEpayco
+          ? "h-11 w-full rounded-xl border-[#ffd08a] bg-gradient-to-r from-[#f59e0b] via-[#f97316] to-[#ea580c] px-4 font-semibold tracking-[0.01em] text-white shadow-[0_10px_28px_-12px_rgba(249,115,22,0.95)] hover:border-[#ffe2ad] hover:from-[#fbbf24] hover:via-[#fb923c] hover:to-[#f97316] hover:text-white focus-visible:border-[#ffe2ad] focus-visible:ring-[#fdba74]/70"
+          : "h-9 w-full border-[#2d333b] text-white hover:bg-[#0d1117]"
+      }
     >
       {loading ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
       ) : (
-        <CreditCard className="h-3.5 w-3.5 mr-1.5" />
+        <CreditCard className={isEpayco ? "mr-2 h-4 w-4" : "mr-1.5 h-3.5 w-3.5"} />
       )}
       {isCurrent
         ? `Renovar con ${gatewayNames[gateway]}`
