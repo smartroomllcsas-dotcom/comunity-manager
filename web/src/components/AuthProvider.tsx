@@ -58,17 +58,55 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const smarttalk = isSmarttalkArea(pathname)
 
   useEffect(() => {
-    if (isPublic || smarttalk) {
-      setLoading(false)
-      return
-    }
-    getCurrentUser().then((u) => {
-      setUser(u)
-      setLoading(false)
-      if (!u) {
-        router.push('/login')
+    let cancelled = false
+
+    async function loadIdentity() {
+      if (isPublic) {
+        setUser(null)
+        setLoading(false)
+        return
       }
-    })
+
+      const localUser = await getCurrentUser()
+      let resolvedUser = localUser
+
+      // SmartTalk routes can have a valid Supabase session while the legacy
+      // CM session is still warming up. Use the agent as the display fallback.
+      if (!resolvedUser && smarttalk) {
+        const { data: { user: authUser } } = await createSupabaseBrowser().auth.getUser()
+        if (authUser) {
+          const { data: agent } = await createSupabaseBrowser()
+            .from('agents')
+            .select('id, email, name, role')
+            .eq('id', authUser.id)
+            .maybeSingle()
+
+          if (agent) {
+            resolvedUser = {
+              id: agent.id,
+              email: agent.email || authUser.email || '',
+              name: agent.name || authUser.user_metadata?.name || authUser.email || 'Usuario',
+              role: agent.role || 'user',
+              plan: 'free',
+              avatar_url: null,
+              created_at: '',
+              updated_at: '',
+            }
+          }
+        }
+      }
+
+      if (cancelled) return
+      setUser(resolvedUser)
+      setLoading(false)
+      if (!resolvedUser && !smarttalk) router.push('/login')
+    }
+
+    void loadIdentity()
+
+    return () => {
+      cancelled = true
+    }
   }, [pathname, router, isPublic, smarttalk])
 
   const logout = async () => {
@@ -83,7 +121,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     router.push('/login')
   }
 
-  if (isPublic || smarttalk) {
+  if (isPublic) {
     return (
       <AuthContext.Provider value={{ user: null, loading: false, logout }}>
         {children}
@@ -102,7 +140,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     )
   }
 
-  if (!user) {
+  if (!user && !smarttalk) {
     return null
   }
 
