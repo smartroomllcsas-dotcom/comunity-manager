@@ -22,7 +22,7 @@ export async function GET() {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("organizations")
-    .select("*, plan:plans(name, price_monthly)")
+    .select("*, plan:plans!organizations_plan_id_fkey(name, price_monthly)")
     .order("created_at", { ascending: false });
 
   if (error) return Response.json({ error: error.message }, { status: 500 });

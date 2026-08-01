@@ -22,7 +22,7 @@ export async function GET() {
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
 
   const [orgsRes, agentsRes, contactsRes, subsRes, paymentsRes] = await Promise.all([
-    supabase.from("organizations").select("id, name, created_at, is_active, plan:plans(name)", { count: "exact" }),
+    supabase.from("organizations").select("id, name, created_at, is_active, plan:plans!organizations_plan_id_fkey(name)", { count: "exact" }),
     supabase.from("agents").select("id", { count: "exact", head: true }),
     supabase.from("contacts").select("id", { count: "exact", head: true }),
     supabase.from("subscriptions").select("status"),
