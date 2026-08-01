@@ -6,6 +6,7 @@ import { mysqlQuery, quoteId } from '@/lib/mysql'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { hashPassword, verifyPassword } from '@/lib/auth/password'
 import { clientIp, rateLimitWithWhitelist } from '@/lib/rate-limit'
+import { isGlobalAdminEmail } from '@/lib/platform-admin'
 
 const SESSION_KEY = 'cm_user_id'
 const LOGIN_RATE_LIMIT = 5
@@ -17,7 +18,7 @@ interface RegistrationContext {
   organizationName: string
   billingPhone: string
   billingCountryCode: string
-  selectedPlanId: string
+  selectedPlanId?: string
 }
 
 async function checkLoginRateLimit(request: NextRequest, email: string) {
@@ -492,6 +493,7 @@ export async function POST(request: NextRequest) {
       const billingPhone = String(body?.billingPhone || '').trim()
       const billingCountryCode = String(body?.billingCountryCode || 'CO').trim().toUpperCase()
       const selectedPlanCode = String(body?.selectedPlanCode || '').trim()
+      const isGlobalAdmin = isGlobalAdminEmail(email)
 
       if (
         !email ||
@@ -503,7 +505,7 @@ export async function POST(request: NextRequest) {
         billingPhone.length < 7 ||
         billingPhone.length > 30 ||
         !/^[A-Z]{2}$/.test(billingCountryCode) ||
-        !selectedPlanCode
+        !isGlobalAdmin && !selectedPlanCode
       ) {
         return NextResponse.json(
           { user: null, error: 'Datos de registro incompletos o inválidos' },
@@ -512,46 +514,51 @@ export async function POST(request: NextRequest) {
       }
 
       const smarttalkAdmin = createAdminClient('smarttalk')
-      const { data: selectedPlan, error: selectedPlanError } = await smarttalkAdmin
-        .from('plans')
-        .select('id')
-        .eq('code', selectedPlanCode)
-        .eq('status', 'active')
-        .eq('is_public', true)
-        .maybeSingle()
+      let selectedPlanId: string | undefined
 
-      if (selectedPlanError || !selectedPlan) {
-        return NextResponse.json(
-          { user: null, error: 'El plan seleccionado no está disponible' },
-          { status: 409 }
-        )
-      }
+      if (!isGlobalAdmin) {
+        const { data: selectedPlan, error: selectedPlanError } = await smarttalkAdmin
+          .from('plans')
+          .select('id')
+          .eq('code', selectedPlanCode)
+          .eq('status', 'active')
+          .eq('is_public', true)
+          .maybeSingle()
 
-      const { data: gatewayRows } = await smarttalkAdmin
-        .from('payment_gateway_settings')
-        .select('gateway')
-        .eq('is_enabled', true)
-        .eq('checkout_enabled', true)
-      const enabledGateways = (gatewayRows || []).map((row) => row.gateway)
+        if (selectedPlanError || !selectedPlan) {
+          return NextResponse.json(
+            { user: null, error: 'El plan seleccionado no está disponible' },
+            { status: 409 }
+          )
+        }
+        selectedPlanId = selectedPlan.id
 
-      const { data: activePrice } = await smarttalkAdmin
-        .from('plan_prices')
-        .select('id')
-        .eq('plan_id', selectedPlan.id)
-        .eq('currency', 'COP')
-        .eq('billing_interval', 'month')
-        .eq('is_active', true)
-        .in('provider', enabledGateways)
-        .lte('active_from', new Date().toISOString())
-        .is('active_to', null)
-        .limit(1)
-        .maybeSingle()
+        const { data: gatewayRows } = await smarttalkAdmin
+          .from('payment_gateway_settings')
+          .select('gateway')
+          .eq('is_enabled', true)
+          .eq('checkout_enabled', true)
+        const enabledGateways = (gatewayRows || []).map((row) => row.gateway)
 
-      if (!activePrice) {
-        return NextResponse.json(
-          { user: null, error: 'El plan no tiene un precio activo' },
-          { status: 409 }
-        )
+        const { data: activePrice } = await smarttalkAdmin
+          .from('plan_prices')
+          .select('id')
+          .eq('plan_id', selectedPlan.id)
+          .eq('currency', 'COP')
+          .eq('billing_interval', 'month')
+          .eq('is_active', true)
+          .in('provider', enabledGateways)
+          .lte('active_from', new Date().toISOString())
+          .is('active_to', null)
+          .limit(1)
+          .maybeSingle()
+
+        if (!activePrice) {
+          return NextResponse.json(
+            { user: null, error: 'El plan no tiene un precio activo' },
+            { status: 409 }
+          )
+        }
       }
 
       const { data: existingRows, error: existingError } = await supabaseRest<Pick<CMUser, 'id'>[]>(
@@ -628,7 +635,7 @@ export async function POST(request: NextRequest) {
           organizationName,
           billingPhone,
           billingCountryCode,
-          selectedPlanId: selectedPlan.id,
+          selectedPlanId,
         }
       )
       if (bridgeError) {

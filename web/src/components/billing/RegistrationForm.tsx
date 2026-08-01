@@ -6,11 +6,13 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Check, Loader2, ShieldCheck } from "lucide-react";
 import { register } from "@/lib/auth";
 import type { PublicPlan } from "@/lib/billing/public-plans";
+import { isGlobalAdminEmail } from "@/lib/platform-admin";
 
 export function RegistrationForm({ plan }: { plan: PublicPlan }) {
   const router = useRouter();
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [emailValue, setEmailValue] = useState("");
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -18,6 +20,8 @@ export function RegistrationForm({ plan }: { plan: PublicPlan }) {
     const form = new FormData(event.currentTarget);
     const password = String(form.get("password") || "");
     const confirmation = String(form.get("passwordConfirmation") || "");
+    const email = String(form.get("email") || "");
+    const isGlobalAdmin = isGlobalAdminEmail(email);
 
     if (password !== confirmation) {
       setError("Las contraseñas no coinciden.");
@@ -29,7 +33,7 @@ export function RegistrationForm({ plan }: { plan: PublicPlan }) {
       const result = await register({
         organizationName: String(form.get("organizationName") || ""),
         name: String(form.get("name") || ""),
-        email: String(form.get("email") || ""),
+        email,
         billingPhone: String(form.get("billingPhone") || ""),
         billingCountryCode: "CO",
         password,
@@ -39,7 +43,7 @@ export function RegistrationForm({ plan }: { plan: PublicPlan }) {
         setError(result.error);
         return;
       }
-      router.push(`/checkout?plan=${encodeURIComponent(plan.code)}`);
+      router.push(isGlobalAdmin ? "/admin" : `/checkout?plan=${encodeURIComponent(plan.code)}`);
     } finally {
       setPending(false);
     }
@@ -74,8 +78,13 @@ export function RegistrationForm({ plan }: { plan: PublicPlan }) {
           </div>
           <div>
             <label htmlFor="email" className="mb-1.5 block text-xs font-semibold text-white/70">Correo de facturación y acceso</label>
-            <input id="email" name="email" type="email" required maxLength={254} autoComplete="email" className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none focus:border-[#55c6b6]" placeholder="admin@agencia.com" />
+            <input id="email" name="email" type="email" required maxLength={254} autoComplete="email" value={emailValue} onChange={(event) => setEmailValue(event.target.value)} className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none focus:border-[#55c6b6]" placeholder="admin@agencia.com" />
           </div>
+          {isGlobalAdminEmail(emailValue) && (
+            <p className="rounded-xl border border-[#55c6b6]/25 bg-[#55c6b6]/10 px-3 py-2 text-xs leading-5 text-[#b9f0e8]">
+              Este correo se activa sin pago y tendrá acceso administrativo global.
+            </p>
+          )}
           <div>
             <label htmlFor="billingPhone" className="mb-1.5 block text-xs font-semibold text-white/70">Teléfono o WhatsApp</label>
             <input id="billingPhone" name="billingPhone" type="tel" required minLength={7} maxLength={30} autoComplete="tel" className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none focus:border-[#55c6b6]" placeholder="+57 300 000 0000" />
@@ -97,11 +106,11 @@ export function RegistrationForm({ plan }: { plan: PublicPlan }) {
           {error && <p role="alert" className="rounded-xl border border-red-400/20 bg-red-400/10 px-3 py-2 text-sm text-red-300">{error}</p>}
           <button type="submit" disabled={pending} className="flex w-full items-center justify-center gap-2 rounded-full bg-[#f7c65f] px-5 py-3 font-bold text-[#3b2b08] hover:bg-[#ffda85] disabled:opacity-60">
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            {pending ? "Creando agencia..." : "Continuar al pago"}
+            {pending ? "Creando agencia..." : isGlobalAdminEmail(emailValue) ? "Crear acceso administrativo" : "Continuar al pago"}
           </button>
           <div className="flex items-center justify-center gap-2 text-xs text-white/45">
             <ShieldCheck className="h-4 w-4 text-[#55c6b6]" />
-            El plan se activa únicamente después de confirmar el pago.
+            Los clientes comerciales activan su plan después de confirmar el pago.
           </div>
           <p className="text-center text-xs text-white/45">¿Ya tienes cuenta? <Link href={`/login`} className="text-[#9be2d8] hover:text-white">Inicia sesión</Link></p>
         </form>
