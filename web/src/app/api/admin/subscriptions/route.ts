@@ -14,7 +14,7 @@ export async function GET() {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("subscriptions")
-    .select("*, organization:organizations(name), plan:plans(name)")
+    .select("*, organization:organizations(name), plan:plans!subscriptions_plan_id_fkey(name)")
     .order("created_at", { ascending: false });
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json(data || []);
