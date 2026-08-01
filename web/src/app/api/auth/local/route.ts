@@ -66,6 +66,14 @@ function getSupabaseConfig() {
   return { supabaseUrl, serviceRoleKey }
 }
 
+function isSchemaCacheError(message: string) {
+  return /schema cache|could not query the database/i.test(message)
+}
+
+function waitForRetry(attempt: number) {
+  return new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)))
+}
+
 async function supabaseRest<T>(
   path: string,
   {
@@ -79,29 +87,35 @@ async function supabaseRest<T>(
   } = {}
 ): Promise<{ data: T | null; error: { message: string } | null; status: number }> {
   const { supabaseUrl, serviceRoleKey } = getSupabaseConfig()
-  const res = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
-    method,
-    headers: {
-      apikey: serviceRoleKey,
-      Authorization: `Bearer ${serviceRoleKey}`,
-      'Content-Type': 'application/json',
-      Prefer: prefer,
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
+  let lastFailure = { message: 'Supabase request failed', status: 500 }
 
-  const text = await res.text()
-  let parsed: unknown = null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const res = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+      method,
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        'Content-Type': 'application/json',
+        Prefer: prefer,
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
 
-  if (text) {
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      parsed = text
+    const text = await res.text()
+    let parsed: unknown = null
+
+    if (text) {
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        parsed = text
+      }
     }
-  }
 
-  if (!res.ok) {
+    if (res.ok) {
+      return { data: parsed as T, error: null, status: res.status }
+    }
+
     const message =
       typeof parsed === 'string'
         ? parsed
@@ -110,10 +124,17 @@ async function supabaseRest<T>(
           : (parsed as { message?: string; error?: string } | null)?.message ||
             (parsed as { message?: string; error?: string } | null)?.error ||
             `Supabase request failed (${res.status})`
-    return { data: null, error: { message }, status: res.status }
+    lastFailure = { message, status: res.status }
+
+    if (attempt < 2 && isSchemaCacheError(message)) {
+      await waitForRetry(attempt)
+      continue
+    }
+
+    break
   }
 
-  return { data: parsed as T, error: null, status: res.status }
+  return { data: null, error: { message: lastFailure.message }, status: lastFailure.status }
 }
 
 async function readPayload(request: NextRequest) {
@@ -217,10 +238,14 @@ async function bridgeSmarttalkSession(
     }
   )
 
-  const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  })
+  let signInResult = await supabase.auth.signInWithPassword({ email, password })
+  for (let attempt = 0; signInResult.error && attempt < 2; attempt += 1) {
+    if (!isSchemaCacheError(signInResult.error.message)) break
+    await waitForRetry(attempt)
+    signInResult = await supabase.auth.signInWithPassword({ email, password })
+  }
+
+  const { data: signInData, error: signInErr } = signInResult
 
   if (signInErr || !signInData?.user) {
     return `No pude iniciar sesión en Supabase Auth: ${signInErr?.message || 'error desconocido'}`

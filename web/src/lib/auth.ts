@@ -1,5 +1,4 @@
 import type { CMUser } from '@/types/database'
-import { createClient as createSupabaseClient } from '@/lib/supabase/client'
 
 const SESSION_KEY = 'cm_user_id'
 
@@ -33,20 +32,6 @@ export async function login(email: string, password: string): Promise<{ user: CM
   if (typeof window !== 'undefined') {
     localStorage.setItem(SESSION_KEY, payload.user.id)
     setSessionCookie(payload.user.id)
-
-    // The legacy CM session and SmartTalk session must be established together.
-    // Without the second session, protected routes such as Team redirect to login.
-    const smarttalk = createSupabaseClient()
-    const { data: session } = await smarttalk.auth.getSession()
-    if (!session.session || session.session.user.email?.toLowerCase() !== email.toLowerCase()) {
-      const { error: smarttalkError } = await smarttalk.auth.signInWithPassword({ email, password })
-      if (smarttalkError) {
-        return {
-          user: null,
-          error: 'La cuenta local inició sesión, pero no se pudo activar la sesión de CommunityManager. Intenta nuevamente.',
-        }
-      }
-    }
   }
 
   return { user: payload.user as CMUser, error: null }
@@ -89,18 +74,6 @@ export async function register(
   if (typeof window !== 'undefined') {
     localStorage.setItem(SESSION_KEY, payload.user.id)
     setSessionCookie(payload.user.id)
-
-    const smarttalk = createSupabaseClient()
-    const { error: smarttalkError } = await smarttalk.auth.signInWithPassword({
-      email: data.email,
-      password: data.password,
-    })
-    if (smarttalkError) {
-      return {
-        user: null,
-        error: 'La cuenta fue creada, pero no se pudo activar la sesión de CommunityManager. Intenta iniciar sesión nuevamente.',
-      }
-    }
   }
 
   return { user: payload.user as CMUser, error: null }
