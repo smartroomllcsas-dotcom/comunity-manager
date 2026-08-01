@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useCurrentAgent } from "@/hooks/useCurrentAgent";
 import { createClient } from "@/lib/supabase/client";
-import { ArrowLeft, CreditCard, Check, Crown, Loader2, Receipt, Calendar } from "lucide-react";
+import { ArrowLeft, CreditCard, Check, Crown, Loader2, Receipt, Calendar, Building2, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import type { Organization, Plan, Subscription, Payment } from "@/types/database";
@@ -47,6 +47,8 @@ export default function BillingSettingsPage() {
   const [usage, setUsage] = useState({
     agents: 0,
     advisors: 0,
+    brands: 0,
+    channels: 0,
     contacts: 0,
     broadcasts: 0,
     flows: 0,
@@ -58,7 +60,7 @@ export default function BillingSettingsPage() {
       setLoading(true);
       const orgId = currentAgent!.organization_id;
 
-      const [orgRes, plansRes, agentsRes, advisorsRes, contactsRes, broadcastsRes, flowsRes, subRes, paymentsRes, gatewaysRes] =
+      const [orgRes, plansRes, agentsRes, advisorsRes, brandsRes, channelsRes, contactsRes, broadcastsRes, flowsRes, subRes, paymentsRes, gatewaysRes] =
         await Promise.all([
           supabase.from("organizations").select("*, plan:plans(*, entitlements:plan_entitlements(*))").eq("id", orgId).single(),
           supabase
@@ -69,6 +71,14 @@ export default function BillingSettingsPage() {
             .order("price_monthly", { ascending: true }),
           supabase.from("agents").select("id", { count: "exact", head: true }).eq("organization_id", orgId).eq("member_type", "agency_user"),
           supabase.from("agents").select("id", { count: "exact", head: true }).eq("organization_id", orgId).eq("member_type", "brand_advisor"),
+          fetch("/api/cm/clients", { cache: "no-store" })
+            .then(async (response) => response.ok ? response.json() : { clients: [] })
+            .catch(() => ({ clients: [] })),
+          supabase
+            .from("channels")
+            .select("id", { count: "exact", head: true })
+            .eq("organization_id", orgId)
+            .eq("status", "active"),
           supabase.from("contacts").select("id", { count: "exact", head: true }).eq("organization_id", orgId),
           supabase
             .from("broadcasts")
@@ -76,7 +86,14 @@ export default function BillingSettingsPage() {
             .eq("organization_id", orgId)
             .gte("created_at", new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
           supabase.from("chatbot_flows").select("id", { count: "exact", head: true }).eq("organization_id", orgId),
-          supabase.from("subscriptions").select("*, plan:plans(name)").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+          supabase
+            .from("subscriptions")
+            .select("*, plan:plans(*, entitlements:plan_entitlements(*))")
+            .eq("organization_id", orgId)
+            .in("status", ["trial", "active", "past_due", "suspended"])
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
           supabase.from("payments").select("*").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(10),
           supabase
             .from("payment_gateway_settings")
@@ -100,6 +117,8 @@ export default function BillingSettingsPage() {
       setUsage({
         agents: agentsRes.count ?? 0,
         advisors: advisorsRes.count ?? 0,
+        brands: Array.isArray(brandsRes?.clients) ? brandsRes.clients.length : 0,
+        channels: channelsRes.count ?? 0,
         contacts: contactsRes.count ?? 0,
         broadcasts: broadcastsRes.count ?? 0,
         flows: flowsRes.count ?? 0,
@@ -109,7 +128,11 @@ export default function BillingSettingsPage() {
     load();
   }, [currentAgent?.organization_id]);
 
-  const currentPlan = org?.plan || null;
+  // An approved payment creates the subscription first. Prefer that plan and
+  // keep organizations.plan_id as a compatibility fallback for legacy data.
+  const currentPlan = subscription?.plan || org?.plan || null;
+  const entitlementLimit = (featureCode: string, fallback: number | null = null) =>
+    currentPlan?.entitlements?.find((item) => item.feature_code === featureCode)?.limit_value ?? fallback;
 
   if (loading) {
     return (
@@ -165,17 +188,31 @@ export default function BillingSettingsPage() {
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div className="flex items-center gap-2 text-[#8b949e]">
                 <Check className="h-3.5 w-3.5 text-green-400" />
-                {currentPlan.max_agents} usuarios de agencia
+                {currentPlan.max_agents === -1 ? "Usuarios de agencia ilimitados" : `${currentPlan.max_agents} usuarios de agencia`}
               </div>
               <div className="flex items-center gap-2 text-[#8b949e]">
                 <Check className="h-3.5 w-3.5 text-green-400" />
-                {currentPlan.entitlements?.find(
-                  (item) => item.feature_code === "brand.advisors_total"
-                )?.limit_value ?? "Ilimitados"} asesores de marca
+                {entitlementLimit("brand.advisors_total") == null
+                  ? "Asesores de marca ilimitados"
+                  : `${entitlementLimit("brand.advisors_total")} asesores de marca`}
+              </div>
+              <div className="flex items-center gap-2 text-[#8b949e]">
+                <Building2 className="h-3.5 w-3.5 text-green-400" />
+                {entitlementLimit("brands.total") == null
+                  ? "Marcas ilimitadas"
+                  : `${entitlementLimit("brands.total")} marcas`}
+              </div>
+              <div className="flex items-center gap-2 text-[#8b949e]">
+                <Radio className="h-3.5 w-3.5 text-green-400" />
+                {entitlementLimit("channels.active") == null
+                  ? "Canales ilimitados"
+                  : `${entitlementLimit("channels.active")} canales activos`}
               </div>
               <div className="flex items-center gap-2 text-[#8b949e]">
                 <Check className="h-3.5 w-3.5 text-green-400" />
-                {currentPlan.max_contacts.toLocaleString()} contactos
+                {currentPlan.max_contacts === -1
+                  ? "Contactos ilimitados"
+                  : `${currentPlan.max_contacts.toLocaleString()} contactos`}
               </div>
               <div className="flex items-center gap-2 text-[#8b949e]">
                 <Check className="h-3.5 w-3.5 text-green-400" />
@@ -195,6 +232,33 @@ export default function BillingSettingsPage() {
           )}
         </div>
 
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Link
+            href="/clients"
+            className="rounded-lg border border-[#2d333b] bg-[#161b22] p-4 transition-colors hover:border-blue-500/50 hover:bg-[#1e2536]"
+          >
+            <Building2 className="h-5 w-5 text-blue-400 mb-2" />
+            <p className="text-sm font-semibold text-white">Crear y gestionar marcas</p>
+            <p className="mt-1 text-xs text-[#8b949e]">Cada marca tiene sus canales y sus leads separados.</p>
+          </Link>
+          <Link
+            href="/settings/channels"
+            className="rounded-lg border border-[#2d333b] bg-[#161b22] p-4 transition-colors hover:border-green-500/50 hover:bg-[#1e2536]"
+          >
+            <Radio className="h-5 w-5 text-green-400 mb-2" />
+            <p className="text-sm font-semibold text-white">Conectar canales</p>
+            <p className="mt-1 text-xs text-[#8b949e]">Selecciona la marca propietaria antes de conectar.</p>
+          </Link>
+          <Link
+            href="/settings/agents"
+            className="rounded-lg border border-[#2d333b] bg-[#161b22] p-4 transition-colors hover:border-amber-500/50 hover:bg-[#1e2536]"
+          >
+            <Building2 className="h-5 w-5 text-amber-400 mb-2" />
+            <p className="text-sm font-semibold text-white">Asignar asesores</p>
+            <p className="mt-1 text-xs text-[#8b949e]">Diferencia usuarios de agencia y asesores por marca.</p>
+          </Link>
+        </div>
+
         {/* Usage Stats */}
         <div className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg p-5">
           <h2 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
@@ -204,19 +268,27 @@ export default function BillingSettingsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <ProgressBar
               current={usage.agents}
-              max={currentPlan?.max_agents ?? 1}
+              max={currentPlan ? currentPlan.max_agents : 0}
               label="Usuarios de agencia"
             />
             <ProgressBar
               current={usage.advisors}
-              max={currentPlan?.entitlements?.find(
-                (item) => item.feature_code === "brand.advisors_total"
-              )?.limit_value ?? null}
+              max={currentPlan ? entitlementLimit("brand.advisors_total") : 0}
               label="Asesores de marca"
             />
             <ProgressBar
+              current={usage.brands}
+              max={currentPlan ? entitlementLimit("brands.total") : 0}
+              label="Marcas"
+            />
+            <ProgressBar
+              current={usage.channels}
+              max={currentPlan ? entitlementLimit("channels.active") : 0}
+              label="Canales activos"
+            />
+            <ProgressBar
               current={usage.contacts}
-              max={currentPlan?.max_contacts ?? 100}
+              max={currentPlan ? currentPlan.max_contacts : 0}
               label="Contactos"
             />
             <ProgressBar

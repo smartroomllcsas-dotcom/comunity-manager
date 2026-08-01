@@ -26,6 +26,23 @@ const sections = [
     ],
   },
   {
+    title: "Operacion por marca",
+    items: [
+      {
+        href: "/clients",
+        title: "Marcas",
+        description: "Crea cada marca de la agencia y conecta sus canales sociales",
+        icon: Building2,
+      },
+      {
+        href: "/contacts",
+        title: "Leads y contactos",
+        description: "Consulta los leads separados por marca y administra su ciclo de vida",
+        icon: Users,
+      },
+    ],
+  },
+  {
     title: "Mensajeria",
     items: [
       {
@@ -106,7 +123,7 @@ const sections = [
       {
         href: "/settings/billing",
         title: "Facturacion y Uso",
-        description: "Plan actual, uso de MACs y gestion de suscripcion",
+        description: "Plan actual, uso de recursos y gestion de suscripcion",
         icon: CreditCard,
       },
       {
