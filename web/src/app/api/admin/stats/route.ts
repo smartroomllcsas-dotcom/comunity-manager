@@ -22,7 +22,7 @@ export async function GET() {
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
 
   const [orgsRes, agentsRes, contactsRes, subsRes, paymentsRes] = await Promise.all([
-    supabase.from("organizations").select("id, is_active", { count: "exact" }),
+    supabase.from("organizations").select("id, name, created_at, is_active, plan:plans(name)", { count: "exact" }),
     supabase.from("agents").select("id", { count: "exact", head: true }),
     supabase.from("contacts").select("id", { count: "exact", head: true }),
     supabase.from("subscriptions").select("status"),
@@ -47,6 +47,17 @@ export async function GET() {
     subsByStatus[(s as any).status] = (subsByStatus[(s as any).status] || 0) + 1;
   }
 
+  const recentOrgs = (orgsRes.data || [])
+    .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 8)
+    .map((org: any) => ({
+      id: org.id,
+      name: org.name,
+      created_at: org.created_at,
+      is_active: org.is_active,
+      plan_name: org.plan?.name || null,
+    }));
+
   return Response.json({
     totalOrgs,
     activeOrgs,
@@ -54,5 +65,6 @@ export async function GET() {
     totalContacts,
     monthlyRevenue,
     subscriptionsByStatus: subsByStatus,
+    recentOrgs,
   });
 }

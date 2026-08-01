@@ -1,6 +1,5 @@
 "use client";
 import { useState, useEffect } from "react";
-import { createClient } from "@/lib/supabase/client";
 import {
   Building2,
   Users,
@@ -23,51 +22,22 @@ interface PlatformStats {
 }
 
 export default function AdminDashboardPage() {
-  const supabase = createClient();
   const [stats, setStats] = useState<PlatformStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function loadStats() {
-      const [orgsRes, agentsRes, paymentsRes] = await Promise.all([
-        supabase.from("organizations").select("id, name, created_at, is_active, plan:plans(name)"),
-        supabase.from("agents").select("id", { count: "exact", head: true }),
-        supabase
-          .from("payments")
-          .select("amount")
-          .eq("status", "approved")
-          .gte("created_at", new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
-      ]);
-
-      const orgs = (orgsRes.data as unknown[]) || [];
-      const totalOrgs = orgs.length;
-      const activeOrgs = orgs.filter((o: any) => o.is_active).length;
-      const monthlyRevenue = (paymentsRes.data || []).reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
-
-      // Subscriptions to count trial vs paid
-      const { data: subs } = await supabase.from("subscriptions").select("status");
-      const trialOrgs = (subs || []).filter((s: any) => s.status === "trial").length;
-      const paidOrgs = (subs || []).filter((s: any) => s.status === "active").length;
-
-      const recentOrgs = orgs
-        .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-        .slice(0, 8)
-        .map((o: any) => ({
-          id: o.id,
-          name: o.name,
-          created_at: o.created_at,
-          is_active: o.is_active,
-          plan_name: o.plan?.name || null,
-        }));
-
+      const response = await fetch("/api/admin/stats", { cache: "no-store" });
+      if (!response.ok) { setLoading(false); return; }
+      const payload = await response.json();
       setStats({
-        totalOrgs,
-        activeOrgs,
-        totalAgents: agentsRes.count ?? 0,
-        monthlyRevenue,
-        recentOrgs,
-        trialOrgs,
-        paidOrgs,
+        totalOrgs: payload.totalOrgs ?? 0,
+        activeOrgs: payload.activeOrgs ?? 0,
+        totalAgents: payload.totalAgents ?? 0,
+        monthlyRevenue: payload.monthlyRevenue ?? 0,
+        recentOrgs: payload.recentOrgs ?? [],
+        trialOrgs: payload.subscriptionsByStatus?.trial ?? 0,
+        paidOrgs: payload.subscriptionsByStatus?.active ?? 0,
       });
       setLoading(false);
     }

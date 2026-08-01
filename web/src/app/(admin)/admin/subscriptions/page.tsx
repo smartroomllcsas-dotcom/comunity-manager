@@ -1,6 +1,5 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import type { Subscription } from "@/types/database";
 
@@ -26,7 +25,6 @@ interface SubRow extends Omit<Subscription, "organization" | "plan"> {
 }
 
 export default function AdminSubscriptionsPage() {
-  const supabase = createClient();
   const [subs, setSubs] = useState<SubRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -35,10 +33,8 @@ export default function AdminSubscriptionsPage() {
 
   useEffect(() => {
     async function load() {
-      const { data } = await supabase
-        .from("subscriptions")
-        .select("*, organization:organizations(name), plan:plans(name)")
-        .order("created_at", { ascending: false });
+      const response = await fetch("/api/admin/subscriptions", { cache: "no-store" });
+      const data = response.ok ? await response.json() : [];
       setSubs((data as SubRow[]) || []);
       setLoading(false);
     }
@@ -54,8 +50,12 @@ export default function AdminSubscriptionsPage() {
   const totalPages = Math.ceil(filtered.length / pageSize);
 
   async function updateStatus(id: string, status: string) {
-    await supabase.from("subscriptions").update({ status }).eq("id", id);
-    setSubs((prev) => prev.map((s) => (s.id === id ? { ...s, status: status as any } : s)));
+    const response = await fetch("/api/admin/subscriptions", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, status }),
+    });
+    if (response.ok) setSubs((prev) => prev.map((s) => (s.id === id ? { ...s, status: status as any } : s)));
   }
 
   if (loading) {
