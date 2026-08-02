@@ -7,7 +7,12 @@ import {
   recordBillingUsage,
 } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
+import { rateLimit } from "@/lib/rate-limit";
 import { randomUUID } from "node:crypto";
+
+// Sprint 22 hardening: 30 req/min por user (endpoint IA costoso).
+const AI_RATE_LIMIT = 30;
+const AI_RATE_WINDOW_MS = 60 * 1000;
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -15,6 +20,14 @@ export async function POST(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  const rl = await rateLimit(`ai-assist:${user.id}`, AI_RATE_LIMIT, AI_RATE_WINDOW_MS);
+  if (!rl.ok) {
+    return Response.json(
+      { error: "Demasiadas solicitudes. Intenta más tarde." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfterSeconds) } }
+    );
+  }
 
   const { data: agent } = await supabase
     .from("agents")

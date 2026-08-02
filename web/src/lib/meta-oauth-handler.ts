@@ -12,6 +12,7 @@ import {
 } from '@/lib/meta'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getCmClientAccess } from '@/lib/cm-client-access'
+import { encryptToken } from '@/lib/crypto'
 
 export async function initiateMetaOAuth(request: NextRequest, callbackPath: string) {
   const clientId = request.nextUrl.searchParams.get('clientId')
@@ -89,12 +90,19 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
       throw existingError
     }
 
+    // Sprint 22 · Cifrado AES-256-GCM antes de persistir.
+    // Escribimos SOLO a las columnas *_ciphertext y ponemos las columnas plain
+    // en NULL para no dejar tokens en claro. Si TOKEN_ENCRYPTION_KEY no está
+    // configurada, encryptToken throwea y el catch de abajo redirige con error
+    // — comportamiento explícito y visible en lugar de escribir en claro.
     const socialData = {
       client_id: clientId,
       page_id: page.id,
       page_name: page.name,
-      access_token: longToken.access_token,
-      page_access_token: page.access_token,
+      access_token: null,
+      access_token_ciphertext: encryptToken(longToken.access_token),
+      page_access_token: null,
+      page_access_token_ciphertext: encryptToken(page.access_token),
       instagram_id: igAccount?.id || null,
       instagram_username: igAccount?.username || null,
       ad_account_id: adAccount?.account_id || adAccount?.id?.replace('act_', '') || null,

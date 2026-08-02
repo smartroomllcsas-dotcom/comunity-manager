@@ -1,9 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest } from "next/server";
+import { clientIp, rateLimitWithWhitelist } from "@/lib/rate-limit";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
+
+// Sprint 22 hardening: 30 req/min por IP (endpoint costoso, sin auth de sesión).
+const CHAT_RATE_LIMIT = 30;
+const CHAT_RATE_WINDOW_MS = 60 * 1000;
 
 const SYSTEM_PROMPT = `You are ComunityAgent, a multi-agent community management platform orchestrator. You coordinate 10 specialized agents to serve multiple brand clients.
 
@@ -43,6 +48,20 @@ When the user mentions a client/brand, use that context throughout the conversat
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = clientIp(req.headers);
+    const rl = await rateLimitWithWhitelist(
+      ip,
+      `chat:${ip}`,
+      CHAT_RATE_LIMIT,
+      CHAT_RATE_WINDOW_MS
+    );
+    if (!rl.ok) {
+      return Response.json(
+        { error: "Demasiadas solicitudes. Intenta más tarde." },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfterSeconds) } }
+      );
+    }
+
     const { messages, mode, client } = await req.json();
 
     const userContext = client

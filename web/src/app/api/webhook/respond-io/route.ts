@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { RespondIoWebhookEvent } from "@/lib/respond-io/types";
+import { clientIp, rateLimitWithWhitelist } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
+
+// Sprint 22 hardening: 200 req/min por IP para webhooks externos.
+const WEBHOOK_RATE_LIMIT = 200;
+const WEBHOOK_RATE_WINDOW_MS = 60 * 1000;
 
 function safeCompare(a: string, b: string) {
   const ab = Buffer.from(a); const bb = Buffer.from(b);
@@ -19,6 +24,20 @@ function verifySignature(secret: string, rawBody: string, signatureHeader: strin
 }
 
 export async function POST(request: NextRequest) {
+  const ip = clientIp(request.headers);
+  const rl = await rateLimitWithWhitelist(
+    ip,
+    `webhook-respond-io:${ip}`,
+    WEBHOOK_RATE_LIMIT,
+    WEBHOOK_RATE_WINDOW_MS
+  );
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: "Too many requests" },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfterSeconds) } }
+    );
+  }
+
   const admin = createAdminClient();
   const rawBody = await request.text();
 
