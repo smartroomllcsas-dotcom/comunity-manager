@@ -97,6 +97,10 @@ export default function AnalyticsDashboard({ initial }: { initial: AnalyticsPayl
   const [range, setRange] = useState<"7d" | "30d" | "90d">("30d");
   const [platforms, setPlatforms] = useState<string[]>(PLATFORM_OPTIONS.map((p) => p.key));
 
+  // Sprint 26 · Agente P — estado del export PDF.
+  const [exportState, setExportState] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [exportMsg, setExportMsg] = useState<string>("");
+
   // Cargar lista de clientes (para el dropdown). Fail-silent: si /api/clients
   // no existe o no responde, dejamos el dropdown vacío.
   useEffect(() => {
@@ -292,15 +296,71 @@ export default function AnalyticsDashboard({ initial }: { initial: AnalyticsPayl
         </div>
       </div>
 
-      {/* Export */}
-      <div>
+      {/* Export — Sprint 26 · Agente P */}
+      <div className="flex items-center gap-3 flex-wrap">
         <button
           type="button"
-          onClick={() => alert("TODO Sprint 26: exportar dashboard a PDF")}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-[#1a1f2e] border border-[#2d333b] hover:bg-[#242a37] text-sm"
+          disabled={exportState === "loading"}
+          onClick={async () => {
+            if (!clientId) {
+              setExportState("error");
+              setExportMsg("Selecciona un cliente para exportar.");
+              return;
+            }
+            setExportState("loading");
+            setExportMsg("Generando PDF... (~15-30s)");
+            try {
+              const days = data?.days ?? (range === "7d" ? 7 : range === "30d" ? 30 : 90);
+              const end = new Date();
+              end.setUTCDate(end.getUTCDate() - 1);
+              const start = new Date(end);
+              start.setUTCDate(start.getUTCDate() - (days - 1));
+              const iso = (d: Date) => d.toISOString().slice(0, 10);
+              const res = await fetch("/api/reports", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  client_id: clientId,
+                  period_type: "custom",
+                  period_start: iso(start),
+                  period_end: iso(end),
+                  include_insights: true,
+                }),
+              });
+              if (!res.ok) {
+                const j = await res.json().catch(() => ({}));
+                throw new Error(j.error || `HTTP ${res.status}`);
+              }
+              const j = await res.json();
+              setExportState("success");
+              setExportMsg(`PDF listo (${((j.size_bytes ?? 0) / 1024).toFixed(0)} KB)`);
+              const url = j.public_url || `/api/reports/${j.id}`;
+              window.open(url, "_blank", "noopener,noreferrer");
+            } catch (e) {
+              setExportState("error");
+              setExportMsg(e instanceof Error ? e.message : String(e));
+            }
+          }}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-[#1a1f2e] border border-[#2d333b] hover:bg-[#242a37] disabled:opacity-50 disabled:cursor-not-allowed text-sm"
         >
-          <Download className="h-4 w-4" /> Exportar PDF
+          <Download className="h-4 w-4" /> {exportState === "loading" ? "Generando..." : "Exportar PDF"}
         </button>
+        <a href="/reports-cm" className="text-xs text-blue-400 hover:underline">
+          Personalizar branding →
+        </a>
+        {exportMsg && (
+          <span
+            className={`text-xs ${
+              exportState === "success"
+                ? "text-green-400"
+                : exportState === "error"
+                  ? "text-red-400"
+                  : "text-blue-400"
+            }`}
+          >
+            {exportMsg}
+          </span>
+        )}
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import { reapScheduledPosts } from "@/lib/inngest/functions/reap-scheduled-posts
 import { fetchMetrics } from "@/lib/inngest/functions/fetch-metrics";
 import { fetchMentions } from "@/lib/inngest/functions/fetch-mentions";
 import { computeBrandHealth } from "@/lib/inngest/functions/compute-brand-health";
+import { sendNotification } from "@/lib/inngest/functions/send-notification";
 
 /**
  * Inngest webhook endpoint. Handles:
@@ -20,5 +21,6 @@ export const { GET, POST, PUT } = serve({
     fetchMetrics,
     fetchMentions,
     computeBrandHealth,
+    sendNotification,
   ],
 });
