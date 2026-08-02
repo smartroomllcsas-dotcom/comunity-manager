@@ -1,6 +1,8 @@
 ---
 name: tweet-draft-reviewer
 description: Review tweet drafts in Claude Code against 8 voice rules. Scores 1-10, breaks down every rule, and rewrites anything that scores below 7.
+metadata:
+  category: content
 ---
 
 # Tweet Draft Reviewer

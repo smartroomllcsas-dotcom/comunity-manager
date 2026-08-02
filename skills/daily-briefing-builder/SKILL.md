@@ -1,6 +1,8 @@
 ---
 name: daily-briefing-builder
 description: Generate a clean morning brief in Claude Code — pulls today's priorities, unposted content, and weather from your vault.
+metadata:
+  category: productivity
 ---
 
 # Daily Briefing Builder

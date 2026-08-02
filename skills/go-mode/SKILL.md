@@ -5,6 +5,8 @@ version: 2.0.0
 author: BrianRWagner
 tags: [autonomy, planning, execution, goal-setting, productivity]
 homepage: https://github.com/BrianRWagner/ai-marketing-claude-code-skills
+metadata:
+  category: analytics
 ---
 
 # 🎯 Go Mode — Autonomous Goal Execution

@@ -1,6 +1,8 @@
 ---
 name: vault-cleanup-auditor
 description: Audit your Obsidian vault in Claude Code — finds stale drafts, empty folders, duplicate filenames, and incomplete files. Saves a dated report.
+metadata:
+  category: analytics
 ---
 
 # Vault Cleanup Auditor

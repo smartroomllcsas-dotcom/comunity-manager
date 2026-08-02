@@ -4,6 +4,8 @@ description: Automatically fetch YouTube video transcripts, generate structured 
 version: 2.0.0
 author: abe238
 tags: [youtube, transcription, summarization, video, telegram]
+metadata:
+  category: content
 ---
 
 # YouTube Summarizer Skill
