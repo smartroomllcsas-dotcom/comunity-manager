@@ -52,7 +52,7 @@
     "inngest-cli": "^1.40.0",
     "pg": "^8.22.0",
     "postcss": "^8.5.18",
-    "supabase": "^2.84.4",
+    "supabase": "2.109.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.10"
