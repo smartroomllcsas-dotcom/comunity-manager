@@ -1,8 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { CMAgent } from '@/types/database'
+// FIXME: waiting Agente B — sync `skillsSummary()` export from '@/lib/skills/registry'.
+// If registry becomes server-only, migrate to props from a Server Component parent.
+import { skillsSummary } from '@/lib/skills/registry'
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState<CMAgent[]>([])
@@ -21,7 +24,10 @@ export default function AgentsPage() {
   }, [])
 
   const activeCount = agents.filter((a) => a.status === 'active').length
-  const totalSkills = agents.reduce((sum, a) => sum + a.skills, 0)
+
+  // Authoritative skill count from the registry — no more DB sum drift.
+  const registrySummary = useMemo(() => skillsSummary(), [])
+  const totalSkills = registrySummary.total
 
   if (loading) {
     return (
@@ -127,6 +133,12 @@ export default function AgentsPage() {
               </p>
 
               <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+                {/*
+                  FIXME: cruzar con getSkillsByCategory(agent.category) cuando el schema
+                  cm_agents exponga `category`. Hoy CMAgent solo tiene {skills:number},
+                  así que mostramos el conteo de la DB — el total agregado ya viene del
+                  registry en el header.
+                */}
                 <span className="text-xs text-slate-500">
                   {agent.skills} skills
                 </span>
