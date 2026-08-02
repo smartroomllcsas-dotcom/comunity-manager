@@ -1,0 +1,17 @@
+{
+  "name": "Community Manager",
+  "short_name": "CM",
+  "description": "Gestión multicanal para agencias: WhatsApp, Messenger e Instagram en un solo lugar.",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#4a5fef",
+  "background_color": "#ffffff",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -6,6 +6,11 @@ import { createHmac, timingSafeEqual } from "crypto";
 import type { WebhookPayload } from "@/lib/whatsapp/types";
 import { processIncomingMessage, processStatusUpdate } from "@/lib/whatsapp/webhook";
 import { persistWhatsAppWebhook } from "@/lib/webhook";
+import { clientIp, rateLimitWithWhitelist } from "@/lib/rate-limit";
+
+// Sprint 22 hardening: 200 req/min por IP para webhooks externos.
+const WEBHOOK_RATE_LIMIT = 200;
+const WEBHOOK_RATE_WINDOW_MS = 60 * 1000;
 
 function safeEqualStrings(a: string, b: string) {
   const bufA = Buffer.from(a);
@@ -29,6 +34,20 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const ip = clientIp(request.headers);
+  const rl = await rateLimitWithWhitelist(
+    ip,
+    `webhook-whatsapp:${ip}`,
+    WEBHOOK_RATE_LIMIT,
+    WEBHOOK_RATE_WINDOW_MS
+  );
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: "Too many requests" },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfterSeconds) } }
+    );
+  }
+
   const appSecret = process.env.WHATSAPP_APP_SECRET || process.env.META_APP_SECRET;
   if (!appSecret) {
     console.error("WHATSAPP_APP_SECRET is not set — webhook security not configured");

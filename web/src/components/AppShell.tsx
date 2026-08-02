@@ -1,7 +1,7 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
-import Sidebar from './Sidebar'
+import { Sidebar } from '@/components/layout/Sidebar'
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()

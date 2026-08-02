@@ -17,6 +17,11 @@ import {
   recordBillingUsage,
 } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
+import { rateLimit } from "@/lib/rate-limit";
+
+// Sprint 22 hardening: 60 req/min por user para envío de mensajes.
+const MESSAGES_RATE_LIMIT = 60;
+const MESSAGES_RATE_WINDOW_MS = 60 * 1000;
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -24,6 +29,14 @@ export async function POST(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const rl = await rateLimit(`messages-send:${user.id}`, MESSAGES_RATE_LIMIT, MESSAGES_RATE_WINDOW_MS);
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: "Demasiadas solicitudes. Intenta más tarde." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfterSeconds) } }
+    );
+  }
 
   const { data: agent } = await supabase.from("agents").select("*").eq("id", user.id).single();
   if (!agent) return NextResponse.json({ error: "Agent not found" }, { status: 404 });

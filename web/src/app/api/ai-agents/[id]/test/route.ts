@@ -3,6 +3,11 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateAIResponse } from "@/lib/chatbot/ai";
 import { processAIActions } from "@/lib/ai/actions";
+import { rateLimit } from "@/lib/rate-limit";
+
+// Sprint 22 hardening: 30 req/min por user en endpoints IA (costoso).
+const AI_RATE_LIMIT = 30;
+const AI_RATE_WINDOW_MS = 60 * 1000;
 
 export async function POST(
   request: NextRequest,
@@ -14,6 +19,14 @@ export async function POST(
 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  const rl = await rateLimit(`ai-agents-test:${user.id}`, AI_RATE_LIMIT, AI_RATE_WINDOW_MS);
+  if (!rl.ok) {
+    return Response.json(
+      { error: "Demasiadas solicitudes. Intenta más tarde." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfterSeconds) } }
+    );
+  }
 
   const { data: agent } = await supabase
     .from("agents")
