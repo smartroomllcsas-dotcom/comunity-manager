@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint src",
     "test": "vitest run && node --test --experimental-strip-types tests/*.test.mjs",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "skills:index": "node scripts/generate-skills-index.mjs",
+    "prebuild": "npm run skills:index"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
@@ -50,6 +52,7 @@
     "eslint": "^9.0.0",
     "eslint-config-next": "^16.2.12",
     "inngest-cli": "^1.40.0",
+    "js-yaml": "^4.1.0",
     "pg": "^8.22.0",
     "postcss": "^8.5.18",
     "supabase": "2.109.0",

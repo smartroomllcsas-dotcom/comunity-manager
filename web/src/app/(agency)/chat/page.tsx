@@ -1,10 +1,15 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useAuth } from '@/components/AuthProvider'
 import { supabase } from '@/lib/supabase'
 import type { CMClient } from '@/types/database'
 import ChatMessage from '@/components/ChatMessage'
+import SkillsBadge from '@/components/SkillsBadge'
+// FIXME: waiting Agente B — expects sync `skillsSummary()` from '@/lib/skills/registry'.
+// If B ships registry as server-only (fs-scan of SKILL.md), swap this import for props
+// from a Server Component parent or a small /api/skills/summary endpoint.
+import { skillsSummary } from '@/lib/skills/registry'
 
 const modes = [
   { id: 'A', label: 'Modo A', description: 'Conversacional' },
@@ -12,21 +17,44 @@ const modes = [
   { id: 'C', label: 'Modo C', description: 'Autónomo' },
 ]
 
+// Agents count in the orchestration system, aligned with system prompt in api/chat/route.ts.
+// Structural constant, not skill data — kept out of the registry on purpose.
+const AGENT_COUNT = 10
+
 interface Message {
   role: 'user' | 'assistant'
   content: string
   timestamp: string
+  skillsUsed?: string[]
 }
 
 export default function ChatPage() {
   const { user } = useAuth()
   const [clients, setClients] = useState<CMClient[]>([])
   const [selectedClient, setSelectedClient] = useState('Todos los Clientes')
-  const [messages, setMessages] = useState<Message[]>([
+
+  // Compute once per mount — registry data is static.
+  const welcomeMessage = useMemo(() => {
+    const summary = skillsSummary()
+    return (
+      `Bienvenido a **ComunityAgent**. Soy tu orquestador de gestión de comunidades ` +
+      `con ${AGENT_COUNT} agentes especializados y ${summary.total} skills a tu servicio.\n\n` +
+      `Selecciona un cliente y modo arriba, luego dime qué necesitas. Puedo:\n\n` +
+      `- **Crear contenido** para cualquier plataforma\n` +
+      `- **Planificar calendarios** y programaciones\n` +
+      `- **Analizar métricas** y competencia\n` +
+      `- **Gestionar comunidad** y engagement\n` +
+      `- **Construir marca** identidad y voz\n` +
+      `- **Gestionar ads**, SEO, campañas de email\n` +
+      `- **Generar reportes** e insights\n\n` +
+      `¿Cómo quieres empezar?`
+    )
+  }, [])
+
+  const [messages, setMessages] = useState<Message[]>(() => [
     {
       role: 'assistant',
-      content:
-        'Bienvenido a **ComunityAgent**. Soy tu orquestador de gestión de comunidades con 11 agentes especializados y 68 skills a tu servicio.\n\nSelecciona un cliente y modo arriba, luego dime qué necesitas. Puedo:\n\n- **Crear contenido** para cualquier plataforma\n- **Planificar calendarios** y programaciones\n- **Analizar métricas** y competencia\n- **Gestionar comunidad** y engagement\n- **Construir marca** identidad y voz\n- **Gestionar ads**, SEO, campañas de email\n- **Generar reportes** e insights\n\n¿Cómo quieres empezar?',
+      content: welcomeMessage,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ])
@@ -98,6 +126,7 @@ export default function ChatPage() {
             role: 'assistant',
             content: data.response,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            skillsUsed: Array.isArray(data._skills_used) ? data._skills_used : undefined,
           },
         ])
       }
@@ -161,7 +190,14 @@ export default function ChatPage() {
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="max-w-3xl mx-auto">
           {messages.map((msg, i) => (
-            <ChatMessage key={i} role={msg.role} content={msg.content} timestamp={msg.timestamp} />
+            <div key={i}>
+              <ChatMessage role={msg.role} content={msg.content} timestamp={msg.timestamp} />
+              {msg.role === 'assistant' && msg.skillsUsed && msg.skillsUsed.length > 0 && (
+                <div className="max-w-[70%] -mt-2 mb-4">
+                  <SkillsBadge skills={msg.skillsUsed} />
+                </div>
+              )}
+            </div>
           ))}
           {isLoading && (
             <div className="flex items-center gap-3 py-4">

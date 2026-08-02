@@ -1,9 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@/components/AuthProvider'
 import { supabase } from '@/lib/supabase'
 import type { CMClient, CMAgent, CMActivityLog } from '@/types/database'
+// FIXME: waiting Agente B — sync `skillsSummary()` from '@/lib/skills/registry'.
+// If registry lands as server-only, migrate to props from a Server Component parent
+// or expose via /api/skills/summary.
+import { skillsSummary } from '@/lib/skills/registry'
 
 export default function Dashboard() {
   const { user } = useAuth()
@@ -27,7 +31,9 @@ export default function Dashboard() {
   }, [user])
 
   const activeAgents = agents.filter(a => a.status === 'active').length
-  const totalSkills = agents.reduce((sum, a) => sum + a.skills, 0)
+  // Authoritative total from the real skills registry — no DB sum drift.
+  const registrySummary = useMemo(() => skillsSummary(), [])
+  const totalSkills = registrySummary.total
 
   const stats = [
     { label: 'Clientes Activos', value: String(clients.filter(c => c.status === 'active').length), change: `${clients.length} total`, color: 'text-violet-400' },
