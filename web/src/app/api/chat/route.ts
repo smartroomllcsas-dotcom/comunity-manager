@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { clientIp, rateLimitWithWhitelist } from "@/lib/rate-limit";
 import { skillsSummary } from "@/lib/skills/registry";
 import { selectRelevantSkills } from "@/lib/skills/selector";
+import { chatWithSkillTools } from "@/lib/skills/tools-handler";
 import type { SkillEntry } from "@/lib/skills/registry";
 
 const anthropic = new Anthropic({
@@ -12,6 +13,19 @@ const anthropic = new Anthropic({
 // Sprint 22 hardening: 30 req/min por IP (endpoint costoso, sin auth de sesión).
 const CHAT_RATE_LIMIT = 30;
 const CHAT_RATE_WINDOW_MS = 60 * 1000;
+
+// Sprint 24: feature flag routing skills injection.
+//   - retrieval (default): Haiku picks 1-3 skills → inject in system prompt
+//   - tools: expose skills as Anthropic tools, let Sonnet invoke them
+//   - off: pass-through, Sonnet without any skills
+type SkillsMode = "retrieval" | "tools" | "off";
+const SKILLS_MODE: SkillsMode = ((): SkillsMode => {
+  const raw = (process.env.SKILLS_MODE || "retrieval").toLowerCase();
+  return raw === "tools" || raw === "off" ? raw : "retrieval";
+})();
+
+const CHAT_MODEL = "claude-sonnet-4-20250514";
+const CHAT_MAX_TOKENS = 4096;
 
 // Sprint 23: skills registry — counts are dynamic so the prompt never lies.
 const SKILLS_STATS = skillsSummary();
@@ -114,7 +128,42 @@ export async function POST(req: NextRequest) {
       ? `\n\nActive client: ${client}. Mode: ${mode || "B"}.`
       : `\nNo client selected. Mode: ${mode || "B"}.`;
 
-    // Sprint 23: RAG-lite skill selection via Haiku.
+    console.log("[chat] SKILLS_MODE=%s", SKILLS_MODE);
+
+    // ── Mode B: expose skills as native Anthropic tools ────────────────────
+    if (SKILLS_MODE === "tools") {
+      const result = await chatWithSkillTools(anthropic, {
+        model: CHAT_MODEL,
+        systemPrompt: SYSTEM_PROMPT + userContext,
+        maxTokens: CHAT_MAX_TOKENS,
+        messages: msgList.map((m: ChatMessage) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        })),
+      });
+      return Response.json({
+        response: result.text,
+        _skills_used: result.skillsUsed,
+      });
+    }
+
+    // ── Mode OFF: no skills at all, plain Sonnet fallback ──────────────────
+    if (SKILLS_MODE === "off") {
+      const response = await anthropic.messages.create({
+        model: CHAT_MODEL,
+        max_tokens: CHAT_MAX_TOKENS,
+        system: SYSTEM_PROMPT + userContext,
+        messages: msgList.map((m: ChatMessage) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        })),
+      });
+      const text =
+        response.content[0]?.type === "text" ? response.content[0].text : "";
+      return Response.json({ response: text, _skills_used: [] });
+    }
+
+    // ── Mode RETRIEVAL (default): Sprint 23 behaviour ──────────────────────
     const lastUserMessage =
       [...msgList].reverse().find((m) => m.role === "user")?.content || "";
     const history = msgList.slice(0, -1);
@@ -133,8 +182,8 @@ export async function POST(req: NextRequest) {
     const skillsContext = formatSkillsContext(relevantSkills);
 
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 4096,
+      model: CHAT_MODEL,
+      max_tokens: CHAT_MAX_TOKENS,
       system: SYSTEM_PROMPT + userContext + skillsContext,
       messages: msgList.map((m: ChatMessage) => ({
         role: m.role as "user" | "assistant",
@@ -143,7 +192,7 @@ export async function POST(req: NextRequest) {
     });
 
     const text =
-      response.content[0].type === "text" ? response.content[0].text : "";
+      response.content[0]?.type === "text" ? response.content[0].text : "";
 
     return Response.json({
       response: text,

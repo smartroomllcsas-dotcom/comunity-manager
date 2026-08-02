@@ -1,6 +1,8 @@
 ---
 name: linkedin-authority-builder
 description: Build a LinkedIn content system for thought leadership. Use when someone needs to establish authority, attract inbound leads, or build a consistent content presence. Covers positioning, content pillars, formats, and posting rhythm.
+metadata:
+  category: community
 ---
 
 # LinkedIn Authority Builder

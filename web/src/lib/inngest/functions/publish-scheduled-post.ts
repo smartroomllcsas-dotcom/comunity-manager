@@ -1,5 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
 import { inngest, INNGEST_EVENTS } from "@/lib/inngest/client";
+import { decryptToken } from "@/lib/crypto";
+import { publishToInstagram, publishToFacebook } from "@/lib/meta";
+import { publishTikTokVideo, publishTikTokPhoto } from "@/lib/social/tiktok";
+import { publishLinkedInPost } from "@/lib/social/linkedin";
+import {
+  createThreadsContainer,
+  publishThreadsContainer,
+} from "@/lib/social/threads";
 
 /**
  * Server-only Supabase admin client that targets the `public` schema, where
@@ -29,22 +37,33 @@ type ScheduleRequestedPayload = {
   scheduled_at: string;
 };
 
+type PublishOutcome = {
+  ok: boolean;
+  platform_post_id?: string;
+  platform_post_url?: string;
+  error?: string;
+  retryable?: boolean;
+};
+
 /**
- * STUB — publishes a scheduled post.
+ * Sprint 24 — Publishes a scheduled post to the target social channel.
  *
- * Real Meta Graph API integration lands in the next sprint; for now this
- * function only:
- *   1. Waits until `event.data.scheduled_at`.
- *   2. Loads the post + its social account.
- *   3. Logs a payload preview and flips `status` to `published` / `failed`.
+ * Flow:
+ *   1. Wait until `event.data.scheduled_at`.
+ *   2. Load the post + its social account.
+ *   3. Decrypt the access token and dispatch to the platform-specific
+ *      publisher (facebook / instagram / tiktok / linkedin / threads).
+ *   4. Persist status = 'published' + platform_post_id (+ url) on success.
+ *      On failure, status = 'failed', last_error set, retry_count++.
  *
- * Concurrency is keyed by `post_id` so an accidental duplicate event never
- * fires two publishes for the same post.
+ * Idempotency: concurrency is keyed by `event.data.post_id` so duplicate
+ * events never fire two publishes for the same post. We also short-circuit
+ * if `status` is already 'published' at load time.
  */
 export const publishScheduledPost = inngest.createFunction(
   {
     id: "publish-scheduled-post",
-    name: "Publish scheduled post (stub)",
+    name: "Publish scheduled post",
     retries: 3,
     concurrency: {
       limit: 5,
@@ -93,42 +112,240 @@ export const publishScheduledPost = inngest.createFunction(
       return data;
     });
 
-    const result = await step.run("publish", async () => {
+    // Idempotency guard — never re-publish an already-published post.
+    if ((post as { status?: string }).status === "published") {
+      logger.info(`publish-scheduled-post: post ${post_id} already published, skipping`);
+      return { post_id, status: "already_published" as const };
+    }
+
+    const outcome = await step.run("publish", async (): Promise<PublishOutcome> => {
+      if (!socialAccount) {
+        return {
+          ok: false,
+          error: "no social account linked to this post",
+          retryable: false,
+        };
+      }
+
+      const acc = socialAccount as {
+        platform: string;
+        account_id: string;
+        access_token_ciphertext?: string | null;
+        access_token_encrypted?: string | null;
+        access_token?: string | null;
+        page_id?: string | null;
+        page_access_token_ciphertext?: string | null;
+        page_access_token?: string | null;
+        ig_user_id?: string | null;
+        instagram_id?: string | null;
+      };
+
+      // Resolve token. Prefer new ciphertext column, fall back to legacy plain.
+      let token: string;
+      try {
+        const cipher = acc.access_token_ciphertext ?? acc.access_token_encrypted;
+        if (cipher) {
+          token = decryptToken(cipher);
+        } else if (acc.access_token) {
+          token = acc.access_token;
+        } else {
+          return { ok: false, error: "no access token on account", retryable: false };
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: `token decrypt failed: ${msg}`, retryable: false };
+      }
+
+      const p = post as {
+        caption?: string | null;
+        text?: string | null;
+        image_url?: string | null;
+        video_url?: string | null;
+        media_urls?: string[] | null;
+        hashtags?: string[] | null;
+      };
+      const caption = (p.caption ?? p.text ?? "").toString();
+
+      try {
+        switch (acc.platform) {
+          case "facebook": {
+            const pageId = acc.page_id ?? acc.account_id;
+            let pageToken = token;
+            const pageCipher = acc.page_access_token_ciphertext;
+            if (pageCipher) {
+              try {
+                pageToken = decryptToken(pageCipher);
+              } catch {
+                pageToken = acc.page_access_token ?? token;
+              }
+            } else if (acc.page_access_token) {
+              pageToken = acc.page_access_token;
+            }
+            const res = await publishToFacebook(pageId, pageToken, {
+              message: caption,
+              imageUrl: p.image_url ?? undefined,
+            });
+            const fbId: string = (res as { id?: string }).id ?? "";
+            return {
+              ok: true,
+              platform_post_id: fbId,
+              platform_post_url: fbId
+                ? `https://www.facebook.com/${fbId}`
+                : undefined,
+            };
+          }
+
+          case "instagram": {
+            const igUserId = acc.ig_user_id ?? acc.instagram_id ?? acc.account_id;
+            let pageToken = token;
+            const pageCipher = acc.page_access_token_ciphertext;
+            if (pageCipher) {
+              try {
+                pageToken = decryptToken(pageCipher);
+              } catch {
+                pageToken = acc.page_access_token ?? token;
+              }
+            } else if (acc.page_access_token) {
+              pageToken = acc.page_access_token;
+            }
+            const res = await publishToInstagram(igUserId, pageToken, {
+              caption,
+              imageUrl: p.image_url ?? undefined,
+              videoUrl: p.video_url ?? undefined,
+            });
+            const igId: string = (res as { id?: string }).id ?? "";
+            return { ok: true, platform_post_id: igId };
+          }
+
+          case "tiktok": {
+            if (p.video_url) {
+              const res = await publishTikTokVideo({
+                accessToken: token,
+                openId: acc.account_id,
+                videoUrl: p.video_url,
+                caption,
+                hashtags: p.hashtags ?? [],
+              });
+              if (!res.ok) return { ok: false, error: res.error, retryable: res.retryable };
+              return { ok: true, platform_post_id: res.publish_id };
+            }
+            const imageUrls = p.media_urls ?? (p.image_url ? [p.image_url] : []);
+            if (imageUrls.length === 0) {
+              return {
+                ok: false,
+                error: "tiktok requires video_url or media_urls",
+                retryable: false,
+              };
+            }
+            const res = await publishTikTokPhoto({
+              accessToken: token,
+              openId: acc.account_id,
+              imageUrls,
+              caption,
+            });
+            if (!res.ok) return { ok: false, error: res.error, retryable: res.retryable };
+            return { ok: true, platform_post_id: res.publish_id };
+          }
+
+          case "linkedin": {
+            const res = await publishLinkedInPost({
+              accessToken: token,
+              authorUrn: acc.account_id, // stored as urn:li:person:xxx or urn:li:organization:xxx
+              text: caption,
+              // media/article omitted for the minimal path; UI will pass them later.
+            });
+            if (!res.ok) return { ok: false, error: res.error, retryable: res.retryable };
+            return {
+              ok: true,
+              platform_post_id: res.post_urn,
+              platform_post_url: res.post_url,
+            };
+          }
+
+          case "threads": {
+            const mediaType = p.video_url
+              ? "VIDEO"
+              : p.image_url
+                ? "IMAGE"
+                : "TEXT";
+            const containerId = await createThreadsContainer({
+              accessToken: token,
+              userId: acc.account_id,
+              mediaType,
+              text: caption,
+              imageUrl: p.image_url ?? undefined,
+              videoUrl: p.video_url ?? undefined,
+            });
+            // Meta recommends waiting for VIDEO/CAROUSEL; TEXT is instant.
+            if (mediaType !== "TEXT") {
+              await new Promise((r) => setTimeout(r, 5_000));
+            }
+            const published = await publishThreadsContainer(
+              token,
+              acc.account_id,
+              containerId,
+            );
+            return {
+              ok: true,
+              platform_post_id: published.id,
+              platform_post_url: published.permalink,
+            };
+          }
+
+          default:
+            return {
+              ok: false,
+              error: `Unsupported platform: ${acc.platform}`,
+              retryable: false,
+            };
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const retryable = /\b5\d\d\b|timeout|ENOTFOUND|ECONNRESET|429/i.test(msg);
+        return { ok: false, error: msg, retryable };
+      }
+    });
+
+    // Persist outcome. Kept as its own step so retries don't re-hit the API.
+    const finalStatus = await step.run("finalize", async () => {
       const supabase = getPublicAdmin();
+      if (outcome.ok) {
+        const { error } = await supabase
+          .from("cm_scheduled_posts")
+          .update({
+            status: "published",
+            published_at: new Date().toISOString(),
+            platform_post_id: outcome.platform_post_id ?? null,
+            platform_post_url: outcome.platform_post_url ?? null,
+            last_error: null,
+          })
+          .eq("id", post_id);
+        if (error) {
+          logger.error(`finalize (published) failed: ${error.message}`);
+          throw new Error(`finalize update failed: ${error.message}`);
+        }
+        return { post_id, status: "published" as const };
+      }
 
-      // TODO(sprint-23): call Meta Graph API using
-      //   `@/lib/meta` + `access_token_encrypted` decryption (agente 3).
-      logger.info("publish-scheduled-post STUB", {
-        post_id,
-        scheduled_at,
-        has_social_account: !!socialAccount,
-      });
-
+      // Failure path: bump retry_count, set last_error. If retryable, throw so
+      // Inngest schedules another attempt (up to `retries: 3`).
       const { error } = await supabase
         .from("cm_scheduled_posts")
         .update({
-          status: "published",
-          published_at: new Date().toISOString(),
+          status: "failed",
+          last_error: outcome.error ?? "unknown",
+          retry_count: ((post as { retry_count?: number }).retry_count ?? 0) + 1,
         })
         .eq("id", post_id);
-
       if (error) {
-        const { error: failErr } = await supabase
-          .from("cm_scheduled_posts")
-          .update({
-            status: "failed",
-            last_error: error.message,
-          })
-          .eq("id", post_id);
-        if (failErr) {
-          logger.error(`failed to mark post failed: ${failErr.message}`);
-        }
-        throw new Error(`publish update failed: ${error.message}`);
+        logger.error(`finalize (failed) update error: ${error.message}`);
       }
-
-      return { post_id, status: "published" as const };
+      if (outcome.retryable) {
+        throw new Error(`publish failed (retryable): ${outcome.error}`);
+      }
+      return { post_id, status: "failed" as const, error: outcome.error };
     });
 
-    return result;
+    return finalStatus;
   },
 );

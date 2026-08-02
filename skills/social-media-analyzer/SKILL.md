@@ -12,6 +12,8 @@ triggers:
   - Facebook metrics
   - TikTok performance
   - LinkedIn engagement
+metadata:
+  category: community
 ---
 
 # Social Media Analyzer

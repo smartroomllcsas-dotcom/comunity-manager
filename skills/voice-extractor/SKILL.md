@@ -1,6 +1,8 @@
 ---
 name: voice-extractor
 description: Extract and document someone's authentic writing voice from samples. Use when someone needs a "voice guide," wants to capture their writing DNA, or needs to train AI to write in their style. Also useful for ghostwriting, brand voice documentation, or onboarding writers.
+metadata:
+  category: brand
 ---
 
 # Voice Extractor

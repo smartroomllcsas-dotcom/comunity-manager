@@ -5,7 +5,7 @@ license: MIT
 metadata:
   version: 1.0.0
   author: Alireza Rezvani
-  category: marketing
+  category: ads
   domain: campaign-analytics
   updated: 2026-02-06
   python-tools: attribution_analyzer.py, funnel_analyzer.py, campaign_roi_calculator.py

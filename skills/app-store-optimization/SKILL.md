@@ -14,6 +14,8 @@ triggers:
   - app store SEO
   - mobile app marketing
   - app conversion rate
+metadata:
+  category: seo
 ---
 
 # App Store Optimization (ASO)

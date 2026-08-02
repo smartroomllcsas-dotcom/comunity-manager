@@ -4,6 +4,8 @@ description: Remove AI-generated jargon and restore human voice to text. Built f
 version: 2.0.0
 author: theflohart
 tags: [writing, editing, voice, ai-detection, content-quality]
+metadata:
+  category: brand
 ---
 
 # De-AI-ify Text

@@ -5,7 +5,7 @@ license: MIT
 metadata:
   version: 1.0.0
   author: Alireza Rezvani
-  category: marketing
+  category: cro
   updated: 2026-03-06
 ---
 

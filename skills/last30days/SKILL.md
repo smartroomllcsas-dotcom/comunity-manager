@@ -4,6 +4,8 @@ description: Research any topic across Reddit, X, and web from the last 30 days.
 version: 2.0.0
 author: theflohart
 tags: [research, trends, reddit, twitter, competitive-intel, content-research]
+metadata:
+  category: content
 ---
 
 # /last30days Research Skill

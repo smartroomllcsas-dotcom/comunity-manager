@@ -1,6 +1,8 @@
 ---
 name: case-study-builder
 description: Turn client wins into formatted case studies for proposals, social proof, and sales conversations. Use when someone needs to document results, build credibility, or create reusable proof assets.
+metadata:
+  category: community
 ---
 
 # Case Study Builder

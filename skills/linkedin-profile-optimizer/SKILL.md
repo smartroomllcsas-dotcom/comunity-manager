@@ -1,6 +1,8 @@
 ---
 name: linkedin-profile-optimizer
 description: Audit and rewrite your LinkedIn profile to attract the right people. Scores each section, rewrites headline and about copy, and includes an AI visibility checklist so you show up in ChatGPT, Perplexity, and Claude search. Use when someone says "optimize my LinkedIn," "LinkedIn profile help," "rewrite my about section," or "how do I show up in AI search."
+metadata:
+  category: community
 ---
 
 # LinkedIn Profile Optimizer
