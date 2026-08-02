@@ -10,7 +10,7 @@
  * Runs on build:  via `prebuild` in package.json
  */
 
-import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
@@ -23,6 +23,17 @@ const WEB_ROOT = resolve(__dirname, "..");
 const REPO_ROOT = resolve(WEB_ROOT, "..");
 const SKILLS_ROOT = resolve(REPO_ROOT, "skills");
 const OUT_FILE = resolve(WEB_ROOT, "src/lib/skills/data.generated.ts");
+
+// Vercel build root is `web/` — SKILLS_ROOT (`../skills/`) is not included.
+// data.generated.ts is committed, so on Vercel we skip regeneration silently.
+if (!existsSync(SKILLS_ROOT)) {
+  if (existsSync(OUT_FILE)) {
+    console.log(`[skills:index] SKILLS_ROOT not found at ${SKILLS_ROOT} — using committed ${OUT_FILE.split(/[\\/]/).slice(-3).join("/")}.`);
+    process.exit(0);
+  }
+  console.error(`[skills:index] SKILLS_ROOT missing AND data.generated.ts missing — cannot proceed.`);
+  process.exit(1);
+}
 
 /**
  * Split a SKILL.md into frontmatter object + body.
