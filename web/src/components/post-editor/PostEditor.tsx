@@ -13,7 +13,6 @@ import {
   Hash,
   Link as LinkIcon,
   Image as ImageIcon,
-  Video,
   Save,
   Send,
   Trash2,
@@ -38,6 +37,8 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 import { PlatformPreview } from "./PlatformPreview";
+import AssetBrowser from "@/components/media/AssetBrowser";
+import { Sparkles } from "lucide-react";
 import {
   PLATFORMS,
   PLATFORM_META,
@@ -192,21 +193,14 @@ export default function PostEditor({ initialClients, initialPost }: PostEditorPr
     });
   }
 
-  function addMediaByUrl(kind: "image" | "video") {
-    // FIXME(sprint-24): reemplazar prompt por uploader que sube al bucket
-    // de Supabase Storage y guarda la public URL. Por ahora aceptamos URL
-    // directa para no bloquear el UX.
-    const url = window.prompt(
-      kind === "image"
-        ? "URL de la imagen (https://…)"
-        : "URL del video (https://…)",
-    );
-    if (!url) return;
-    if (!/^https?:\/\//i.test(url)) {
-      toast.error("La URL debe empezar con http(s)://");
-      return;
-    }
-    setMediaUrls((m) => [...m, url]);
+  // Sprint 26: reemplazado por AssetBrowser (upload a Supabase Storage +
+  // generacion con IA via Fal.ai). Los assets seleccionados llegan por callback.
+  const [assetBrowserOpen, setAssetBrowserOpen] = React.useState(false);
+  const [aiBrowserOpen, setAiBrowserOpen] = React.useState(false);
+
+  function handleAssetsSelected(urls: string[]) {
+    if (!urls.length) return;
+    setMediaUrls((m) => Array.from(new Set([...m, ...urls])));
   }
 
   function togglePlatform(p: Platform) {
@@ -432,19 +426,42 @@ export default function PostEditor({ initialClients, initialPost }: PostEditorPr
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => addMediaByUrl("image")}
+            onClick={() => setAssetBrowserOpen(true)}
             type="button"
+            disabled={!clientId}
+            title={!clientId ? "Selecciona un cliente primero" : undefined}
           >
-            <ImageIcon className="size-3.5" /> Imagen
+            <ImageIcon className="size-3.5" /> Media
           </Button>
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => addMediaByUrl("video")}
+            onClick={() => setAiBrowserOpen(true)}
             type="button"
+            disabled={!clientId}
+            title={!clientId ? "Selecciona un cliente primero" : "Generar con IA (Fal.ai)"}
           >
-            <Video className="size-3.5" /> Video
+            <Sparkles className="size-3.5" /> Generar con IA
           </Button>
+          {clientId && (
+            <>
+              <AssetBrowser
+                clientId={clientId}
+                open={assetBrowserOpen}
+                onOpenChange={setAssetBrowserOpen}
+                onSelect={handleAssetsSelected}
+                initialTab="all"
+              />
+              <AssetBrowser
+                clientId={clientId}
+                open={aiBrowserOpen}
+                onOpenChange={setAiBrowserOpen}
+                onSelect={handleAssetsSelected}
+                initialTab="ai"
+                seedPrompt={content}
+              />
+            </>
+          )}
         </div>
 
         {/* Textarea */}

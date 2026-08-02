@@ -18,6 +18,7 @@ export const inngest = new Inngest({
 export const INNGEST_EVENTS = {
   POST_SCHEDULE_REQUESTED: "cm/post.schedule.requested",
   LISTENING_CRISIS_DETECTED: "cm/listening.crisis.detected",
+  NOTIFICATION_REQUESTED: "cm/notification.requested",
 } as const;
 
 export type InngestEventName =
