@@ -18,6 +18,8 @@ import {
   Send,
   Trash2,
   Loader2,
+  UserCheck,
+  Copy as CopyIcon,
 } from "lucide-react";
 
 import { Textarea } from "@/components/ui/textarea";
@@ -138,6 +140,14 @@ export default function PostEditor({ initialClients, initialPost }: PostEditorPr
   const [timezone] = React.useState<string>(initialPost?.timezone ?? "America/Bogota");
   const [savingDraft, setSavingDraft] = React.useState(false);
   const [scheduling, setScheduling] = React.useState(false);
+  // Sprint 25 · approval modal state
+  const [approvalOpen, setApprovalOpen] = React.useState(false);
+  const [approvalSending, setApprovalSending] = React.useState(false);
+  const [approvalEmail, setApprovalEmail] = React.useState("");
+  const [approvalPhone, setApprovalPhone] = React.useState("");
+  const [approvalNotifyEmail, setApprovalNotifyEmail] = React.useState(true);
+  const [approvalNotifyWa, setApprovalNotifyWa] = React.useState(false);
+  const [approvalUrl, setApprovalUrl] = React.useState<string | null>(null);
 
   // Auto-select first client cuando cargan.
   React.useEffect(() => {
@@ -267,6 +277,60 @@ export default function PostEditor({ initialClients, initialPost }: PostEditorPr
     } finally {
       setSavingDraft(false);
       setScheduling(false);
+    }
+  }
+
+  // -- Sprint 25 · Send to client for approval --------------------------------
+
+  async function sendForApproval() {
+    if (!postId) {
+      toast.error("Guarda el draft antes de enviar a aprobación");
+      return;
+    }
+    if (!clientId) {
+      toast.error("Selecciona un cliente");
+      return;
+    }
+    const notify: ("email" | "whatsapp")[] = [];
+    if (approvalNotifyEmail && approvalEmail.trim()) notify.push("email");
+    if (approvalNotifyWa && approvalPhone.trim()) notify.push("whatsapp");
+    setApprovalSending(true);
+    try {
+      const res = await fetch("/api/approval", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          post_id: postId,
+          client_id: clientId,
+          notify_channels: notify,
+          recipient_email: approvalEmail.trim() || undefined,
+          recipient_phone: approvalPhone.trim() || undefined,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        url?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        toast.error(json?.error ?? `Error HTTP ${res.status}`);
+        return;
+      }
+      setApprovalUrl(json.url ?? null);
+      toast.success("Enlace de aprobación generado");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error inesperado");
+    } finally {
+      setApprovalSending(false);
+    }
+  }
+
+  async function copyApprovalLink() {
+    if (!approvalUrl) return;
+    try {
+      await navigator.clipboard.writeText(approvalUrl);
+      toast.success("Enlace copiado");
+    } catch {
+      toast.error("No se pudo copiar");
     }
   }
 
@@ -476,7 +540,129 @@ export default function PostEditor({ initialClients, initialPost }: PostEditorPr
             )}
             Programar
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setApprovalUrl(null);
+              setApprovalOpen(true);
+            }}
+            disabled={savingDraft || scheduling || !postId}
+            type="button"
+            title={!postId ? "Guarda el draft primero" : "Enviar a cliente para aprobación"}
+          >
+            <UserCheck className="size-3.5" />
+            Enviar a cliente para aprobación
+          </Button>
         </div>
+
+        {/* Sprint 25 · Modal aprobación (inline, sin dep de Dialog para reducir riesgo) */}
+        {approvalOpen && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="approval-modal-title"
+            className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setApprovalOpen(false);
+            }}
+          >
+            <div className="w-full max-w-md rounded-lg border border-[#2d333b] bg-[#0d1117] p-5 space-y-4">
+              <div>
+                <h3 id="approval-modal-title" className="text-base font-semibold text-[#e6edf3]">
+                  Enviar a cliente para aprobación
+                </h3>
+                <p className="text-xs text-[#7d8590] mt-1">
+                  Se genera un enlace único (7 días) para que el cliente revise sin necesidad de login.
+                </p>
+              </div>
+
+              {approvalUrl ? (
+                <div className="space-y-3">
+                  <div className="rounded-md border border-[#2d333b] bg-[#010409] p-2 text-xs text-[#e6edf3] break-all">
+                    {approvalUrl}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="button" onClick={copyApprovalLink} className="flex-1">
+                      <CopyIcon className="size-3.5" />
+                      Copiar enlace
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setApprovalOpen(false)}
+                    >
+                      Cerrar
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="approval-email">Email del cliente</Label>
+                    <Input
+                      id="approval-email"
+                      type="email"
+                      value={approvalEmail}
+                      onChange={(e) => setApprovalEmail(e.target.value)}
+                      placeholder="cliente@empresa.com"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="approval-phone">Teléfono WhatsApp (opcional)</Label>
+                    <Input
+                      id="approval-phone"
+                      value={approvalPhone}
+                      onChange={(e) => setApprovalPhone(e.target.value)}
+                      placeholder="+57 300 000 0000"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-sm text-[#e6edf3]">
+                      <input
+                        type="checkbox"
+                        checked={approvalNotifyEmail}
+                        onChange={(e) => setApprovalNotifyEmail(e.target.checked)}
+                      />
+                      Notificar por email
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-[#e6edf3]">
+                      <input
+                        type="checkbox"
+                        checked={approvalNotifyWa}
+                        onChange={(e) => setApprovalNotifyWa(e.target.checked)}
+                      />
+                      Notificar por WhatsApp
+                    </label>
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setApprovalOpen(false)}
+                      disabled={approvalSending}
+                      className="flex-1"
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={sendForApproval}
+                      disabled={approvalSending}
+                      className="flex-1"
+                    >
+                      {approvalSending ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Send className="size-3.5" />
+                      )}
+                      Enviar
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Panel derecho: preview */}

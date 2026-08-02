@@ -8,6 +8,20 @@ import {
   createThreadsContainer,
   publishThreadsContainer,
 } from "@/lib/social/threads";
+import { publishYouTubeShort } from "@/lib/social/youtube";
+import { publishGBPPost } from "@/lib/social/gbp";
+import { createPinterestPin } from "@/lib/social/pinterest";
+
+/**
+ * Extract #hashtags from free-form caption text. Returns tags without the '#'.
+ * Kept local: youtube.videos.insert accepts a tags array whose combined length
+ * is capped at 500 chars by the API — caller can trim further if needed.
+ */
+function extractHashtags(text: string | null | undefined): string[] {
+  if (!text) return [];
+  const matches = text.match(/#([\p{L}\p{N}_]+)/gu) ?? [];
+  return Array.from(new Set(matches.map((t) => t.slice(1)))).filter(Boolean);
+}
 
 /**
  * Server-only Supabase admin client that targets the `public` schema, where
@@ -138,6 +152,7 @@ export const publishScheduledPost = inngest.createFunction(
         page_access_token?: string | null;
         ig_user_id?: string | null;
         instagram_id?: string | null;
+        metadata?: Record<string, unknown> | null;
       };
 
       // Resolve token. Prefer new ciphertext column, fall back to legacy plain.
@@ -289,6 +304,89 @@ export const publishScheduledPost = inngest.createFunction(
               ok: true,
               platform_post_id: published.id,
               platform_post_url: published.permalink,
+            };
+          }
+
+          case "youtube": {
+            const media = p.media_urls ?? (p.video_url ? [p.video_url] : []);
+            const videoUrl = media[0];
+            if (!videoUrl) {
+              return {
+                ok: false,
+                error: "youtube requires video_url or media_urls[0]",
+                retryable: false,
+              };
+            }
+            const title = (caption || "Untitled").slice(0, 100);
+            const tags = (p.hashtags && p.hashtags.length > 0)
+              ? p.hashtags
+              : extractHashtags(caption);
+            const res = await publishYouTubeShort({
+              accessToken: token,
+              videoUrl,
+              title,
+              description: caption,
+              tags,
+            });
+            if (!res.ok) return { ok: false, error: res.error, retryable: res.retryable };
+            return {
+              ok: true,
+              platform_post_id: res.video_id,
+              platform_post_url: res.video_url,
+            };
+          }
+
+          case "gbp": {
+            const meta = acc.metadata ?? {};
+            const locationName =
+              (meta.location_name as string | undefined) ?? acc.account_id;
+            const mediaUrl = p.image_url ?? (p.media_urls ?? [])[0] ?? null;
+            const res = await publishGBPPost({
+              accessToken: token,
+              locationName,
+              summary: caption,
+              media: mediaUrl
+                ? [{ mediaFormat: "PHOTO", sourceUrl: mediaUrl }]
+                : undefined,
+            });
+            if (!res.ok) return { ok: false, error: res.error, retryable: res.retryable };
+            return {
+              ok: true,
+              platform_post_id: res.post_name,
+              platform_post_url: res.post_url,
+            };
+          }
+
+          case "pinterest": {
+            const meta = acc.metadata ?? {};
+            const boardId = meta.board_id as string | undefined;
+            if (!boardId) {
+              return {
+                ok: false,
+                error: "pinterest account has no default board_id — reconnect account",
+                retryable: false,
+              };
+            }
+            const imageUrl = p.image_url ?? (p.media_urls ?? [])[0];
+            if (!imageUrl) {
+              return {
+                ok: false,
+                error: "pinterest requires image_url or media_urls[0]",
+                retryable: false,
+              };
+            }
+            const res = await createPinterestPin({
+              accessToken: token,
+              boardId,
+              title: (caption || "").slice(0, 100),
+              description: caption,
+              mediaSource: { source_type: "image_url", url: imageUrl },
+            });
+            if (!res.ok) return { ok: false, error: res.error, retryable: res.retryable };
+            return {
+              ok: true,
+              platform_post_id: res.pin_id,
+              platform_post_url: res.pin_url,
             };
           }
 
