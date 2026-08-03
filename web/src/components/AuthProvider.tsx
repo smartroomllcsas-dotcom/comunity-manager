@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import { getCurrentUser, logout as doLogout } from '@/lib/auth'
 import { createClient as createSupabaseBrowser } from '@/lib/supabase/client'
 import type { CMUser } from '@/types/database'
+import type { User as SupabaseUser } from '@supabase/supabase-js'
 
 interface AuthContextType {
   user: CMUser | null
@@ -68,30 +69,50 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const localUser = await getCurrentUser()
+      let authUser: SupabaseUser | null = null
+
+      // The legacy CM cookie can outlive the Supabase session. Do not render
+      // protected routes as authenticated when the secure session is gone.
+      if (smarttalk) {
+        try {
+          const authResult = await createSupabaseBrowser().auth.getUser()
+          authUser = authResult.data.user
+        } catch {
+          authUser = null
+        }
+
+        if (!authUser) {
+          doLogout()
+          document.cookie = 'cm_user_id=; Path=/; Max-Age=0'
+          if (cancelled) return
+          setUser(null)
+          setLoading(false)
+          router.push('/login')
+          return
+        }
+      }
+
       let resolvedUser = localUser
 
       // SmartTalk routes can have a valid Supabase session while the legacy
       // CM session is still warming up. Use the agent as the display fallback.
-      if (!resolvedUser && smarttalk) {
-        const { data: { user: authUser } } = await createSupabaseBrowser().auth.getUser()
-        if (authUser) {
-          const { data: agent } = await createSupabaseBrowser()
-            .from('agents')
-            .select('id, email, name, role')
-            .eq('id', authUser.id)
-            .maybeSingle()
+      if (!resolvedUser && smarttalk && authUser) {
+        const { data: agent } = await createSupabaseBrowser()
+          .from('agents')
+          .select('id, email, name, role')
+          .eq('id', authUser.id)
+          .maybeSingle()
 
-          if (agent) {
-            resolvedUser = {
-              id: agent.id,
-              email: agent.email || authUser.email || '',
-              name: agent.name || authUser.user_metadata?.name || authUser.email || 'Usuario',
-              role: agent.role || 'user',
-              plan: 'free',
-              avatar_url: null,
-              created_at: '',
-              updated_at: '',
-            }
+        if (agent) {
+          resolvedUser = {
+            id: agent.id,
+            email: agent.email || authUser.email || '',
+            name: agent.name || authUser.user_metadata?.name || authUser.email || 'Usuario',
+            role: agent.role || 'user',
+            plan: 'free',
+            avatar_url: null,
+            created_at: '',
+            updated_at: '',
           }
         }
       }
