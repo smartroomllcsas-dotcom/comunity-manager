@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { mysqlQuery, quoteId } from "@/lib/mysql";
+import { isGlobalAdminEmail } from "@/lib/platform-admin";
 
 interface CmClientAccess {
   clientId: string;
@@ -52,7 +53,7 @@ export async function getCmClientAccess(
       .maybeSingle(),
     smarttalkAdmin
       .from("agents")
-      .select("id, organization_id, member_type")
+      .select("id, organization_id, member_type, is_super_admin")
       .eq("id", user.id)
       .maybeSingle(),
   ]);
@@ -64,12 +65,14 @@ export async function getCmClientAccess(
     .eq("id", clientId)
     .maybeSingle();
   if (!client) return null;
+  const isSuperAdmin =
+    agent?.is_super_admin === true || isGlobalAdminEmail(user.email);
   const ownsClient = client.user_id === cmUser.id;
   const belongsToAgency =
     Boolean(agent?.organization_id) &&
     client.smarttalk_organization_id === agent?.organization_id;
-  if (!ownsClient && !belongsToAgency) return null;
-  if (agent?.member_type === "brand_advisor") {
+  if (!isSuperAdmin && !ownsClient && !belongsToAgency) return null;
+  if (!isSuperAdmin && agent?.member_type === "brand_advisor") {
     const { data: assignment } = await smarttalkAdmin
       .from("brand_advisor_assignments")
       .select("id")
