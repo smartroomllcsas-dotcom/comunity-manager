@@ -74,19 +74,23 @@ async function metaFetch(url: string, options: RequestInit = {}, maxRetries = 3)
 export function getOAuthUrl(
   redirectUri: string,
   state: string,
-  options: { includeInstagramMessaging?: boolean } = {}
+  options: { includeInstagramMessaging?: boolean; includeAds?: boolean } = {}
 ): string {
   const scopes = [
-    'business_management',
     'pages_manage_metadata',
-    'pages_read_engagement',
     'pages_show_list',
-    'ads_read',
-    'ads_management',
+    'pages_messaging',
   ]
 
   if (options.includeInstagramMessaging) {
     scopes.push('instagram_basic', 'instagram_manage_messages')
+  }
+
+  // Ads and business permissions require separate approval in production.
+  // Keep them out of the Facebook/Messenger connection flow unless that
+  // dedicated combined flow explicitly requests them.
+  if (options.includeAds) {
+    scopes.push('business_management', 'pages_read_engagement', 'ads_read', 'ads_management')
   }
 
   const params = new URLSearchParams({

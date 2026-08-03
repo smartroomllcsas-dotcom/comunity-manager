@@ -31,8 +31,10 @@ export async function initiateMetaOAuth(request: NextRequest, callbackPath: stri
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin
   const redirectUri = `${appUrl}${callbackPath}`
+  const isFacebookOnly = callbackPath.includes('/auth/facebook/callback')
   const authUrl = getOAuthUrl(redirectUri, state, {
-    includeInstagramMessaging: !callbackPath.includes('/auth/facebook/callback'),
+    includeInstagramMessaging: !isFacebookOnly,
+    includeAds: !isFacebookOnly,
   })
   return NextResponse.redirect(authUrl)
 }
