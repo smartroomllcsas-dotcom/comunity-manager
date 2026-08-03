@@ -5,6 +5,7 @@ import { GeistMono } from 'geist/font/mono'
 import './globals.css'
 import AuthProvider from '@/components/AuthProvider'
 import FacebookSDK from '@/components/FacebookSDK'
+import { QueryProvider } from '@/components/providers/QueryProvider'
 
 export const metadata: Metadata = {
   title: 'Community Manager - Gestión multicanal para agencias',
@@ -38,7 +39,9 @@ export default function RootLayout({
     <html lang="es" className={`dark ${GeistSans.variable} ${GeistMono.variable}`}>
       <body className="bg-background text-foreground antialiased">
         <FacebookSDK />
-        <AuthProvider>{children}</AuthProvider>
+        <QueryProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </QueryProvider>
         <Analytics />
       </body>
     </html>
