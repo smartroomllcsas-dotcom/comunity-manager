@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
 
 export async function GET(
   _request: Request,
@@ -19,12 +20,18 @@ export async function GET(
     .single();
   if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
 
-  const { data: segment } = await admin
+  const assignedBrandIds = await getAgentBrandIds(agent);
+  if (assignedBrandIds && assignedBrandIds.length === 0) {
+    return Response.json({ count: 0 });
+  }
+
+  let segmentQuery = admin
     .from("contact_segments")
     .select("*")
     .eq("id", id)
-    .eq("organization_id", agent.organization_id)
-    .single();
+    .eq("organization_id", agent.organization_id);
+  if (assignedBrandIds) segmentQuery = segmentQuery.eq("created_by", agent.id);
+  const { data: segment } = await segmentQuery.single();
 
   if (!segment) return Response.json({ error: "Segmento no encontrado" }, { status: 404 });
 
@@ -34,6 +41,7 @@ export async function GET(
     .from("contacts")
     .select("id", { count: "exact", head: true })
     .eq("organization_id", agent.organization_id);
+  if (assignedBrandIds) query = query.in("brand_id", assignedBrandIds);
 
   for (const condition of conditions) {
     const { field, operator, value } = condition;

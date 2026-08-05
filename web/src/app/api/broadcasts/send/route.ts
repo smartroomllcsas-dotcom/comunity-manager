@@ -9,6 +9,7 @@ import {
 } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { rateLimit } from "@/lib/rate-limit";
+import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
 
 // Sprint 22 hardening: 60 req/min por user para evitar spam de broadcasts.
 const BROADCAST_RATE_LIMIT = 60;
@@ -32,10 +33,32 @@ export async function POST(request: NextRequest) {
   const { data: agent } = await supabase.from("agents").select("*").eq("id", user.id).single();
   if (!agent) return NextResponse.json({ error: "Agent not found" }, { status: 404 });
 
+  const assignedBrandIds = await getAgentBrandIds(agent);
+
   const { broadcastId } = await request.json();
 
   const { data: broadcast } = await admin.from("broadcasts").select("*, template:message_templates(*)").eq("id", broadcastId).eq("organization_id", agent.organization_id).single();
   if (!broadcast || !broadcast.template) return NextResponse.json({ error: "Broadcast not found" }, { status: 404 });
+
+  let channelBrandId: string | null = null;
+  if (broadcast.channel_id) {
+    const { data: channel } = await admin
+      .from("channels")
+      .select("id, brand_id")
+      .eq("id", broadcast.channel_id)
+      .eq("organization_id", agent.organization_id)
+      .single();
+    if (!channel) {
+      return NextResponse.json({ error: "Channel not found or does not belong to this organization" }, { status: 403 });
+    }
+    channelBrandId = channel.brand_id;
+  }
+
+  if (assignedBrandIds) {
+    if (!channelBrandId || !assignedBrandIds.includes(channelBrandId)) {
+      return NextResponse.json({ error: "No autorizado para enviar difusiones en esta marca" }, { status: 403 });
+    }
+  }
 
   const billingDecision = await checkBillingFeature({
     organizationId: agent.organization_id,
@@ -45,7 +68,14 @@ export async function POST(request: NextRequest) {
   });
   if (!billingDecision.allowed) return billingDeniedResponse(billingDecision);
 
-  let contactQuery = admin.from("contacts").select("id, wa_id").eq("organization_id", agent.organization_id);
+  let contactQuery = admin
+    .from("contacts")
+    .select("id, wa_id")
+    .eq("organization_id", agent.organization_id);
+  if (channelBrandId) contactQuery = contactQuery.eq("brand_id", channelBrandId);
+  else if (assignedBrandIds) {
+    contactQuery = contactQuery.in("brand_id", assignedBrandIds);
+  }
   const filter = broadcast.contact_filter as { tags?: string[] };
   if (filter.tags && filter.tags.length > 0) contactQuery = contactQuery.overlaps("tags", filter.tags);
 
@@ -54,12 +84,6 @@ export async function POST(request: NextRequest) {
 
   const recipients = contacts.map((c) => ({ broadcast_id: broadcastId, contact_id: c.id, status: "pending" as const }));
   await admin.from("broadcast_recipients").insert(recipients);
-
-  // Verify channel belongs to this org if specified
-  if (broadcast.channel_id) {
-    const { data: channel } = await admin.from("channels").select("id").eq("id", broadcast.channel_id).eq("organization_id", agent.organization_id).single();
-    if (!channel) return NextResponse.json({ error: "Channel not found or does not belong to this organization" }, { status: 403 });
-  }
 
   const { phoneNumberId, accessToken } = await getOrgWhatsAppCredentials(agent.organization_id, broadcast.channel_id);
 

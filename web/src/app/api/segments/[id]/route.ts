@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
 
 export async function PATCH(
   request: NextRequest,
@@ -20,12 +21,18 @@ export async function PATCH(
     .single();
   if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
 
-  const { data: existing } = await admin
+  const assignedBrandIds = await getAgentBrandIds(agent);
+  if (assignedBrandIds && assignedBrandIds.length === 0) {
+    return Response.json({ error: "Segmento no encontrado" }, { status: 404 });
+  }
+
+  let existingQuery = admin
     .from("contact_segments")
     .select("id")
     .eq("id", id)
-    .eq("organization_id", agent.organization_id)
-    .single();
+    .eq("organization_id", agent.organization_id);
+  if (assignedBrandIds) existingQuery = existingQuery.eq("created_by", agent.id);
+  const { data: existing } = await existingQuery.single();
   if (!existing) return Response.json({ error: "Segmento no encontrado" }, { status: 404 });
 
   const body = await request.json();
@@ -64,12 +71,18 @@ export async function DELETE(
     .single();
   if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
 
-  const { data: existing } = await admin
+  const assignedBrandIds = await getAgentBrandIds(agent);
+  if (assignedBrandIds && assignedBrandIds.length === 0) {
+    return Response.json({ error: "Segmento no encontrado" }, { status: 404 });
+  }
+
+  let existingQuery = admin
     .from("contact_segments")
     .select("id")
     .eq("id", id)
-    .eq("organization_id", agent.organization_id)
-    .single();
+    .eq("organization_id", agent.organization_id);
+  if (assignedBrandIds) existingQuery = existingQuery.eq("created_by", agent.id);
+  const { data: existing } = await existingQuery.single();
   if (!existing) return Response.json({ error: "Segmento no encontrado" }, { status: 404 });
 
   const { error } = await admin.from("contact_segments").delete().eq("id", id);

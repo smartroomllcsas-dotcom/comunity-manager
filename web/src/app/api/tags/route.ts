@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
 
 export async function GET() {
   const supabase = await createClient();
@@ -16,6 +17,11 @@ export async function GET() {
     .single();
   if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
 
+  const assignedBrandIds = await getAgentBrandIds(agent);
+  if (assignedBrandIds && assignedBrandIds.length === 0) {
+    return Response.json({ tags: [] });
+  }
+
   const { data: tags, error } = await admin
     .from("tags")
     .select("*")
@@ -25,10 +31,12 @@ export async function GET() {
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
   // Count usage per tag by checking contacts with matching tag names
-  const { data: contacts } = await admin
+  let contactsQuery = admin
     .from("contacts")
     .select("tags")
     .eq("organization_id", agent.organization_id);
+  if (assignedBrandIds) contactsQuery = contactsQuery.in("brand_id", assignedBrandIds);
+  const { data: contacts } = await contactsQuery;
 
   const usageMap: Record<string, number> = {};
   if (contacts) {

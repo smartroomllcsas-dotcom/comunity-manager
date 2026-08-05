@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
 
 export async function GET() {
   const supabase = await createClient();
@@ -16,11 +17,19 @@ export async function GET() {
     .single();
   if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
 
-  const { data: segments, error } = await admin
+  const assignedBrandIds = await getAgentBrandIds(agent);
+  if (assignedBrandIds && assignedBrandIds.length === 0) {
+    return Response.json({ segments: [] });
+  }
+
+  let segmentsQuery = admin
     .from("contact_segments")
     .select("*")
     .eq("organization_id", agent.organization_id)
     .order("created_at", { ascending: false });
+  if (assignedBrandIds) segmentsQuery = segmentsQuery.eq("created_by", agent.id);
+
+  const { data: segments, error } = await segmentsQuery;
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
@@ -41,6 +50,11 @@ export async function POST(request: NextRequest) {
     .single();
   if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
 
+  const assignedBrandIds = await getAgentBrandIds(agent);
+  if (assignedBrandIds && assignedBrandIds.length === 0) {
+    return Response.json({ error: "No tienes marcas asignadas" }, { status: 403 });
+  }
+
   const { name, conditions } = await request.json();
 
   if (!name?.trim()) {
@@ -52,7 +66,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Count matching contacts
-  const count = await countMatchingContacts(admin, agent.organization_id, conditions);
+  const count = await countMatchingContacts(admin, agent.organization_id, conditions, assignedBrandIds);
 
   const { data: segment, error } = await admin
     .from("contact_segments")
@@ -80,12 +94,14 @@ interface SegmentCondition {
 async function countMatchingContacts(
   admin: ReturnType<typeof createAdminClient>,
   organizationId: string,
-  conditions: SegmentCondition[]
+  conditions: SegmentCondition[],
+  assignedBrandIds: string[] | null
 ): Promise<number> {
   let query = admin
     .from("contacts")
     .select("id", { count: "exact", head: true })
     .eq("organization_id", organizationId);
+  if (assignedBrandIds) query = query.in("brand_id", assignedBrandIds);
 
   for (const condition of conditions) {
     const { field, operator, value } = condition;

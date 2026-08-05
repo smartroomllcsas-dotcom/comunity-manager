@@ -6,6 +6,7 @@ export interface BrandScopeAgent {
   id: string;
   organization_id: string;
   member_type?: string | null;
+  is_super_admin?: boolean | null;
 }
 
 export function isBrandScopedMember(agent: {
@@ -21,7 +22,7 @@ export async function getBrandScopeAgent(userId: string): Promise<BrandScopeAgen
   const admin = createAdminClient("smarttalk");
   const { data, error } = await admin
     .from("agents")
-    .select("id, organization_id, member_type")
+    .select("id, organization_id, member_type, is_super_admin")
     .eq("id", userId)
     .maybeSingle();
 
@@ -43,7 +44,7 @@ export async function getBrandInOrganization(brandId: string, organizationId: st
 }
 
 export async function getAgentBrandIds(agent: BrandScopeAgent) {
-  if (!isBrandScopedMember(agent)) return null;
+  if (agent.is_super_admin === true || !isBrandScopedMember(agent)) return null;
 
   const admin = createAdminClient("smarttalk");
   const { data, error } = await admin

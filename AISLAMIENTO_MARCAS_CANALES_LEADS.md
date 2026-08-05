@@ -2,8 +2,10 @@
 
 Proyecto: CommunityManager  
 Fecha: 2026-07-30  
-Migracion: `20260730000300_013_brand_channel_lead_isolation.sql`  
-Estado: aplicada y validada en Supabase `smartmedia`
+Migraciones: `20260730000300_013_brand_channel_lead_isolation.sql` y
+`20260805000200_028_advisor_brand_rls_hardening.sql`
+Estado: la migracion 013 esta aplicada y validada en Supabase `smartmedia`; la
+028 queda lista para ejecutar antes del siguiente despliegue.
 
 ## Objetivo
 
@@ -52,6 +54,13 @@ La jerarquia obligatoria es:
 - Un usuario de agencia conserva acceso a las marcas de su organizacion.
 - Un asesor de marca solo ve canales y conversaciones de marcas asignadas.
 - La API del inbox aplica el mismo filtro en backend.
+- La migracion 028 reemplaza las politicas historicas de `messages` e
+  `internal_notes`, que validaban solo la organizacion, por politicas que
+  tambien validan la marca asignada.
+- La IA, el snooze, las notas, los segmentos, las etiquetas y los envios
+  masivos validan el alcance de marca antes de leer contactos o ejecutar una
+  accion.
+- El superadministrador conserva acceso global y no necesita asignacion.
 
 ## Interfaz
 
@@ -89,6 +98,8 @@ recupero su marca correcta mediante el `phone_number_id` de
 - `npm run build`: aprobado.
 - `npm run lint`: sin errores; permanecen advertencias heredadas.
 - `git diff --check`: aprobado.
+- Verificacion estatica del alcance de marca: rutas de contactos, inbox,
+  canales, IA, segmentos, etiquetas y broadcasts revisadas.
 
 ## Limpieza autorizada de cuenta de pruebas
 
@@ -119,10 +130,13 @@ conservaron.
 6. Invitar un asesor asignado solo a una marca.
 7. Confirmar que ese asesor no ve la otra marca, sus canales ni sus leads.
 8. Repetir recepcion y respuesta con WhatsApp, Messenger e Instagram.
+9. Ejecutar la migracion 028 y repetir el intento de lectura directa de
+   `contacts`, `conversations`, `messages` e `internal_notes` con el cliente
+   Supabase autenticado del asesor; las marcas no asignadas deben devolver cero
+   filas o acceso denegado.
 
 ## Reversion
 
 No eliminar las columnas para una emergencia. Revertir primero la aplicacion al
 commit anterior y mantener la migracion. Si se requiere una correccion de
 esquema, crear una migracion hacia adelante preservando `brand_id`.
-

@@ -49,6 +49,30 @@ WhatsApp.
     administrador. La eliminación borra sus conversaciones por cascada y
     libera un cupo; un asesor no puede ejecutar esta operación.
 
+## Aislamiento por marca para asesores
+
+La asignacion se guarda en `smarttalk.brand_advisor_assignments`. Un asesor o
+administrador de marca solo debe recibir las marcas que tengan una asignacion
+activa para su `agent_id`; no basta con pertenecer a la misma organizacion.
+
+Validar con una invitacion aceptada para Marca A y otra marca B dentro de la
+misma agencia:
+
+1. En Equipo, confirmar que el asesor tiene solo Marca A asignada.
+2. En Marcas, Leads y Contactos, confirmar que solo aparece Marca A.
+3. En Inbox, confirmar que solo aparecen conversaciones de Marca A y que una
+   URL/API con una conversacion de Marca B responde sin acceso.
+4. Intentar leer por el cliente Supabase autenticado los `contacts`,
+   `conversations`, `messages` e `internal_notes` de Marca B. Las politicas RLS
+   deben devolver cero filas o negar la operacion.
+5. Confirmar que el asesor puede responder y agregar notas solo en
+   conversaciones de Marca A.
+
+La migracion `20260805000200_028_advisor_brand_rls_hardening.sql` refuerza este
+aislamiento en `messages` e `internal_notes`, que antes tenian una politica
+historica basada unicamente en la organizacion. El superadministrador mantiene
+acceso global y no necesita una asignacion de marca.
+
 ## Prueba de contacto sobre el limite
 
 La migracion `20260805000100_027_contact_quota_restrictions.sql` agrega el

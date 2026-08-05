@@ -9,6 +9,7 @@ import {
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { rateLimit } from "@/lib/rate-limit";
 import { randomUUID } from "node:crypto";
+import { getAccessibleConversation } from "@/lib/smarttalk/brand-scope";
 
 // Sprint 22 hardening: 30 req/min por user (endpoint IA costoso).
 const AI_RATE_LIMIT = 30;
@@ -56,12 +57,22 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "conversationId and messages are required" }, { status: 400 });
   }
 
-  // Verify conversation belongs to agent's org
+  // Verify the conversation belongs to a brand assigned to this agent before
+  // reading contact data or sending it to the AI provider.
+  const accessibleConversation = await getAccessibleConversation(agent, conversationId);
+  const accessibleContact = Array.isArray(accessibleConversation?.contact)
+    ? accessibleConversation.contact[0]
+    : accessibleConversation?.contact;
+  if (!accessibleConversation || accessibleContact?.visibility_status === "restricted") {
+    return Response.json({ error: "Conversation not found" }, { status: 404 });
+  }
+
   const { data: conversation } = await admin
     .from("conversations")
     .select("*, contact:contacts(name, wa_id)")
     .eq("id", conversationId)
     .eq("organization_id", agent.organization_id)
+    .eq("brand_id", accessibleConversation.brand_id)
     .single();
 
   if (!conversation) {
