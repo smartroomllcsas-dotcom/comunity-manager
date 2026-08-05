@@ -62,7 +62,11 @@ export default function BillingSettingsPage() {
 
       const [orgRes, plansRes, agentsRes, advisorsRes, brandsRes, channelsRes, contactsRes, broadcastsRes, flowsRes, subRes, paymentsRes, gatewaysRes] =
         await Promise.all([
-          supabase.from("organizations").select("*, plan:plans(*, entitlements:plan_entitlements(*))").eq("id", orgId).single(),
+          supabase
+            .from("organizations")
+            .select("*, plan:plans!organizations_plan_id_fkey(*, entitlements:plan_entitlements(*))")
+            .eq("id", orgId)
+            .single(),
           supabase
             .from("plans")
             .select("*, prices:plan_prices(*), entitlements:plan_entitlements(*)")
@@ -88,7 +92,7 @@ export default function BillingSettingsPage() {
           supabase.from("chatbot_flows").select("id", { count: "exact", head: true }).eq("organization_id", orgId),
           supabase
             .from("subscriptions")
-            .select("*, plan:plans(*, entitlements:plan_entitlements(*))")
+            .select("*, plan:plans!subscriptions_plan_id_fkey(*, entitlements:plan_entitlements(*))")
             .eq("organization_id", orgId)
             .in("status", ["trial", "active", "past_due", "suspended"])
             .order("created_at", { ascending: false })

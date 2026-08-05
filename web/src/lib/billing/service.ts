@@ -378,7 +378,7 @@ export async function checkBillingFeature(
   const { data: organization, error: organizationError } = await admin
     .from("organizations")
     .select(
-      "id, is_active, plan_id, billing_enforcement_mode, trial_ends_at, onboarding_status, plan:plans(price_monthly)"
+      "id, is_active, plan_id, billing_enforcement_mode, trial_ends_at, onboarding_status, plan:plans!organizations_plan_id_fkey(price_monthly)"
     )
     .eq("id", input.organizationId)
     .maybeSingle();

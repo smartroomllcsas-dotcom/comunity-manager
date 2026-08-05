@@ -161,7 +161,14 @@ política de recepción de mensajes, no como contactos ilimitados.
 - Aplicado en backend: el plan `Free` heredado no sustituye una suscripción y
   `BILLING_ENFORCEMENT_MODE=hard` se respeta aunque la organización conserve el
   valor histórico `observe`.
+- Aplicado en backend y facturación: las lecturas de organización y suscripción
+  usan explícitamente las relaciones `plan_id` (`organizations_plan_id_fkey` y
+  `subscriptions_plan_id_fkey`). Esto evita que PostgREST confunda los campos
+  de onboarding/pending y muestre "Cuenta no activa" después de un pago aprobado.
+- Validado en Supabase: el pago ePayco `379960820` está `approved`, la suscripción
+  está `active`, la organización está activa y el plan es `Demo Inicial`.
 - No se agregó una migración nueva para estos controles; reutilizan las tablas
   y el catálogo de billing existentes.
-- Pendiente de operación: configurar `BILLING_ENFORCEMENT_MODE=hard`, ejecutar
-  redeploy y completar la matriz con tres organizaciones no superadmin.
+- Pendiente de operación: completar la matriz con tres organizaciones no
+  superadmin y validar una cuenta que no tenga suscripción para comprobar que
+  el aviso y el bloqueo continúan funcionando.

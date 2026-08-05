@@ -40,19 +40,23 @@ export async function GET() {
     });
   }
 
-  const [{ data: organization }, { data: subscription }, { data: latestPayment }] =
+  const [
+    { data: organization, error: organizationError },
+    { data: subscription, error: subscriptionError },
+    { data: latestPayment, error: latestPaymentError },
+  ] =
     await Promise.all([
       admin
         .from("organizations")
         .select(
-          "id, is_active, plan_id, trial_ends_at, onboarding_status, plan:plans(name, price_monthly)"
+          "id, is_active, plan_id, trial_ends_at, onboarding_status, plan:plans!organizations_plan_id_fkey(name, price_monthly)"
         )
         .eq("id", agent.organization_id)
         .maybeSingle(),
       admin
         .from("subscriptions")
         .select(
-          "status, trial_ends_at, grace_ends_at, current_period_end, plan:plans(name, price_monthly)"
+          "status, trial_ends_at, grace_ends_at, current_period_end, plan:plans!subscriptions_plan_id_fkey(name, price_monthly)"
         )
         .eq("organization_id", agent.organization_id)
         .order("created_at", { ascending: false })
@@ -66,6 +70,22 @@ export async function GET() {
         .limit(1)
         .maybeSingle(),
     ]);
+
+  if (organizationError || subscriptionError || latestPaymentError) {
+    console.error("[billing/status] Failed to read billing state", {
+      organizationError: organizationError?.message,
+      subscriptionError: subscriptionError?.message,
+      latestPaymentError: latestPaymentError?.message,
+      organizationId: agent.organization_id,
+    });
+    return Response.json(
+      {
+        error: "No se pudo consultar el estado de facturación.",
+        retryable: true,
+      },
+      { status: 503 }
+    );
+  }
 
   if (!organization) {
     return Response.json({
