@@ -196,13 +196,16 @@ export default function ClientsPage() {
 
   async function loadData() {
     const [clientsRes, whatsappsResponse] = await Promise.all([
-      supabase.from('cm_clients').select('*').eq('user_id', user!.id).order('created_at', { ascending: false }),
+      fetch('/api/cm/clients', { cache: 'no-store' }),
       fetch('/api/whatsapp/accounts'),
     ])
+    const clientsPayload = clientsRes.ok
+      ? await clientsRes.json()
+      : { clients: [] }
     const whatsappsPayload = whatsappsResponse.ok
       ? await whatsappsResponse.json()
       : { accounts: [] }
-    const clientRows = clientsRes.data ?? []
+    const clientRows = Array.isArray(clientsPayload.clients) ? clientsPayload.clients : []
     setClients(clientRows)
 
     const clientIds = clientRows.map((client: CMClient) => client.id)
