@@ -60,7 +60,7 @@ export default function BillingSettingsPage() {
       setLoading(true);
       const orgId = currentAgent!.organization_id;
 
-      const [orgRes, plansRes, agentsRes, advisorsRes, brandsRes, channelsRes, contactsRes, broadcastsRes, flowsRes, subRes, paymentsRes, gatewaysRes] =
+      const [orgRes, plansRes, agentsRes, pendingAgencyUsersRes, advisorsRes, pendingAdvisorsRes, brandsRes, channelsRes, contactsRes, broadcastsRes, flowsRes, subRes, paymentsRes, gatewaysRes] =
         await Promise.all([
           supabase
             .from("organizations")
@@ -74,7 +74,9 @@ export default function BillingSettingsPage() {
             .eq("is_public", true)
             .order("price_monthly", { ascending: true }),
           supabase.from("agents").select("id", { count: "exact", head: true }).eq("organization_id", orgId).eq("member_type", "agency_user"),
+          supabase.from("invitations").select("id", { count: "exact", head: true }).eq("organization_id", orgId).eq("member_type", "agency_user").eq("status", "pending"),
           supabase.from("agents").select("id", { count: "exact", head: true }).eq("organization_id", orgId).eq("member_type", "brand_advisor"),
+          supabase.from("invitations").select("id", { count: "exact", head: true }).eq("organization_id", orgId).eq("member_type", "brand_advisor").eq("status", "pending"),
           fetch("/api/cm/clients", { cache: "no-store" })
             .then(async (response) => response.ok ? response.json() : { clients: [] })
             .catch(() => ({ clients: [] })),
@@ -119,8 +121,8 @@ export default function BillingSettingsPage() {
         );
       }
       setUsage({
-        agents: agentsRes.count ?? 0,
-        advisors: advisorsRes.count ?? 0,
+        agents: (agentsRes.count ?? 0) + (pendingAgencyUsersRes.count ?? 0),
+        advisors: (advisorsRes.count ?? 0) + (pendingAdvisorsRes.count ?? 0),
         brands: Array.isArray(brandsRes?.clients) ? brandsRes.clients.length : 0,
         channels: channelsRes.count ?? 0,
         contacts: contactsRes.count ?? 0,

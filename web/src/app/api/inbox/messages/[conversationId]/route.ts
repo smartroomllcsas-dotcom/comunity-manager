@@ -37,6 +37,9 @@ export async function GET(
   if (!conversation) {
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
   }
+  if ((conversation.contact as { visibility_status?: string } | null)?.visibility_status === "restricted") {
+    return NextResponse.json({ error: "Contact restricted", message: "Amplía el plan para ver los mensajes" }, { status: 402 });
+  }
 
   const { data, error } = await admin
     .from("messages")

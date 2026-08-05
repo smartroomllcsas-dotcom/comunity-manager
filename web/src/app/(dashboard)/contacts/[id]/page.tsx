@@ -1,11 +1,12 @@
 "use client";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import type { Contact, Conversation } from "@/types/database";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { ArrowLeft, Phone, Mail, Tag, MessageSquare, Clock } from "lucide-react";
+import { ArrowLeft, Phone, Mail, Tag, MessageSquare, Clock, Trash2 } from "lucide-react";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +31,10 @@ const statusConfig: Record<string, { label: string; bg: string; text: string }> 
 export default function ContactDetailPage() {
   const params = useParams();
   const contactId = params.id as string;
+  const router = useRouter();
   const supabase = createClient();
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const { data: contact } = useQuery<Contact>({
     queryKey: ["contact", contactId],
@@ -65,6 +69,25 @@ export default function ContactDetailPage() {
   const displayName = contact.name || "Sin nombre";
   const initials = displayName.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
 
+  async function handleDelete() {
+    if (!window.confirm(`¿Eliminar a ${displayName}? Esta acción libera un cupo del plan y no se puede deshacer.`)) {
+      return;
+    }
+
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/contacts/${contactId}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "No se pudo eliminar el contacto");
+      router.push("/contacts");
+      router.refresh();
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "No se pudo eliminar el contacto");
+      setDeleting(false);
+    }
+  }
+
   return (
     <div className="min-h-full bg-[#0d1117]">
       {/* Top Bar */}
@@ -73,9 +96,23 @@ export default function ContactDetailPage() {
           <ArrowLeft className="h-5 w-5" />
         </Link>
         <h1 className="text-lg font-bold text-white">Detalle del contacto</h1>
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={deleting}
+          className="ml-auto inline-flex items-center gap-2 rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-300 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Trash2 className="h-4 w-4" />
+          {deleting ? "Eliminando..." : "Eliminar contacto"}
+        </button>
       </div>
 
       <div className="p-6 max-w-4xl">
+        {deleteError && (
+          <div className="mb-6 rounded-lg border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm text-red-200">
+            {deleteError}
+          </div>
+        )}
         {/* Contact Header */}
         <div className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg p-5 mb-6">
           <div className="flex items-center gap-4">
@@ -85,10 +122,14 @@ export default function ContactDetailPage() {
             <div className="flex-1 min-w-0">
               <h2 className="text-xl font-bold text-white">{displayName}</h2>
               <div className="flex items-center gap-4 mt-2 text-sm text-[#8b949e]">
-                <span className="flex items-center gap-1.5">
-                  <Phone className="h-3.5 w-3.5" />
-                  {contact.wa_id}
-                </span>
+                {contact.visibility_status === "restricted" ? (
+                  <span className="text-amber-300">Datos de contacto ocultos por el límite del plan</span>
+                ) : (
+                  <span className="flex items-center gap-1.5">
+                    <Phone className="h-3.5 w-3.5" />
+                    {contact.wa_id}
+                  </span>
+                )}
                 {contact.custom_fields?.email && (
                   <span className="flex items-center gap-1.5">
                     <Mail className="h-3.5 w-3.5" />
@@ -111,8 +152,14 @@ export default function ContactDetailPage() {
           </div>
         </div>
 
+        {contact.visibility_status === "restricted" && (
+          <div className="mb-6 rounded-lg border border-amber-500/30 bg-amber-500/10 px-5 py-4 text-sm text-amber-100">
+            Este lead fue recibido cuando el plan ya había alcanzado el límite de contactos. Se conserva el nombre para trazabilidad, pero el teléfono, los mensajes y la conversación se habilitan al ampliar el plan o liberar un cupo.
+          </div>
+        )}
+
         {/* Conversations */}
-        <div className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg overflow-hidden">
+        {contact.visibility_status === "restricted" ? null : <div className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg overflow-hidden">
           <div className="px-5 py-3 border-b border-[#2d333b] flex items-center gap-2">
             <MessageSquare className="h-4 w-4 text-[#8b949e]" />
             <h3 className="text-sm font-semibold text-white">Conversaciones</h3>
@@ -144,7 +191,7 @@ export default function ContactDetailPage() {
               })}
             </div>
           )}
-        </div>
+        </div>}
       </div>
     </div>
   );

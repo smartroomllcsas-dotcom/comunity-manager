@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
   const headers = ["Nombre", "Telefono", "Email", "Etiquetas", "Ciclo de Vida", "Fecha Creacion"];
   const rows = (contacts || []).map((c) => [
     escapeCsvField(c.name || ""),
-    escapeCsvField(c.wa_id || ""),
+    escapeCsvField(c.visibility_status === "restricted" ? "Oculto por límite del plan" : c.wa_id || ""),
     escapeCsvField(c.custom_fields?.email || ""),
     escapeCsvField((c.tags || []).join(", ")),
     escapeCsvField(c.lifecycle_stage?.name || ""),

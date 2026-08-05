@@ -4,6 +4,7 @@ import type { MessageContent, MessageType } from "@/types/database";
 import { processIncomingWithChatbot } from "@/lib/chatbot/engine";
 import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
+import { upsertRestrictedContact } from "@/lib/smarttalk/contact-privacy";
 
 export async function processIncomingMessage(
   message: WebhookMessage,
@@ -36,11 +37,22 @@ export async function processIncomingMessage(
   // 2. Upsert contact
   const { data: existingContact } = await admin
     .from("contacts")
-    .select("id")
+    .select("id, visibility_status")
     .eq("organization_id", org.id)
     .eq("brand_id", channel.brand_id)
     .eq("wa_id", contact.wa_id)
     .maybeSingle();
+
+  if (existingContact?.visibility_status === "restricted") {
+    await admin
+      .from("contacts")
+      .update({
+        name: contact.profile.name || undefined,
+        last_message_at: new Date().toISOString(),
+      })
+      .eq("id", existingContact.id);
+    return;
+  }
 
   if (!existingContact) {
     const billingDecision = await checkBillingFeature({
@@ -50,8 +62,15 @@ export async function processIncomingMessage(
       source: "webhook/whatsapp/inbound-contact",
     });
     if (!billingDecision.allowed) {
-      // Preserve inbound delivery and audit the over-limit condition instead
-      // of returning 4xx/5xx and causing provider retries or message loss.
+      // A hard quota keeps the lead traceable, but does not create a
+      // conversation/message or expose its phone number in the CRM.
+      await upsertRestrictedContact({
+        organizationId: org.id,
+        brandId: channel.brand_id,
+        channelId: channel.id,
+        externalContactId: contact.wa_id,
+        name: contact.profile.name,
+      });
       console.warn("[billing] inbound WhatsApp contact over limit; preserving webhook", {
         organizationId: org.id,
         brandId: channel.brand_id,
@@ -59,6 +78,7 @@ export async function processIncomingMessage(
         currentUsage: billingDecision.currentUsage,
         limit: billingDecision.limitValue,
       });
+      return;
     }
   }
 

@@ -85,7 +85,13 @@ export function ContactsTable() {
                         </span>
                       </Link>
                     </td>
-                    <td className="px-4 py-3 text-sm text-[#8b949e]">{contact.wa_id}</td>
+                    <td className="px-4 py-3 text-sm text-[#8b949e]">
+                      {contact.visibility_status === "restricted" ? (
+                        <span className="text-amber-300">Oculto por límite del plan</span>
+                      ) : (
+                        contact.wa_id
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1 flex-wrap">
                         {contact.tags?.map((tag: string, idx: number) => (

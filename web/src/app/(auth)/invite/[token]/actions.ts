@@ -1,6 +1,8 @@
 "use server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { checkBillingFeature } from "@/lib/billing/service";
+import { BILLING_FEATURES } from "@/lib/billing/features";
 import { redirect } from "next/navigation";
 
 export async function getInvitation(token: string) {
@@ -76,6 +78,38 @@ export async function acceptInvitation(token: string, formData: FormData) {
   }
   if (invitation.member_type === "brand_admin" && (brandAssignments?.length ?? 0) !== 1) {
     return { error: "El administrador de marca debe tener una única marca asignada" };
+  }
+
+  const featureCode =
+    invitation.member_type === "brand_advisor"
+      ? BILLING_FEATURES.BRAND_ADVISORS_TOTAL
+      : invitation.member_type === "agency_user"
+        ? BILLING_FEATURES.AGENCY_USERS
+        : null;
+  if (featureCode) {
+    const decision = await checkBillingFeature({
+      organizationId: invitation.organization_id,
+      featureCode,
+      excludeInvitationId: invitation.id,
+      source: "invite/accept",
+    });
+    if (!decision.allowed) {
+      return { error: "El límite del plan ya fue alcanzado. La agencia debe ampliar el plan antes de activar esta invitación." };
+    }
+  }
+  if (invitation.member_type === "brand_advisor") {
+    for (const assignment of brandAssignments || []) {
+      const decision = await checkBillingFeature({
+        organizationId: invitation.organization_id,
+        featureCode: BILLING_FEATURES.BRAND_ADVISORS_PER_BRAND,
+        brandId: assignment.brand_id,
+        excludeInvitationId: invitation.id,
+        source: "invite/accept",
+      });
+      if (!decision.allowed) {
+        return { error: "El límite de asesores de esta marca ya fue alcanzado." };
+      }
+    }
   }
 
   // Create the auth user

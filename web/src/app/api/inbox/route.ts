@@ -222,7 +222,7 @@ export async function GET(req: NextRequest) {
     let stQ = stAdmin
       .from("conversations")
       .select(
-        "id, channel_type, contact_id, last_message_at, last_message_preview, unread_count, status, assigned_agent_id, organization_id, brand_id",
+        "id, channel_type, contact_id, last_message_at, last_message_preview, unread_count, status, assigned_agent_id, organization_id, brand_id, contact:contacts(visibility_status)",
       )
       .eq("organization_id", agentRow.organization_id)
       .eq("brand_id", clientId)
@@ -240,7 +240,9 @@ export async function GET(req: NextRequest) {
         unread_count: number | null;
         status: string | null;
         assigned_agent_id: string | null;
+        contact: { visibility_status?: string | null } | null;
       }>) {
+        if (c.contact?.visibility_status === "restricted") continue;
         const key = makeConversationKey({
           clientId,
           platform: c.channel_type,

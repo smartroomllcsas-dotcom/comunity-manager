@@ -56,6 +56,7 @@ export default async function InboxPage() {
   ]);
 
   const initialConversations = ((conversationsRes.data || []) as Conversation[]).filter((conversation) => {
+    if (conversation.contact?.visibility_status === "restricted") return false;
     const channelType = (conversation.channel as { type?: string } | null)?.type;
     return channelType !== "instagram" || Boolean(conversation.last_message_preview);
   });

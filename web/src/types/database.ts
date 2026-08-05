@@ -261,6 +261,8 @@ export interface Contact {
   organization_id: string;
   brand_id: string;
   wa_id: string;
+  visibility_status: "full" | "restricted";
+  restricted_reason: string | null;
   name: string | null;
   profile_picture_url: string | null;
   tags: string[];

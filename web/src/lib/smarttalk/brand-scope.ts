@@ -78,7 +78,7 @@ export async function getAccessibleConversation(
 
   let query = admin
     .from("conversations")
-    .select("id, organization_id, brand_id, channel_id, contact_id, channel_type, assigned_agent_id, status")
+    .select("id, organization_id, brand_id, channel_id, contact_id, channel_type, assigned_agent_id, status, contact:contacts(visibility_status)")
     .eq("id", conversationId)
     .eq("organization_id", agent.organization_id);
 

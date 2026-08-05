@@ -10,6 +10,7 @@ interface BillingCheckInput {
   organizationId: string;
   featureCode: BillingFeatureCode;
   brandId?: string;
+  excludeInvitationId?: string;
   requestedUnits?: number;
   source?: string;
 }
@@ -221,72 +222,83 @@ async function getCurrentUsage(
   organizationId: string,
   featureCode: BillingFeatureCode,
   period: { start: string; end: string },
-  brandId?: string
+  brandId?: string,
+  excludeInvitationId?: string
 ) {
   const admin = createAdminClient();
 
   if (featureCode === BILLING_FEATURES.TEAM_MEMBERS) {
+    let invitationsQuery = admin
+      .from("invitations")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId)
+      .eq("status", "pending");
+    if (excludeInvitationId) invitationsQuery = invitationsQuery.neq("id", excludeInvitationId);
     const [agents, invitations] = await Promise.all([
       admin
         .from("agents")
         .select("id", { count: "exact", head: true })
         .eq("organization_id", organizationId),
-      admin
-        .from("invitations")
-        .select("id", { count: "exact", head: true })
-        .eq("organization_id", organizationId)
-        .eq("status", "pending"),
+      invitationsQuery,
     ]);
     return (agents.count || 0) + (invitations.count || 0);
   }
 
   if (featureCode === BILLING_FEATURES.AGENCY_USERS) {
+    let invitationsQuery = admin
+      .from("invitations")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId)
+      .eq("member_type", "agency_user")
+      .eq("status", "pending");
+    if (excludeInvitationId) invitationsQuery = invitationsQuery.neq("id", excludeInvitationId);
     const [agents, invitations] = await Promise.all([
       admin
         .from("agents")
         .select("id", { count: "exact", head: true })
         .eq("organization_id", organizationId)
         .eq("member_type", "agency_user"),
-      admin
-        .from("invitations")
-        .select("id", { count: "exact", head: true })
-        .eq("organization_id", organizationId)
-        .eq("member_type", "agency_user")
-        .eq("status", "pending"),
+      invitationsQuery,
     ]);
     return (agents.count || 0) + (invitations.count || 0);
   }
 
   if (featureCode === BILLING_FEATURES.BRAND_ADVISORS_TOTAL) {
+    let invitationsQuery = admin
+      .from("invitations")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId)
+      .eq("member_type", "brand_advisor")
+      .eq("status", "pending");
+    if (excludeInvitationId) invitationsQuery = invitationsQuery.neq("id", excludeInvitationId);
     const [agents, invitations] = await Promise.all([
       admin
         .from("agents")
         .select("id", { count: "exact", head: true })
         .eq("organization_id", organizationId)
         .eq("member_type", "brand_advisor"),
-      admin
-        .from("invitations")
-        .select("id", { count: "exact", head: true })
-        .eq("organization_id", organizationId)
-        .eq("member_type", "brand_advisor")
-        .eq("status", "pending"),
+      invitationsQuery,
     ]);
     return (agents.count || 0) + (invitations.count || 0);
   }
 
   if (featureCode === BILLING_FEATURES.BRAND_ADVISORS_PER_BRAND) {
     if (!brandId) return 0;
+    let invitationAssignmentsQuery = admin
+      .from("invitation_brand_assignments")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId)
+      .eq("brand_id", brandId);
+    if (excludeInvitationId) {
+      invitationAssignmentsQuery = invitationAssignmentsQuery.neq("invitation_id", excludeInvitationId);
+    }
     const [assignments, invitationAssignments] = await Promise.all([
       admin
         .from("brand_advisor_assignments")
         .select("id", { count: "exact", head: true })
         .eq("organization_id", organizationId)
         .eq("brand_id", brandId),
-      admin
-        .from("invitation_brand_assignments")
-        .select("id", { count: "exact", head: true })
-        .eq("organization_id", organizationId)
-        .eq("brand_id", brandId),
+      invitationAssignmentsQuery,
     ]);
     return (assignments.count || 0) + (invitationAssignments.count || 0);
   }
@@ -519,7 +531,8 @@ export async function checkBillingFeature(
     input.organizationId,
     input.featureCode,
     period,
-    input.brandId
+    input.brandId,
+    input.excludeInvitationId
   );
   const wouldExceed =
     currentUsage + requestedUnits > Number(entitlement.limit_value);

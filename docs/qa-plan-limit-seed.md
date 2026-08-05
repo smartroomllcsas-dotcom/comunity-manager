@@ -15,6 +15,8 @@ El script `web/supabase/seed/qa_demo_inicial_limit.sql` prepara la organizacion
 - Un administrador de marca pendiente por cada marca, asignado de forma aislada.
 - Broadcasts completados sinteticos hasta el limite mensual, sin destinatarios ni envio.
 - Flujos de chatbot inactivos sinteticos hasta el limite.
+- Cinco invitaciones de asesor, una por cada marca, y cinco invitaciones de
+  administrador de marca, cada una asignada a una sola marca.
 
 Todos los registros simulados llevan `qa_seed = true` o la etiqueta
 `qa-seed`. No se crean tokens, cuentas OAuth ni conexiones reales con Meta o
@@ -43,6 +45,51 @@ WhatsApp.
 9. Intentar conectar un cuarto canal real solo despues de verificar que el
    tercero ya aparece como activo. La operacion debe ser rechazada por el
    limite, sin llamar al proveedor si el backend la valida antes.
+10. Abrir el detalle de un contacto y usar `Eliminar contacto` con un usuario
+    administrador. La eliminación borra sus conversaciones por cascada y
+    libera un cupo; un asesor no puede ejecutar esta operación.
+
+## Prueba de contacto sobre el limite
+
+La migracion `20260805000100_027_contact_quota_restrictions.sql` agrega el
+estado `restricted` a los contactos. Con `BILLING_ENFORCEMENT_MODE=hard`:
+
+1. Enviar un lead nuevo por Facebook Messenger, Instagram o WhatsApp cuando
+   el contador ya este en `1.000/1.000`.
+2. Confirmar que el webhook responde correctamente y que el lead queda en la
+   marca y canal propietarios con su nombre.
+3. Confirmar que no se crea conversacion ni mensaje para ese lead.
+4. Confirmar que Contactos muestra `Oculto por limite del plan` y no muestra
+   telefono, identificador del proveedor ni contenido del mensaje.
+5. Solicitar el detalle o los mensajes directamente por API: debe responder
+   `402 contact_restricted`.
+6. Eliminar/liberar un contacto valido o ampliar el plan y repetir el flujo.
+   Los nuevos leads deben volver a tener contacto completo y conversacion.
+
+Los contactos restringidos también cuentan para el límite hasta que un
+administrador los elimine desde Contactos. El botón y la API validan la
+organización y la marca antes de borrar, por lo que no es posible liberar cupo
+eliminando información de otra cuenta.
+
+El identificador original no se guarda en `smarttalk.contacts`. Solo se
+conserva un hash con alcance de organizacion, marca y canal en
+`smarttalk.contact_private_identifiers`, accesible exclusivamente por
+`service_role`, para evitar duplicados sin exponer el numero.
+
+## Orden de despliegue
+
+1. Ejecutar primero la migracion en el SQL Editor del proyecto Supabase
+   correcto.
+2. En Vercel establecer `BILLING_ENFORCEMENT_MODE=hard` en Production. No se
+   agrega otra variable para esta funcionalidad.
+3. Desplegar la aplicacion.
+4. Ejecutar el seed QA si se necesita volver a llenar los limites. El seed es
+   idempotente y no conecta proveedores reales.
+
+Si la variable permanece en `off`, `observe` o `soft`, el sistema registra la
+decision de limite pero conserva el flujo completo; eso es intencional para
+pruebas de observacion. El bloqueo y el contacto restringido requieren
+`hard`.
 
 ## Reversion
 

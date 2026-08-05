@@ -86,7 +86,8 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
 
   if (!contact) return null;
 
-  const displayName = contact.name || contact.wa_id;
+  const restricted = contact.visibility_status === "restricted";
+  const displayName = contact.name || "Lead restringido";
 
   return (
     <aside
@@ -120,10 +121,14 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
           <h3 className="font-semibold text-white text-sm">
             {contact.name || "Sin nombre"}
           </h3>
-          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-            <Phone className="h-3 w-3" />
-            {contact.wa_id}
-          </p>
+          {restricted ? (
+            <p className="text-xs text-amber-300 mt-1">Datos ocultos por límite del plan</p>
+          ) : (
+            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+              <Phone className="h-3 w-3" />
+              {contact.wa_id}
+            </p>
+          )}
         </div>
 
         {/* Contact Info */}
@@ -139,7 +144,9 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
               <label className="text-[10px] text-muted-foreground/70 uppercase tracking-wider">
                 WhatsApp
               </label>
-              <p className="text-xs text-foreground/85">{contact.wa_id}</p>
+              <p className="text-xs text-foreground/85">
+                {restricted ? "Oculto por límite del plan" : contact.wa_id}
+              </p>
             </div>
             {contact.custom_fields &&
               Object.entries(contact.custom_fields).map(([key, value]) => (

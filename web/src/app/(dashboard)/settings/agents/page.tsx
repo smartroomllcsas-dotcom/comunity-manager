@@ -258,12 +258,15 @@ export default function AgentsSettingsPage() {
 
   const pendingInvitations = invitations?.filter((i) => i.status === "pending") || [];
   const agencyUsers =
-    agents?.filter((agent) => (agent.member_type || "agency_user") === "agency_user")
-      .length ?? 0;
+    (agents?.filter((agent) => (agent.member_type || "agency_user") === "agency_user")
+      .length ?? 0) +
+    pendingInvitations.filter((invitation) => invitation.member_type === "agency_user").length;
   const brandAdvisors =
-    agents?.filter((agent) => agent.member_type === "brand_advisor").length ?? 0;
+    (agents?.filter((agent) => agent.member_type === "brand_advisor").length ?? 0) +
+    pendingInvitations.filter((invitation) => invitation.member_type === "brand_advisor").length;
   const brandAdmins =
-    agents?.filter((agent) => agent.member_type === "brand_admin").length ?? 0;
+    (agents?.filter((agent) => agent.member_type === "brand_admin").length ?? 0) +
+    pendingInvitations.filter((invitation) => invitation.member_type === "brand_admin").length;
 
   return (
     <div className="min-h-full bg-[#0d1117]">

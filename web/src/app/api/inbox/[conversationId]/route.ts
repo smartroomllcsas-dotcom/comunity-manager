@@ -140,6 +140,9 @@ export async function GET(
     if (!conv) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
+    if ((conv.contact as { visibility_status?: string } | null)?.visibility_status === "restricted") {
+      return NextResponse.json({ error: "contact_restricted", message: "Amplía el plan para ver este contacto" }, { status: 402 });
+    }
     const { data: msgs } = await stAdmin
       .from("messages")
       .select("id, content, direction, created_at, sender_type, media_url")

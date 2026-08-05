@@ -3,6 +3,7 @@ import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { findReusableConversation } from "@/lib/smarttalk/conversation-dedupe";
 import { resolveToken } from "@/lib/auth/token-crypto";
+import { upsertRestrictedContact } from "@/lib/smarttalk/contact-privacy";
 import type { MessageContent, MessageType } from "@/types/database";
 
 type SmarttalkChannel = {
@@ -419,7 +420,7 @@ async function upsertInstagramContact(
 
   const { data: existing } = await admin
     .from("contacts")
-    .select("id,name")
+    .select("id,name,visibility_status")
     .eq("organization_id", channel.organization_id)
     .eq("brand_id", channel.brand_id)
     .eq("wa_id", contactId)
@@ -434,7 +435,10 @@ async function upsertInstagramContact(
     }
 
     await admin.from("contacts").update(updates).eq("id", existing.id);
-    return existing.id as string;
+    return {
+      id: existing.id as string,
+      restricted: existing.visibility_status === "restricted",
+    };
   }
 
   const billingDecision = await checkBillingFeature({
@@ -444,8 +448,14 @@ async function upsertInstagramContact(
     source: "sync/instagram/inbound-contact",
   });
   if (!billingDecision.allowed) {
-    // Polling must not discard a real Instagram interaction because of a
-    // quota. Keep the contact and leave the audited decision for upgrade UX.
+    await upsertRestrictedContact({
+      organizationId: channel.organization_id,
+      brandId: channel.brand_id,
+      channelId: channel.id,
+      externalContactId: contactId,
+      name: contact.username || null,
+      lastMessageAt,
+    });
     console.warn("[billing] inbound Instagram contact over limit; preserving sync", {
       organizationId: channel.organization_id,
       brandId: channel.brand_id,
@@ -453,6 +463,7 @@ async function upsertInstagramContact(
       currentUsage: billingDecision.currentUsage,
       limit: billingDecision.limitValue,
     });
+    return { id: null, restricted: true };
   }
 
   const { data: inserted, error } = await admin
@@ -468,7 +479,7 @@ async function upsertInstagramContact(
     .single();
 
   if (error) throw error;
-  return inserted.id as string;
+  return { id: inserted.id as string, restricted: false };
 }
 
 async function upsertInstagramConversation(
@@ -591,7 +602,9 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
         const updatedAt = conversation.updated_time
           ? new Date(conversation.updated_time).toISOString()
           : new Date().toISOString();
-        const contactId = await upsertInstagramContact(channel, externalContact, updatedAt);
+        const contactResult = await upsertInstagramContact(channel, externalContact, updatedAt);
+        if (contactResult.restricted || !contactResult.id) continue;
+        const contactId = contactResult.id;
 
         // Cursor persistente por conversación: si el sync anterior paró mid-way, retomamos.
         const savedCursors = syncMeta.messageCursors ?? {};

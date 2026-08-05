@@ -5,6 +5,7 @@ import { findReusableConversation } from "@/lib/smarttalk/conversation-dedupe";
 import { resolveToken } from "@/lib/auth/token-crypto";
 import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
+import { upsertRestrictedContact } from "@/lib/smarttalk/contact-privacy";
 import {
   buildDisplayName,
   extractContactId,
@@ -212,13 +213,29 @@ async function upsertContactAndConversation(
   const admin = createAdminClient("smarttalk");
   const { data: existingContact } = await admin
     .from("contacts")
-    .select("id, name, profile_picture_url")
+    .select("id, name, profile_picture_url, visibility_status")
     .eq("organization_id", channel.organization_id)
     .eq("brand_id", channel.brand_id)
     .eq("wa_id", contactId)
     .maybeSingle();
 
   let dbContactId = existingContact?.id as string | undefined;
+
+  if (existingContact?.visibility_status === "restricted") {
+    await admin
+      .from("contacts")
+      .update({
+        name: contactIdentity.name || undefined,
+        last_message_at: new Date().toISOString(),
+      })
+      .eq("id", existingContact.id);
+    return {
+      dbContactId: existingContact.id as string,
+      conversationId: null,
+      unreadCount: 0,
+      restricted: true,
+    };
+  }
 
   if (!dbContactId) {
     const billingDecision = await checkBillingFeature({
@@ -228,9 +245,14 @@ async function upsertContactAndConversation(
       source: `webhook/${channel.type}/inbound-contact`,
     });
     if (!billingDecision.allowed) {
-      // Never reject a provider webhook because of a commercial quota. The
-      // event must remain deliverable; the blocked decision is audited and
-      // the customer can upgrade without losing the inbound message.
+      await upsertRestrictedContact({
+        organizationId: channel.organization_id,
+        brandId: channel.brand_id,
+        channelId: channel.id,
+        externalContactId: contactId,
+        name: contactIdentity.name,
+        profilePictureUrl: contactIdentity.profile_picture_url,
+      });
       console.warn("[billing] inbound contact over limit; preserving webhook", {
         organizationId: channel.organization_id,
         brandId: channel.brand_id,
@@ -238,6 +260,12 @@ async function upsertContactAndConversation(
         currentUsage: billingDecision.currentUsage,
         limit: billingDecision.limitValue,
       });
+      return {
+        dbContactId: undefined,
+        conversationId: null,
+        unreadCount: 0,
+        restricted: true,
+      };
     }
 
     const { data: inserted, error } = await admin
@@ -334,7 +362,7 @@ async function upsertContactAndConversation(
     throw new Error("Could not upsert Meta conversation");
   }
 
-  return { dbContactId, conversationId, unreadCount };
+  return { dbContactId, conversationId, unreadCount, restricted: false };
 }
 
 async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload: MetaWebhookPayload) {
@@ -410,11 +438,13 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
       const contactId = extractContactId(event);
       const contactName = extractContactName(event);
       const contactIdentity = await resolveContactIdentity(channel, contactId, contactName);
-      const { dbContactId, conversationId, unreadCount } = await upsertContactAndConversation(
+      const { dbContactId, conversationId, unreadCount, restricted } = await upsertContactAndConversation(
         channel,
         contactId,
         contactIdentity
       );
+
+      if (restricted || !dbContactId || !conversationId) continue;
 
       const parsed = parseMetaMessage(payloadMessage);
       const direction = getMessageDirection(event, payloadMessage);
@@ -495,11 +525,13 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
           value
         );
         const contactIdentity = await resolveContactIdentity(channel, contactId, contactName);
-        const { dbContactId, conversationId, unreadCount } = await upsertContactAndConversation(
+        const { dbContactId, conversationId, unreadCount, restricted } = await upsertContactAndConversation(
           channel,
           contactId,
           contactIdentity
         );
+
+        if (restricted || !dbContactId || !conversationId) continue;
 
         const parsed = parseMetaMessage(message);
         const preview = parsed.content.type === "text"
