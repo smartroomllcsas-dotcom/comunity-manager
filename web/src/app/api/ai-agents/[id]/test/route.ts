@@ -4,6 +4,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { generateAIResponse } from "@/lib/chatbot/ai";
 import { processAIActions } from "@/lib/ai/actions";
 import { rateLimit } from "@/lib/rate-limit";
+import { BILLING_FEATURES } from "@/lib/billing/features";
+import {
+  billingDeniedResponse,
+  checkBillingFeature,
+  recordBillingUsage,
+} from "@/lib/billing/service";
+import { randomUUID } from "node:crypto";
 
 // Sprint 22 hardening: 30 req/min por user en endpoints IA (costoso).
 const AI_RATE_LIMIT = 30;
@@ -34,6 +41,21 @@ export async function POST(
     .eq("id", user.id)
     .single();
   if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
+
+  // Billing enforcement (IA).
+  const aiAccess = await checkBillingFeature({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.AI_ACCESS,
+    source: "api/ai-agents/test",
+  });
+  if (!aiAccess.allowed) return billingDeniedResponse(aiAccess);
+  const aiUsage = await checkBillingFeature({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.AI_REQUESTS_MONTH,
+    requestedUnits: 1,
+    source: "api/ai-agents/test",
+  });
+  if (!aiUsage.allowed) return billingDeniedResponse(aiUsage);
 
   const { data: aiAgent } = await admin
     .from("ai_agents")
@@ -117,6 +139,17 @@ export async function POST(
     });
 
     const { cleanText, actions } = processAIActions(rawResponse);
+
+    await recordBillingUsage({
+      organizationId: agent.organization_id,
+      featureCode: BILLING_FEATURES.AI_REQUESTS_MONTH,
+      quantity: 1,
+      idempotencyKey: `ai-agents-test:${randomUUID()}`,
+      sourceType: "ai_agents_test",
+      sourceId: id,
+      periodStart: aiUsage.periodStart,
+      periodEnd: aiUsage.periodEnd,
+    });
 
     return Response.json({
       response: cleanText,

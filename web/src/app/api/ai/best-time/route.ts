@@ -8,6 +8,9 @@ import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { rateLimit } from "@/lib/rate-limit";
 import { suggestBestTime } from "@/lib/ai/best-time";
+import { getCmClientAccess } from "@/lib/cm-client-access";
+import { BILLING_FEATURES } from "@/lib/billing/features";
+import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
 
 const AI_RATE_LIMIT = 30;
 const AI_RATE_WINDOW_MS = 60 * 1000;
@@ -34,6 +37,19 @@ export async function GET(request: NextRequest) {
 
   if (!clientId) return Response.json({ error: "clientId requerido" }, { status: 400 });
   if (!platform) return Response.json({ error: "platform requerido" }, { status: 400 });
+
+  // Billing enforcement (IA): sugerencia de hora óptima requiere acceso a IA
+  // con suscripción activa. No consume cupo mensual (es una lectura ligera).
+  const access = await getCmClientAccess(request, clientId);
+  const orgId = access?.organizationId ?? null;
+  const aiAccess = orgId
+    ? await checkBillingFeature({
+        organizationId: orgId,
+        featureCode: BILLING_FEATURES.AI_ACCESS,
+        source: "api/ai/best-time",
+      })
+    : null;
+  if (aiAccess && !aiAccess.allowed) return billingDeniedResponse(aiAccess);
 
   let dayOfWeek: number | undefined;
   if (dayOfWeekRaw !== null) {

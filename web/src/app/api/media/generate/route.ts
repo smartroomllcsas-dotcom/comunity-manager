@@ -35,6 +35,12 @@ import {
   DEFAULT_VIDEO_MODEL,
 } from "@/lib/media/fal";
 import { uploadAsset, downloadRemoteAsset } from "@/lib/media/storage";
+import { BILLING_FEATURES } from "@/lib/billing/features";
+import {
+  billingDeniedResponse,
+  checkBillingFeature,
+  recordBillingUsage,
+} from "@/lib/billing/service";
 
 export const maxDuration = 300; // Vercel: subir a 300s para dar margen a kling
 export const runtime = "nodejs";
@@ -127,6 +133,17 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Billing enforcement (almacenamiento): valida suscripción activa y que la
+  // organización no haya agotado su cupo antes de gastar en generación. El
+  // tamaño real del asset se registra tras subirlo al Storage.
+  const storageDecision = await checkBillingFeature({
+    organizationId: access.organizationId,
+    featureCode: BILLING_FEATURES.STORAGE_BYTES,
+    requestedUnits: 1,
+    source: "api/media/generate",
+  });
+  if (!storageDecision.allowed) return billingDeniedResponse(storageDecision);
+
   const start = Date.now();
   const model = v.model || (v.type === "image" ? DEFAULT_IMAGE_MODEL : DEFAULT_VIDEO_MODEL);
 
@@ -213,6 +230,18 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   }
+
+  await recordBillingUsage({
+    organizationId: access.organizationId,
+    featureCode: BILLING_FEATURES.STORAGE_BYTES,
+    quantity: uploaded.size,
+    idempotencyKey: `storage:${uploaded.path}`,
+    sourceType: "media_generate",
+    sourceId: inserted.id,
+    periodStart: storageDecision.periodStart,
+    periodEnd: storageDecision.periodEnd,
+    metadata: { origin, mime_type: uploaded.mimeType },
+  });
 
   return Response.json({
     ok: true,

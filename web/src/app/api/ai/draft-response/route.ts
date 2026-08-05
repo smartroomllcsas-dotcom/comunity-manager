@@ -12,6 +12,14 @@ import {
   type ResponseDraftInput,
   type ConversationTurn,
 } from "@/lib/ai/response-drafting";
+import { getCmClientAccess } from "@/lib/cm-client-access";
+import { BILLING_FEATURES } from "@/lib/billing/features";
+import {
+  billingDeniedResponse,
+  checkBillingFeature,
+  recordBillingUsage,
+} from "@/lib/billing/service";
+import { randomUUID } from "node:crypto";
 
 const AI_RATE_LIMIT = 30;
 const AI_RATE_WINDOW_MS = 60 * 1000;
@@ -79,6 +87,27 @@ export async function POST(request: NextRequest) {
   const { input, error } = validateInput(body);
   if (!input) return Response.json({ error }, { status: 400 });
 
+  // Billing enforcement (IA).
+  const access = await getCmClientAccess(request, input.clientId);
+  const orgId = access?.organizationId ?? null;
+  const aiAccess = orgId
+    ? await checkBillingFeature({
+        organizationId: orgId,
+        featureCode: BILLING_FEATURES.AI_ACCESS,
+        source: "api/ai/draft-response",
+      })
+    : null;
+  if (aiAccess && !aiAccess.allowed) return billingDeniedResponse(aiAccess);
+  const aiUsage = orgId
+    ? await checkBillingFeature({
+        organizationId: orgId,
+        featureCode: BILLING_FEATURES.AI_REQUESTS_MONTH,
+        requestedUnits: 1,
+        source: "api/ai/draft-response",
+      })
+    : null;
+  if (aiUsage && !aiUsage.allowed) return billingDeniedResponse(aiUsage);
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return Response.json({ error: "AI no configurada. Falta ANTHROPIC_API_KEY." }, { status: 500 });
@@ -87,6 +116,18 @@ export async function POST(request: NextRequest) {
   try {
     const client = new Anthropic({ apiKey });
     const result = await draftResponse(input, client);
+    if (orgId && aiUsage) {
+      await recordBillingUsage({
+        organizationId: orgId,
+        featureCode: BILLING_FEATURES.AI_REQUESTS_MONTH,
+        quantity: 1,
+        idempotencyKey: `ai-draft:${randomUUID()}`,
+        sourceType: "ai_draft",
+        sourceId: input.clientId,
+        periodStart: aiUsage.periodStart,
+        periodEnd: aiUsage.periodEnd,
+      });
+    }
     return Response.json(result);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

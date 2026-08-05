@@ -21,6 +21,12 @@ import {
   isAllowedMime,
   MAX_UPLOAD_BYTES,
 } from "@/lib/media/storage";
+import { BILLING_FEATURES } from "@/lib/billing/features";
+import {
+  billingDeniedResponse,
+  checkBillingFeature,
+  recordBillingUsage,
+} from "@/lib/billing/service";
 
 export const maxDuration = 60; // Vercel serverless: 60s max
 export const runtime = "nodejs"; // needs Buffer/crypto
@@ -87,6 +93,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Billing enforcement (almacenamiento): valida suscripción activa y cupo de
+  // bytes disponible antes de subir. El superadmin queda sin límites.
+  const storageDecision = await checkBillingFeature({
+    organizationId: access.organizationId,
+    featureCode: BILLING_FEATURES.STORAGE_BYTES,
+    requestedUnits: file.size,
+    source: "api/media/upload",
+  });
+  if (!storageDecision.allowed) return billingDeniedResponse(storageDecision);
+
   // Sube al Storage
   const uploaded = await uploadAsset({
     file,
@@ -135,6 +151,18 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   }
+
+  await recordBillingUsage({
+    organizationId: access.organizationId,
+    featureCode: BILLING_FEATURES.STORAGE_BYTES,
+    quantity: uploaded.size,
+    idempotencyKey: `storage:${inserted.storage_path}`,
+    sourceType: "media_upload",
+    sourceId: inserted.id,
+    periodStart: storageDecision.periodStart,
+    periodEnd: storageDecision.periodEnd,
+    metadata: { mime_type: uploaded.mimeType },
+  });
 
   return Response.json({
     ok: true,

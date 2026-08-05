@@ -35,11 +35,18 @@ export function FlowEditor({ flow }: FlowEditorProps) {
       if (flow) {
         await supabase.from("chatbot_flows").update(data).eq("id", flow.id);
       } else {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-        const { data: agent } = await supabase.from("agents").select("organization_id").eq("id", user.id).single();
-        if (!agent) return;
-        await supabase.from("chatbot_flows").insert({ ...data, organization_id: agent.organization_id });
+        // La creación pasa por el backend para aplicar billing enforcement
+        // (automations.flows). Un 402 significa plan sin cupo / sin suscripción.
+        const res = await fetch("/api/chatbot/flows", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          alert(payload?.error || "No se pudo crear el flujo");
+          return;
+        }
       }
       router.push("/chatbot");
     } finally { setSaving(false); }

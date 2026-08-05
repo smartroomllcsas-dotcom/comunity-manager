@@ -33,6 +33,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { rateLimit } from "@/lib/rate-limit";
 import { buildReportPdf, type ReportData, type ReportBranding } from "@/lib/reports/pdf-builder";
 import { generateReportInsights } from "@/lib/reports/insights-generator";
+import { BILLING_FEATURES } from "@/lib/billing/features";
+import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
 
 // @react-pdf/renderer requiere Node runtime (no edge).
 export const runtime = "nodejs";
@@ -301,6 +303,22 @@ export async function POST(req: NextRequest) {
     .maybeSingle();
   if (cErr || !client) {
     return NextResponse.json({ error: "Cliente no encontrado" }, { status: 404 });
+  }
+
+  // 1.b) Billing enforcement (reportes): reports.access requiere suscripción
+  // activa y que el plan habilite la generación de reportes. El superadmin
+  // queda sin límites (checkBillingFeature lo resuelve).
+  const reportsOrgId =
+    (client as { organization_id: string | null }).organization_id ?? null;
+  const reportsDecision = reportsOrgId
+    ? await checkBillingFeature({
+        organizationId: reportsOrgId,
+        featureCode: BILLING_FEATURES.REPORTS_ACCESS,
+        source: "api/reports",
+      })
+    : null;
+  if (reportsDecision && !reportsDecision.allowed) {
+    return billingDeniedResponse(reportsDecision);
   }
 
   // 2) Branding — merge request → defaults

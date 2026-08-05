@@ -14,6 +14,9 @@ import { createClient as createServerSupabase } from "@/lib/supabase/server";
 import { createClient as createSbClient } from "@supabase/supabase-js";
 import { inngest, INNGEST_EVENTS } from "@/lib/inngest/client";
 import { rateLimit } from "@/lib/rate-limit";
+import { getCmClientAccess } from "@/lib/cm-client-access";
+import { BILLING_FEATURES } from "@/lib/billing/features";
+import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
 
 // -- shared helpers -----------------------------------------------------------
 
@@ -184,6 +187,27 @@ export async function POST(req: NextRequest) {
   const parsed = validatePayload(body);
   if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
   const v = parsed.value;
+
+  // Billing enforcement (posts): sólo al CREAR un post nuevo (draft o
+  // programado). La edición de un post existente (v.id presente) no consume
+  // cupo. El conteo mensual real de posts.month se registra al publicar
+  // (ver /api/social/publish y el worker publish-scheduled-post). El superadmin
+  // queda sin límites (checkBillingFeature lo resuelve).
+  if (!v.id) {
+    const access = await getCmClientAccess(req, v.client_id);
+    const orgId = access?.organizationId ?? null;
+    const postsDecision = orgId
+      ? await checkBillingFeature({
+          organizationId: orgId,
+          featureCode: BILLING_FEATURES.POSTS_MONTH,
+          requestedUnits: Math.max(1, v.platforms.length),
+          source: "api/posts",
+        })
+      : null;
+    if (postsDecision && !postsDecision.allowed) {
+      return billingDeniedResponse(postsDecision);
+    }
+  }
 
   const supabase = getPublicAdmin();
 

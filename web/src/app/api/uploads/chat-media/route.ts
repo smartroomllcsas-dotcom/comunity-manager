@@ -9,6 +9,12 @@ import { tmpdir } from "os";
 import path from "path";
 import { promisify } from "util";
 import { fileTypeFromBuffer } from "file-type";
+import { BILLING_FEATURES } from "@/lib/billing/features";
+import {
+  billingDeniedResponse,
+  checkBillingFeature,
+  recordBillingUsage,
+} from "@/lib/billing/service";
 
 const MEDIA_BUCKET = "chat-media";
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
@@ -169,6 +175,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "El archivo supera el límite de 25MB" }, { status: 400 });
   }
 
+  // Billing enforcement (almacenamiento): valida suscripción activa y cupo de
+  // bytes disponible antes de subir el adjunto. El superadmin queda sin límites.
+  const storageDecision = await checkBillingFeature({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.STORAGE_BYTES,
+    requestedUnits: file.size,
+    source: "api/uploads/chat-media",
+  });
+  if (!storageDecision.allowed) return billingDeniedResponse(storageDecision);
+
   const allowed = [
     "image/",
     "video/",
@@ -260,6 +276,18 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+
+  await recordBillingUsage({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.STORAGE_BYTES,
+    quantity: uploadBuffer.byteLength,
+    idempotencyKey: `storage:${MEDIA_BUCKET}:${storagePath}`,
+    sourceType: "chat_media_upload",
+    sourceId: storagePath,
+    periodStart: storageDecision.periodStart,
+    periodEnd: storageDecision.periodEnd,
+    metadata: { bucket: MEDIA_BUCKET, mime_type: uploadMimeType },
+  });
 
   return NextResponse.json({
     url: signed.signedUrl,
