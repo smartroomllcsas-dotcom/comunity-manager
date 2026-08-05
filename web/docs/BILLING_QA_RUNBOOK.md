@@ -161,6 +161,9 @@ política de recepción de mensajes, no como contactos ilimitados.
 - Aplicado en backend: el plan `Free` heredado no sustituye una suscripción y
   `BILLING_ENFORCEMENT_MODE=hard` se respeta aunque la organización conserve el
   valor histórico `observe`.
+- Plataformas comerciales actuales para nuevas marcas: Instagram, Facebook y
+  WhatsApp. Las etiquetas heredadas de otras plataformas no se eliminan de
+  registros existentes y no se alteran sus flujos de conexión.
 - Aplicado en backend y facturación: las lecturas de organización y suscripción
   usan explícitamente las relaciones `plan_id` (`organizations_plan_id_fkey` y
   `subscriptions_plan_id_fkey`). Esto evita que PostgREST confunda los campos

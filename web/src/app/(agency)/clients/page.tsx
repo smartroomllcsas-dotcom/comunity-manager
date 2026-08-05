@@ -51,7 +51,9 @@ const statusStyles: Record<string, string> = {
   paused: 'bg-slate-500/20 text-slate-400',
 }
 
-const allPlatforms = ['Instagram', 'WhatsApp', 'Twitter', 'LinkedIn', 'TikTok', 'Facebook', 'YouTube']
+// These are the only channels currently offered when creating a new brand.
+// Existing records may still contain legacy platform labels and remain visible.
+const allPlatforms = ['Instagram', 'Facebook', 'WhatsApp']
 
 type BillingStatus = 'unlimited' | 'active' | 'trial' | 'past_due' | 'payment_rejected' | 'no_plan' | 'inactive'
 

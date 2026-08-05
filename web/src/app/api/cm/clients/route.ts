@@ -12,12 +12,8 @@ import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
 
 const ALLOWED_PLATFORMS = new Set([
   "Instagram",
-  "WhatsApp",
-  "Twitter",
-  "LinkedIn",
-  "TikTok",
   "Facebook",
-  "YouTube",
+  "WhatsApp",
 ]);
 
 function isLocalMysql() {
