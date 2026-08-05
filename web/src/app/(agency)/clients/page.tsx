@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/components/AuthProvider'
 import WhatsAppConnectButton from '@/components/WhatsAppConnectButton'
@@ -52,6 +53,17 @@ const statusStyles: Record<string, string> = {
 
 const allPlatforms = ['Instagram', 'WhatsApp', 'Twitter', 'LinkedIn', 'TikTok', 'Facebook', 'YouTube']
 
+type BillingStatus = 'unlimited' | 'active' | 'trial' | 'past_due' | 'payment_rejected' | 'no_plan' | 'inactive'
+
+interface BillingStatusPayload {
+  isSuperAdmin?: boolean
+  status: BillingStatus
+  message?: string | null
+  redirect?: string
+}
+
+const ACTIVE_BILLING_STATUSES = new Set<BillingStatus>(['unlimited', 'active', 'trial', 'past_due'])
+
 export default function ClientsPage() {
   const { user } = useAuth()
   const searchParams = useSearchParams()
@@ -70,6 +82,8 @@ export default function ClientsPage() {
   const [whatsappPinByClient, setWhatsappPinByClient] = useState<Record<string, string>>({})
   const [whatsappTestToByClient, setWhatsappTestToByClient] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
+  const [billingLoading, setBillingLoading] = useState(true)
+  const [billingStatus, setBillingStatus] = useState<BillingStatusPayload | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ name: '', industry: '', platforms: [] as string[], language: 'es' })
@@ -131,6 +145,41 @@ export default function ClientsPage() {
   }, [user])
 
   useEffect(() => {
+    let cancelled = false
+
+    if (!user) {
+      setBillingStatus(null)
+      setBillingLoading(false)
+      return
+    }
+
+    setBillingLoading(true)
+    fetch('/api/billing/status', { cache: 'no-store' })
+      .then(async response => {
+        if (!response.ok) throw new Error('billing_status_unavailable')
+        return (await response.json()) as BillingStatusPayload
+      })
+      .then(payload => {
+        if (!cancelled) setBillingStatus(payload)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBillingStatus({
+            status: 'inactive',
+            message: 'No fue posible validar tu suscripción. La creación permanece bloqueada por seguridad.',
+          })
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setBillingLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id])
+
+  useEffect(() => {
     if (!user || loading) return
     for (const client of clients) {
       const social = socials[client.id]
@@ -183,6 +232,13 @@ export default function ClientsPage() {
 
   async function handleAddClient(e: React.FormEvent) {
     e.preventDefault()
+    if (!canCreateClient) {
+      setNotification({
+        type: 'error',
+        message: 'Tu cuenta no tiene un plan activo. Suscríbete a un plan para crear marcas.',
+      })
+      return
+    }
     if (!user || !form.name.trim()) return
     setSaving(true)
     setNotification(null)
@@ -287,6 +343,13 @@ export default function ClientsPage() {
     return `${Math.floor(hrs / 24)}d`
   }
 
+  const canCreateClient =
+    !billingLoading &&
+    Boolean(
+      billingStatus?.isSuperAdmin ||
+        ACTIVE_BILLING_STATUSES.has(billingStatus?.status || 'inactive')
+    )
+
   if (loading) {
     return (
       <div className="p-8 flex items-center justify-center min-h-[60vh]">
@@ -328,7 +391,13 @@ export default function ClientsPage() {
         </div>
         <button
           onClick={() => setShowAddModal(!showAddModal)}
-          className="bg-violet-600 hover:bg-violet-500 text-white rounded-lg px-4 py-2.5 text-sm font-medium transition-colors flex items-center gap-2"
+          disabled={!canCreateClient}
+          title={canCreateClient ? 'Crear una marca' : 'Necesitas una suscripción activa'}
+          className={`rounded-lg px-4 py-2.5 text-sm font-medium transition-colors flex items-center gap-2 ${
+            canCreateClient
+              ? 'bg-violet-600 hover:bg-violet-500 text-white'
+              : 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-70'
+          }`}
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <line x1="12" y1="5" x2="12" y2="19" />
@@ -338,7 +407,24 @@ export default function ClientsPage() {
         </button>
       </div>
 
-      {showAddModal && (
+      {!billingLoading && !canCreateClient && (
+        <div className="mb-6 flex flex-col gap-3 rounded-xl border border-red-400/20 bg-red-950/30 px-4 py-4 text-sm text-slate-200 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-semibold text-white">Creación de marcas bloqueada</p>
+            <p className="mt-1 text-xs text-slate-400">
+              {billingStatus?.message || 'Activa un plan para crear marcas y conectar sus canales.'}
+            </p>
+          </div>
+          <Link
+            href={billingStatus?.redirect || '/settings/billing'}
+            className="inline-flex shrink-0 items-center justify-center rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-900 transition hover:bg-slate-200"
+          >
+            Ver planes
+          </Link>
+        </div>
+      )}
+
+      {showAddModal && canCreateClient && (
         <form onSubmit={handleAddClient} className="mb-6 bg-slate-900 border border-violet-500/30 rounded-xl p-6">
           <h3 className="text-sm font-semibold text-slate-200 mb-4">Nuevo Cliente</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -386,7 +472,7 @@ export default function ClientsPage() {
           <div className="flex items-center gap-3">
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || !canCreateClient}
               className="bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
             >
               {saving ? 'Guardando...' : 'Agregar Cliente'}
@@ -401,7 +487,11 @@ export default function ClientsPage() {
       {clients.length === 0 ? (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
           <p className="text-slate-400 mb-2">Sin clientes aún</p>
-          <p className="text-sm text-slate-500">Haz clic en &quot;Agregar Cliente&quot; para vincular tu primera marca.</p>
+          <p className="text-sm text-slate-500">
+            {canCreateClient
+              ? 'Haz clic en "Agregar Cliente" para vincular tu primera marca.'
+              : 'Activa una suscripción para vincular tu primera marca.'}
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

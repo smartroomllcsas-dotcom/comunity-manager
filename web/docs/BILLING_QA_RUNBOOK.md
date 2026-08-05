@@ -152,6 +152,12 @@ política de recepción de mensajes, no como contactos ilimitados.
 - Aplicado en frontend: aviso global de cuenta no activa, pago rechazado o pago
   pendiente en las vistas privadas; la vista de facturación muestra el motivo
   y conserva los planes disponibles para completar la activación.
+ - Aplicado en frontend: `/clients` valida `/api/billing/status` antes de mostrar
+   el formulario; sin suscripción activa el botón de creación queda deshabilitado,
+   el formulario no se renderiza y se ofrece el enlace para activar un plan.
+ - Aplicado en backend: `POST /api/cm/clients` ejecuta la misma verificación
+   centralizada antes del `INSERT`; una llamada directa sin suscripción responde
+   `402 BILLING_SUBSCRIPTION_REQUIRED`. El superadministrador conserva el bypass.
 - Aplicado en backend: el plan `Free` heredado no sustituye una suscripción y
   `BILLING_ENFORCEMENT_MODE=hard` se respeta aunque la organización conserve el
   valor histórico `observe`.
