@@ -27,8 +27,19 @@ interface OrganizationBillingRow {
   plan_id: string | null;
   billing_enforcement_mode: BillingEnforcementMode | null;
   trial_ends_at: string | null;
+  onboarding_status: OrganizationOnboardingStatus | null;
   plan: { price_monthly: number } | null;
 }
+
+type OrganizationOnboardingStatus =
+  | "not_started"
+  | "pending_payment"
+  | "checkout_started"
+  | "active"
+  | "payment_rejected"
+  | "payment_failed"
+  | "payment_expired"
+  | "cancelled";
 
 interface SubscriptionBillingRow {
   id: string;
@@ -74,10 +85,13 @@ function resolveMode(
   if (globalMode === "off") return "off";
 
   const orgMode = parseMode(organizationMode);
-  if (orgMode === "off") return "off";
+  // The deployment variable is the platform safety floor. Legacy
+  // organizations default to `observe`, so using the old minimum calculation
+  // would silently disable `hard` enforcement for every existing account.
+  if (orgMode === "off") return globalMode;
 
   const levels: BillingEnforcementMode[] = ["off", "observe", "soft", "hard"];
-  return levels[Math.min(levels.indexOf(globalMode), levels.indexOf(orgMode))];
+  return levels[Math.max(levels.indexOf(globalMode), levels.indexOf(orgMode))];
 }
 
 function defaultPeriod() {
@@ -122,12 +136,18 @@ function isSubscriptionUsable(
   organization: OrganizationBillingRow
 ) {
   if (!organization.is_active) return false;
+  if (
+    organization.onboarding_status &&
+    organization.onboarding_status !== "not_started" &&
+    organization.onboarding_status !== "active"
+  ) {
+    return false;
+  }
   if (!subscription) {
-    if (Number(organization.plan?.price_monthly) === 0) return true;
-    return Boolean(
-      organization.trial_ends_at &&
-        new Date(organization.trial_ends_at).getTime() > Date.now()
-    );
+    // `organizations.plan_id` may contain the compatibility Free plan. It is
+    // not proof that the customer completed onboarding or has an entitlement.
+    // A real trial or paid activation is represented by subscriptions.
+    return false;
   }
   if (subscription.status === "active") return true;
   if (
@@ -358,7 +378,7 @@ export async function checkBillingFeature(
   const { data: organization, error: organizationError } = await admin
     .from("organizations")
     .select(
-      "id, is_active, plan_id, billing_enforcement_mode, trial_ends_at, plan:plans(price_monthly)"
+      "id, is_active, plan_id, billing_enforcement_mode, trial_ends_at, onboarding_status, plan:plans(price_monthly)"
     )
     .eq("id", input.organizationId)
     .maybeSingle();
@@ -556,14 +576,22 @@ export async function recordBillingUsage(input: {
 }
 
 export function billingDeniedResponse(decision: BillingDecision) {
+  const subscriptionRequired =
+    decision.reason === "subscription_inactive" ||
+    decision.reason === "organization_inactive";
   return Response.json(
     {
-      error: "Tu plan no permite realizar esta accion.",
-      code: "BILLING_LIMIT_REACHED",
+      error: subscriptionRequired
+        ? "Tu cuenta no tiene un plan activo. Suscríbete a un plan para continuar."
+        : "Tu plan no permite realizar esta acción porque alcanzaste el límite contratado.",
+      code: subscriptionRequired
+        ? "BILLING_SUBSCRIPTION_REQUIRED"
+        : "BILLING_LIMIT_REACHED",
       feature: decision.featureCode,
       reason: decision.reason,
       currentUsage: decision.currentUsage,
       limit: decision.limitValue,
+      redirect: "/settings/billing",
     },
     { status: 402 }
   );

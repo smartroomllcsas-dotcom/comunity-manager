@@ -25,7 +25,8 @@ export function InboxClient({ initialConversations, initialChannels }: InboxClie
   const { data: conversations, isLoading } = useConversations(initialConversations);
   const { data: channels } = useChannels(initialChannels);
   const selectedConversation = conversations?.find((c) => c.id === selectedId);
-  const [showTopPanel, setShowTopPanel] = useState(true);
+  // Keep the dashboard summary closed until the operator explicitly opens it.
+  const [showTopPanel, setShowTopPanel] = useState(false);
 
   useEffect(() => {
     if (!selectedId && conversations?.length) {

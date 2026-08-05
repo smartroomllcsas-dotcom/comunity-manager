@@ -2,12 +2,6 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { PaymentGatewayCode } from "@/lib/payments/types";
 
-const COMMERCIAL_PLAN_CODES = [
-  "demo-inicial-2026",
-  "demo-crecimiento-2026",
-  "demo-escala-2026",
-] as const;
-
 const COMMERCIAL_DESCRIPTIONS: Record<string, string> = {
   "demo-inicial-2026":
     "Para agencias que están centralizando sus primeras marcas y canales.",
@@ -74,7 +68,6 @@ export async function getPublicPlans(): Promise<PublicPlan[]> {
       .select(
         "id, code, name, description, max_agents, max_contacts, ai_enabled, prices:plan_prices(amount_minor, currency, billing_interval, provider, active_from, active_to), entitlements:plan_entitlements(feature_code, enabled, limit_value)"
       )
-      .in("code", [...COMMERCIAL_PLAN_CODES])
       .eq("status", "active")
       .eq("is_public", true),
     admin

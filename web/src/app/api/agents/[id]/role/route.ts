@@ -55,6 +55,15 @@ export async function PATCH(
       { status: 400 }
     );
   }
+  if (targetAgent.member_type === "brand_admin") {
+    return Response.json(
+      {
+        error:
+          "El rol del administrador de marca se gestiona desde su clasificación y no puede cambiarse aquí.",
+      },
+      { status: 400 }
+    );
+  }
 
   const { error } = await admin
     .from("agents")

@@ -2,6 +2,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { WebhookMessage, WebhookContact, WebhookStatus } from "./types";
 import type { MessageContent, MessageType } from "@/types/database";
 import { processIncomingWithChatbot } from "@/lib/chatbot/engine";
+import { checkBillingFeature } from "@/lib/billing/service";
+import { BILLING_FEATURES } from "@/lib/billing/features";
 
 export async function processIncomingMessage(
   message: WebhookMessage,
@@ -32,6 +34,34 @@ export async function processIncomingMessage(
     .eq("id", channel.id);
 
   // 2. Upsert contact
+  const { data: existingContact } = await admin
+    .from("contacts")
+    .select("id")
+    .eq("organization_id", org.id)
+    .eq("brand_id", channel.brand_id)
+    .eq("wa_id", contact.wa_id)
+    .maybeSingle();
+
+  if (!existingContact) {
+    const billingDecision = await checkBillingFeature({
+      organizationId: org.id,
+      featureCode: BILLING_FEATURES.CONTACTS_TOTAL,
+      requestedUnits: 1,
+      source: "webhook/whatsapp/inbound-contact",
+    });
+    if (!billingDecision.allowed) {
+      // Preserve inbound delivery and audit the over-limit condition instead
+      // of returning 4xx/5xx and causing provider retries or message loss.
+      console.warn("[billing] inbound WhatsApp contact over limit; preserving webhook", {
+        organizationId: org.id,
+        brandId: channel.brand_id,
+        channelId: channel.id,
+        currentUsage: billingDecision.currentUsage,
+        limit: billingDecision.limitValue,
+      });
+    }
+  }
+
   const { data: dbContact } = await admin
     .from("contacts")
     .upsert(
@@ -82,16 +112,24 @@ export async function processIncomingMessage(
   // 4. Parse message content
   const { type, content } = parseMessageContent(message);
 
-  // 5. Insert message
-  await admin.from("messages").insert({
-    conversation_id: conversation.id,
-    contact_id: dbContact.id,
-    direction: "inbound",
-    type,
-    content,
-    wa_message_id: message.id,
-    status: "delivered",
-  });
+  // 5. Insert message. Meta may redeliver the same event; the partial
+  // unique index makes 23505 the expected duplicate-delivery result.
+  const { data: insertedMessage, error: messageError } = await admin
+    .from("messages")
+    .insert({
+      conversation_id: conversation.id,
+      contact_id: dbContact.id,
+      direction: "inbound",
+      type,
+      content,
+      wa_message_id: message.id,
+      status: "delivered",
+    })
+    .select("id");
+
+  if (messageError?.code === "23505") return;
+  if (messageError) throw messageError;
+  if (!insertedMessage?.length) return;
 
   // 6. Update conversation
   const preview = content.type === "text" ? content.text.slice(0, 100) : `[${type}]`;

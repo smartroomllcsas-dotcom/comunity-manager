@@ -8,9 +8,10 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { Hero } from "@/components/marketing/Hero";
 import { FeatureGrid } from "@/components/marketing/FeatureGrid";
-import { PricingCards, DEFAULT_PLANS } from "@/components/marketing/PricingCards";
+import { PricingCards, type PricingPlan } from "@/components/marketing/PricingCards";
 import { ComparisonTable } from "@/components/marketing/ComparisonTable";
 import { EmailSignupForm } from "@/components/marketing/EmailSignupForm";
+import { getPublicPlans, type PublicPlan } from "@/lib/billing/public-plans";
 
 export const metadata: Metadata = {
   title: "ComunityManager · Marketing con IA para agencias",
@@ -21,7 +22,39 @@ export const metadata: Metadata = {
 
 const LOGOS = ["CG Moda", "SmartSends", "Bliss", "Katalog", "Nova", "Alba"];
 
-export default function HomePage() {
+export const dynamic = "force-dynamic";
+
+function formatLimit(value: number | null, singular: string, plural = `${singular}s`) {
+  if (value === null) return `${plural[0].toUpperCase()}${plural.slice(1)} ilimitados`;
+  return `${value} ${value === 1 ? singular : plural}`;
+}
+
+function toPricingPlan(plan: PublicPlan, index: number, total: number): PricingPlan {
+  return {
+    code: plan.code,
+    name: plan.name,
+    price: plan.amountMinor / 100,
+    currency: plan.currency,
+    featured: total >= 3 && index === 1,
+    tagline: plan.description || "Gestión multicanal para tu agencia y sus marcas.",
+    features: [
+      formatLimit(plan.maxAgencyUsers, "usuario de agencia", "usuarios de agencia"),
+      formatLimit(plan.maxBrandAdvisors, "asesor de marca", "asesores de marca"),
+      formatLimit(plan.maxBrands, "marca", "marcas"),
+      formatLimit(plan.maxChannels, "canal conectado", "canales conectados"),
+      formatLimit(plan.maxContacts, "contacto", "contactos"),
+      plan.aiEnabled ? "Acceso a inteligencia artificial" : "Sin inteligencia artificial",
+    ],
+    cta: `Elegir ${plan.name}`,
+  };
+}
+
+export default async function HomePage() {
+  const activePlans = await getPublicPlans();
+  const pricingPlans = activePlans.map((plan, index) =>
+    toPricingPlan(plan, index, activePlans.length)
+  );
+
   return (
     <main>
       <Hero
@@ -71,7 +104,13 @@ export default function HomePage() {
           </p>
         </div>
       </section>
-      <PricingCards plans={DEFAULT_PLANS} />
+      {pricingPlans.length > 0 ? (
+        <PricingCards plans={pricingPlans} />
+      ) : (
+        <p className="px-5 pb-16 text-center text-sm text-[#65706d]">
+          No hay planes disponibles en este momento.
+        </p>
+      )}
 
       {/* Final CTA */}
       <section className="mx-5 my-16 overflow-hidden rounded-[2.5rem] bg-[#063c39] px-8 py-16 text-white sm:mx-8 lg:mx-12">

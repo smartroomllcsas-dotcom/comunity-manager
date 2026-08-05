@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getAccessibleConversation } from "@/lib/smarttalk/brand-scope";
 
 export async function POST(
   request: NextRequest,
@@ -20,12 +21,7 @@ export async function POST(
     .single();
   if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
 
-  const { data: conversation } = await admin
-    .from("conversations")
-    .select("id")
-    .eq("id", id)
-    .eq("organization_id", agent.organization_id)
-    .single();
+  const conversation = await getAccessibleConversation(agent, id);
 
   if (!conversation) {
     return Response.json({ error: "Conversation not found" }, { status: 404 });
@@ -70,12 +66,7 @@ export async function DELETE(
     .single();
   if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
 
-  const { data: conversation } = await admin
-    .from("conversations")
-    .select("id")
-    .eq("id", id)
-    .eq("organization_id", agent.organization_id)
-    .single();
+  const conversation = await getAccessibleConversation(agent, id);
 
   if (!conversation) {
     return Response.json({ error: "Conversation not found" }, { status: 404 });

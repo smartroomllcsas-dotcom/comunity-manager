@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getAccessibleConversation } from "@/lib/smarttalk/brand-scope";
 
 export async function GET(
   _request: NextRequest,
@@ -19,7 +20,7 @@ export async function GET(
   const admin = createAdminClient("smarttalk");
   const { data: agent, error: agentError } = await admin
     .from("agents")
-    .select("id, organization_id")
+    .select("id, organization_id, member_type")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -31,16 +32,7 @@ export async function GET(
     return NextResponse.json({ error: "Agent not found" }, { status: 404 });
   }
 
-  const { data: conversation, error: conversationError } = await admin
-    .from("conversations")
-    .select("id")
-    .eq("id", conversationId)
-    .eq("organization_id", agent.organization_id)
-    .maybeSingle();
-
-  if (conversationError) {
-    return NextResponse.json({ error: conversationError.message }, { status: 500 });
-  }
+  const conversation = await getAccessibleConversation(agent, conversationId);
 
   if (!conversation) {
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });

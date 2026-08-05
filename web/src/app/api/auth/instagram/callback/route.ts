@@ -7,6 +7,9 @@ import {
 } from '@/lib/instagram'
 import { subscribeInstagramAccountToApp } from '@/lib/meta'
 import { encryptToken } from '@/lib/auth/token-crypto'
+import { getCmClientAccess } from '@/lib/cm-client-access'
+import { billingDeniedResponse, checkBillingFeature } from '@/lib/billing/service'
+import { BILLING_FEATURES } from '@/lib/billing/features'
 
 const REDIRECT_URI_FALLBACK = 'https://www.comunitymanager.io/'
 
@@ -61,6 +64,40 @@ export async function GET(request: NextRequest) {
     }
 
     const clientId = stateRow.client_id as string
+    const access = await getCmClientAccess(request, clientId)
+    if (!access?.organizationId) {
+      await publicAdminEarly.from('cm_oauth_states').delete().eq('state', state)
+      return NextResponse.redirect(successUrl({ ig_error: 'unauthorized_client' }))
+    }
+
+    const smarttalkAdmin = createAdminClient('smarttalk')
+    const { data: existingInstagramChannel } = await smarttalkAdmin
+      .from('channels')
+      .select('id')
+      .eq('organization_id', access.organizationId)
+      .eq('brand_id', clientId)
+      .eq('type', 'instagram')
+      .neq('status', 'disconnected')
+      .maybeSingle()
+    if (!existingInstagramChannel) {
+      const billingDecision = await checkBillingFeature({
+        organizationId: access.organizationId,
+        featureCode: BILLING_FEATURES.CHANNELS_ACTIVE,
+        requestedUnits: 1,
+        source: 'oauth/instagram',
+      })
+      if (!billingDecision.allowed) {
+        await publicAdminEarly.from('cm_oauth_states').delete().eq('state', state)
+        const denied = billingDeniedResponse(billingDecision)
+        return NextResponse.redirect(
+          successUrl({
+            ig_error: 'billing_limit_reached',
+            billing_status: String(denied.status),
+          })
+        )
+      }
+    }
+
     // Consumo one-shot: eliminamos el state ya validado (evita replay).
     await publicAdminEarly.from('cm_oauth_states').delete().eq('state', state)
 

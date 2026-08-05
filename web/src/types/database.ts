@@ -123,7 +123,7 @@ export interface CMChatMessage {
 
 export type AgentRole = "admin" | "supervisor" | "agent";
 export type AgentStatus = "online" | "away" | "offline";
-export type AgentMemberType = "agency_user" | "brand_advisor";
+export type AgentMemberType = "agency_user" | "brand_admin" | "brand_advisor";
 export type ConversationStatus = "open" | "pending" | "resolved" | "closed";
 export type ConversationPriority = "low" | "medium" | "high";
 export type MessageDirection = "inbound" | "outbound";
@@ -151,6 +151,16 @@ export interface Organization {
   trial_ends_at: string | null;
   is_active: boolean;
   billing_enforcement_mode?: "off" | "observe" | "soft" | "hard";
+  onboarding_plan_id?: string | null;
+  onboarding_status?:
+    | "not_started"
+    | "pending_payment"
+    | "checkout_started"
+    | "active"
+    | "payment_rejected"
+    | "payment_failed"
+    | "payment_expired"
+    | "cancelled";
   created_at: string;
   plan?: Plan;
   cm_client_id?: string | null;

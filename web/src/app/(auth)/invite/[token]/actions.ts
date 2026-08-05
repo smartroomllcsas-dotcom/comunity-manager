@@ -68,11 +68,14 @@ export async function acceptInvitation(token: string, formData: FormData) {
     .from("invitation_brand_assignments")
     .select("brand_id")
     .eq("invitation_id", invitation.id);
-  if (
-    invitation.member_type === "brand_advisor" &&
-    (!brandAssignments || brandAssignments.length === 0)
-  ) {
-    return { error: "La invitacion de asesor no tiene una marca asignada" };
+  const isBrandScopedMember =
+    invitation.member_type === "brand_admin" ||
+    invitation.member_type === "brand_advisor";
+  if (isBrandScopedMember && (!brandAssignments || brandAssignments.length === 0)) {
+    return { error: "La invitacion no tiene una marca asignada" };
+  }
+  if (invitation.member_type === "brand_admin" && (brandAssignments?.length ?? 0) !== 1) {
+    return { error: "El administrador de marca debe tener una única marca asignada" };
   }
 
   // Create the auth user
@@ -101,7 +104,7 @@ export async function acceptInvitation(token: string, formData: FormData) {
     return { error: "Error al crear agente" };
   }
 
-  if (invitation.member_type === "brand_advisor") {
+  if (isBrandScopedMember) {
     const { error: assignmentError } = await admin
       .from("brand_advisor_assignments")
       .insert(
@@ -115,7 +118,7 @@ export async function acceptInvitation(token: string, formData: FormData) {
     if (assignmentError) {
       await admin.from("agents").delete().eq("id", authData.user.id);
       await admin.auth.admin.deleteUser(authData.user.id);
-      return { error: "Error asignando las marcas al asesor" };
+      return { error: "Error asignando las marcas al miembro" };
     }
   }
 

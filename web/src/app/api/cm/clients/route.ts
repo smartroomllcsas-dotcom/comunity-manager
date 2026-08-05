@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
     );
   }
   const isSuperAdmin = agent.is_super_admin === true;
-  if ((!isSuperAdmin && agent.role !== "admin") || (!isSuperAdmin && cmUser.role !== "admin")) {
+  if (!isSuperAdmin && agent.role !== "admin") {
     return Response.json(
       { error: "Solo un administrador puede crear marcas." },
       { status: 403 }

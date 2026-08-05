@@ -78,10 +78,14 @@ export async function POST(request: NextRequest) {
         const { value } = change;
         const phoneNumberId = value.metadata.phone_number_id;
 
-        if (value.messages && value.contacts) {
+        if (value.messages) {
           for (let i = 0; i < value.messages.length; i++) {
             const message = value.messages[i];
-            const contact = value.contacts[i] || value.contacts[0];
+            const contact = value.contacts?.[i] || value.contacts?.[0] || {
+              wa_id: message.from,
+              profile: { name: message.from },
+            };
+            if (!contact?.wa_id) continue;
             await processIncomingMessage(message, contact, phoneNumberId);
           }
         }
@@ -95,6 +99,7 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     console.error("[whatsapp-webhook] SmartTalk processing failed", error);
+    return NextResponse.json({ error: "smarttalk_processing_failed" }, { status: 500 });
   }
 
   return NextResponse.json({ status: "ok" });

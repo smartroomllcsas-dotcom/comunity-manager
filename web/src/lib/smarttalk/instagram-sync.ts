@@ -1,4 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { checkBillingFeature } from "@/lib/billing/service";
+import { BILLING_FEATURES } from "@/lib/billing/features";
 import { findReusableConversation } from "@/lib/smarttalk/conversation-dedupe";
 import { resolveToken } from "@/lib/auth/token-crypto";
 import type { MessageContent, MessageType } from "@/types/database";
@@ -42,6 +44,7 @@ type InstagramMessage = {
   id: string;
   message?: string;
   created_time?: string;
+  is_unsupported?: boolean;
   from?: InstagramParticipant;
   to?: {
     data?: InstagramParticipant[];
@@ -63,6 +66,13 @@ type InstagramMessage = {
 
 type GraphResponse<T> = {
   data?: T[];
+  messages?: {
+    data?: T[];
+    paging?: {
+      next?: string;
+      cursors?: { before?: string; after?: string };
+    };
+  };
   paging?: {
     next?: string;
     cursors?: { before?: string; after?: string };
@@ -82,22 +92,40 @@ type SyncResult = {
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v21.0";
 const GRAPH_URL = `https://graph.facebook.com/${GRAPH_VERSION}`;
+const INSTAGRAM_GRAPH_URL = `https://graph.instagram.com/${GRAPH_VERSION}`;
 const GRAPH_TIMEOUT_MS = 20_000;
 const CONVERSATION_LIMIT = 25;
 const CONVERSATION_MAX_PAGES = 4; // hasta 100 conversaciones por sync
-const MESSAGE_LIMIT = 25;
-const MESSAGE_MAX_PAGES = 4; // hasta 100 mensajes por conversación por sync
+// Meta only exposes full details for the 20 most recent conversation messages.
+const MESSAGE_LIMIT = 20;
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : null;
 }
 
-async function graphGet<T>(path: string, accessToken: string): Promise<GraphResponse<T>> {
+// Meta may include the access token in paging.next. Never persist that URL in
+// inbox_sync_state; graphGet adds the current token when following the cursor.
+function stripGraphAccessToken(path: string | null) {
+  if (!path) return null;
+  const [base, query] = path.split("?", 2);
+  if (!query) return path;
+
+  const params = new URLSearchParams(query);
+  params.delete("access_token");
+  const sanitizedQuery = params.toString();
+  return sanitizedQuery ? `${base}?${sanitizedQuery}` : base;
+}
+
+async function graphGet<T>(
+  path: string,
+  accessToken: string,
+  baseUrl = GRAPH_URL
+): Promise<GraphResponse<T>> {
   const isFullUrl = path.startsWith("https://");
   const separator = path.includes("?") ? "&" : "?";
   const url = isFullUrl
     ? (path.includes("access_token=") ? path : `${path}${separator}access_token=${encodeURIComponent(accessToken)}`)
-    : `${GRAPH_URL}/${path}${separator}access_token=${encodeURIComponent(accessToken)}`;
+    : `${baseUrl}/${path}${separator}access_token=${encodeURIComponent(accessToken)}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GRAPH_TIMEOUT_MS);
 
@@ -119,6 +147,89 @@ async function graphGet<T>(path: string, accessToken: string): Promise<GraphResp
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function graphGetObject<T>(path: string, accessToken: string, baseUrl = GRAPH_URL) {
+  return (await graphGet<T>(path, accessToken, baseUrl)) as unknown as T;
+}
+
+async function getInstagramConversationMessages(
+  conversationId: string,
+  accessToken: string,
+  cursor: string | null
+) {
+  // Instagram returns message summaries nested under `messages.data`.
+  // Message text is exposed by the individual message resource, not by the
+  // Page Graph `/conversation/messages` edge used by the old sync.
+  const startPath = cursor || `${conversationId}?fields=messages&limit=${MESSAGE_LIMIT}`;
+  const graphBases = [GRAPH_URL, INSTAGRAM_GRAPH_URL];
+  let response: GraphResponse<InstagramMessage> | null = null;
+  let messageBaseUrl = GRAPH_URL;
+  let lastError: unknown = null;
+
+  // Facebook Login stores a Page token, while Instagram Login stores an
+  // Instagram user token. Support both API hosts without changing the stored
+  // connection format for existing customers.
+  for (const baseUrl of graphBases) {
+    try {
+      const candidate = await graphGet<InstagramMessage>(startPath, accessToken, baseUrl);
+      const candidateMessages = candidate.messages?.data || candidate.data || [];
+      response = candidate;
+      messageBaseUrl = baseUrl;
+      if (candidateMessages.length > 0 || baseUrl === graphBases.at(-1)) break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (!response) {
+    throw lastError instanceof Error ? lastError : new Error("Instagram messages request failed");
+  }
+
+  const summaries = response.messages?.data || response.data || [];
+  const paging = response.messages?.paging || response.paging;
+
+  const detailedMessages = await Promise.all(
+    summaries
+      .filter((message) => Boolean(message?.id))
+      .slice(0, MESSAGE_LIMIT)
+      .map(async (summary) => {
+        let detail: InstagramMessage | null = null;
+        let detailError: unknown = null;
+        const detailBases = [messageBaseUrl, ...graphBases.filter((baseUrl) => baseUrl !== messageBaseUrl)];
+
+        for (const baseUrl of detailBases) {
+          try {
+            detail = await graphGetObject<InstagramMessage>(
+              `${summary.id}?fields=id,created_time,from,to,message,attachments,sticker`,
+              accessToken,
+              baseUrl
+            );
+            break;
+          } catch (error) {
+            detailError = error;
+          }
+        }
+
+        try {
+          if (detail) return { ...summary, ...detail };
+          throw detailError instanceof Error ? detailError : new Error("Message detail unavailable");
+        } catch (error) {
+          // Meta only exposes details for the 20 most recent messages. Keep
+          // the sync alive for older/unsupported entries and process the rest.
+          console.warn(
+            `[instagram-sync] message detail unavailable for ${summary.id}`,
+            error instanceof Error ? error.message : error
+          );
+          return null;
+        }
+      })
+  );
+
+  return {
+    items: detailedMessages.filter((message): message is InstagramMessage => Boolean(message)),
+    nextCursor: stripGraphAccessToken(paging?.next || null),
+  };
 }
 
 async function graphGetPaginated<T>(
@@ -143,7 +254,7 @@ async function graphGetPaginatedWithCursor<T>(
       throw new Error(`Meta Graph paging error: ${response.error.message || "unknown"}`);
     }
     if (Array.isArray(response.data)) collected.push(...response.data);
-    nextPath = response.paging?.next || null;
+    nextPath = stripGraphAccessToken(response.paging?.next || null);
   }
   // Si aún hay next tras agotar maxPages, es el cursor para el próximo sync.
   return { items: collected, nextCursor: nextPath };
@@ -326,6 +437,24 @@ async function upsertInstagramContact(
     return existing.id as string;
   }
 
+  const billingDecision = await checkBillingFeature({
+    organizationId: channel.organization_id,
+    featureCode: BILLING_FEATURES.CONTACTS_TOTAL,
+    requestedUnits: 1,
+    source: "sync/instagram/inbound-contact",
+  });
+  if (!billingDecision.allowed) {
+    // Polling must not discard a real Instagram interaction because of a
+    // quota. Keep the contact and leave the audited decision for upgrade UX.
+    console.warn("[billing] inbound Instagram contact over limit; preserving sync", {
+      organizationId: channel.organization_id,
+      brandId: channel.brand_id,
+      channelId: channel.id,
+      currentUsage: billingDecision.currentUsage,
+      limit: billingDecision.limitValue,
+    });
+  }
+
   const { data: inserted, error } = await admin
     .from("contacts")
     .insert({
@@ -463,25 +592,17 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
           ? new Date(conversation.updated_time).toISOString()
           : new Date().toISOString();
         const contactId = await upsertInstagramContact(channel, externalContact, updatedAt);
-        const conversationId = await upsertInstagramConversation(
-          channel,
-          contactId,
-          conversation.id,
-          updatedAt
-        );
-
-        result.conversations += 1;
 
         // Cursor persistente por conversación: si el sync anterior paró mid-way, retomamos.
         const savedCursors = syncMeta.messageCursors ?? {};
-        const messageStartPath = savedCursors[conversation.id]
-          || `${encodeURIComponent(conversation.id)}/messages?fields=id,message,from,to,created_time,attachments,sticker&limit=${MESSAGE_LIMIT}`;
+        const messageCursor = savedCursors[conversation.id] || null;
 
-        const { items: messageRows, nextCursor: messagesNextCursor } = await graphGetPaginatedWithCursor<InstagramMessage>(
-          messageStartPath,
-          pageToken,
-          MESSAGE_MAX_PAGES
-        );
+        const { items: messageRows, nextCursor: messagesNextCursor } =
+          await getInstagramConversationMessages(
+            conversation.id,
+            pageToken,
+            messageCursor
+          );
 
         // Actualiza el cursor de esta conversación (o lo limpia si llegamos al final).
         const updatedCursors = { ...savedCursors };
@@ -491,6 +612,21 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
           delete updatedCursors[conversation.id];
         }
         syncMeta.messageCursors = updatedCursors;
+
+        // Meta puede devolver una conversación sin exponer mensajes legibles
+        // (por ejemplo, solicitudes antiguas o mensajes fuera de la ventana
+        // disponible). No la mostramos como una conversación vacía.
+        const readableMessages = messageRows.filter((message) => Boolean(parseInstagramMessage(message)));
+        if (readableMessages.length === 0) continue;
+
+        const conversationId = await upsertInstagramConversation(
+          channel,
+          contactId,
+          conversation.id,
+          updatedAt
+        );
+        result.conversations += 1;
+
         const messageIds = messageRows.map((message) => message.id).filter(Boolean);
 
         const { data: existingMessages } = messageIds.length
@@ -532,15 +668,22 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
           .filter((message): message is NonNullable<typeof message> => Boolean(message));
 
         if (inserts.length > 0) {
-          // ignoreDuplicates cierra la race con el webhook push que puede escribir el mismo wa_message_id.
-          const { data: upserted, error: insertError } = await admin
-            .from("messages")
-            .upsert(inserts, { onConflict: "conversation_id,wa_message_id", ignoreDuplicates: true })
-            .select("id");
-          if (insertError) throw insertError;
-          const insertedCount = upserted?.length ?? 0;
-          result.insertedMessages += insertedCount;
-          result.skippedMessages += inserts.length - insertedCount;
+          // The uniqueness rule is a partial index. Insert one by one so a
+          // webhook/sync race skips only the duplicated message, not the batch.
+          for (const insert of inserts) {
+            const { data: insertedMessage, error: insertError } = await admin
+              .from("messages")
+              .insert(insert)
+              .select("id");
+
+            if (insertError?.code === "23505") {
+              result.skippedMessages += 1;
+              continue;
+            }
+
+            if (insertError) throw insertError;
+            if (insertedMessage?.length) result.insertedMessages += insertedMessage.length;
+          }
         }
         result.skippedMessages += messageRows.length - inserts.length;
 

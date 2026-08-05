@@ -18,6 +18,7 @@ import {
 } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { rateLimit } from "@/lib/rate-limit";
+import { getAccessibleConversation } from "@/lib/smarttalk/brand-scope";
 
 // Sprint 22 hardening: 60 req/min por user para envío de mensajes.
 const MESSAGES_RATE_LIMIT = 60;
@@ -64,6 +65,13 @@ export async function POST(request: NextRequest) {
     type: MessageType;
     content: MessageContent;
   };
+
+  // First enforce server-side brand access. The following read stays on the
+  // authenticated client to preserve RLS on contact/channel joins.
+  const accessibleConversation = await getAccessibleConversation(agent, conversationId);
+  if (!accessibleConversation) {
+    return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+  }
 
   // Nunca traer access_token en el join: si conversation se serializa/loguea, no leakea.
   const { data: conversation } = await supabase

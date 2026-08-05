@@ -3,6 +3,8 @@ import { exchangeWhatsAppCode, getPhoneNumberDetails } from '@/lib/whatsapp-cm'
 import { getCmClientAccess } from '@/lib/cm-client-access'
 import { encryptToken } from '@/lib/auth/token-crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { billingDeniedResponse, checkBillingFeature } from '@/lib/billing/service'
+import { BILLING_FEATURES } from '@/lib/billing/features'
 
 interface ExchangeRequestBody {
   code?: string
@@ -124,6 +126,18 @@ export async function POST(request: NextRequest) {
       (existingChannel.organization_id !== access.organizationId || existingChannel.brand_id !== client_id)
     ) {
       throw new Error('Este número de WhatsApp ya está conectado a otra marca')
+    }
+
+    if (!existingChannel) {
+      const billingDecision = await checkBillingFeature({
+        organizationId: access.organizationId,
+        featureCode: BILLING_FEATURES.CHANNELS_ACTIVE,
+        requestedUnits: 1,
+        source: 'oauth/whatsapp-exchange',
+      })
+      if (!billingDecision.allowed) {
+        return billingDeniedResponse(billingDecision)
+      }
     }
 
     const { error: channelError } = existingChannel

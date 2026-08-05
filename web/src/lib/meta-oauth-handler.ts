@@ -13,6 +13,8 @@ import {
 import { supabaseAdmin } from '@/lib/supabase'
 import { getCmClientAccess } from '@/lib/cm-client-access'
 import { encryptToken } from '@/lib/crypto'
+import { checkBillingFeature, billingDeniedResponse } from '@/lib/billing/service'
+import { BILLING_FEATURES } from '@/lib/billing/features'
 
 export async function initiateMetaOAuth(request: NextRequest, callbackPath: string) {
   const clientId = request.nextUrl.searchParams.get('clientId')
@@ -32,9 +34,11 @@ export async function initiateMetaOAuth(request: NextRequest, callbackPath: stri
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin
   const redirectUri = `${appUrl}${callbackPath}`
   const isFacebookOnly = callbackPath.includes('/auth/facebook/callback')
+  const facebookConfigId = process.env.META_FACEBOOK_CONFIG_ID?.trim()
   const authUrl = getOAuthUrl(redirectUri, state, {
     includeInstagramMessaging: !isFacebookOnly,
     includeAds: !isFacebookOnly,
+    configId: isFacebookOnly ? facebookConfigId : undefined,
   })
   return NextResponse.redirect(authUrl)
 }
@@ -65,6 +69,11 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
   await supabaseAdmin.from('cm_oauth_states').delete().eq('state', state)
 
   try {
+    const access = await getCmClientAccess(request, clientId)
+    if (!access?.organizationId) {
+      return NextResponse.redirect(`${appUrl}/clients?meta_error=No+autorizado+para+esta+marca`)
+    }
+
     const redirectUri = `${appUrl}${callbackPath}`
     const shortToken = await exchangeCodeForToken(code, redirectUri)
     const longToken = await getLongLivedToken(shortToken.access_token)
@@ -75,10 +84,59 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
       return NextResponse.redirect(`${appUrl}/clients?meta_error=No+se+encontraron+paginas+de+Facebook`)
     }
 
-    const page = pages[0]
+    // Facebook may return several pages. For the Instagram flow, prefer the
+    // page that actually exposes its linked Instagram Business account instead
+    // of always taking the first page returned by Meta.
+    const page = flow === 'facebook'
+      ? pages[0]
+      : pages.find((candidate: { instagram_business_account?: unknown }) => candidate.instagram_business_account) || pages[0]
     const igAccount = flow === 'facebook' ? null : page.instagram_business_account
+
+    if (flow !== 'facebook' && !igAccount) {
+      return NextResponse.redirect(
+        `${appUrl}/clients?meta_error=${encodeURIComponent('No se encontró una cuenta de Instagram Business asociada a las páginas autorizadas')}`
+      )
+    }
     const adAccounts = flow === 'facebook' ? [] : await getUserAdAccounts(longToken.access_token)
     const adAccount = adAccounts[0]
+
+    // The OAuth record is legacy data. The actual billable resources are the
+    // SmartTalk channels created by the sync step, so reserve only channels
+    // that do not already exist for this brand.
+    const expectedTypes = flow === 'facebook'
+      ? ['facebook_messenger']
+      : ['facebook_messenger', 'instagram']
+    const { data: currentChannels } = await supabaseAdmin
+      .schema('smarttalk')
+      .from('channels')
+      .select('type, status')
+      .eq('organization_id', access.organizationId)
+      .eq('brand_id', clientId)
+    const currentChannelRows = (currentChannels || []) as Array<{
+      type: string
+      status: string
+    }>
+    const currentTypes = new Set(
+      currentChannelRows
+        .filter((channel) => channel.status !== 'disconnected')
+        .map((channel) => channel.type)
+    )
+    const requestedUnits = expectedTypes.filter((type) => !currentTypes.has(type)).length
+    if (requestedUnits > 0) {
+      const billingDecision = await checkBillingFeature({
+        organizationId: access.organizationId,
+        featureCode: BILLING_FEATURES.CHANNELS_ACTIVE,
+        requestedUnits,
+        source: `oauth/meta/${flow}`,
+      })
+      if (!billingDecision.allowed) {
+        const denied = billingDeniedResponse(billingDecision)
+        return NextResponse.redirect(
+          `${appUrl}/clients?meta_error=${encodeURIComponent('El plan contratado no permite conectar mas canales')}&billing_status=${denied.status}`
+        )
+      }
+    }
+
     const tokenExpires = new Date()
     tokenExpires.setSeconds(tokenExpires.getSeconds() + (longToken.expires_in || 5184000))
 

@@ -6,7 +6,22 @@ import {
   checkBillingFeature,
 } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
-import { getBrandInOrganization } from "@/lib/smarttalk/brand-scope";
+import {
+  getAgentBrandIds,
+  getBrandInOrganization,
+} from "@/lib/smarttalk/brand-scope";
+
+function canManageChannels(agent: {
+  role: string;
+  member_type?: string | null;
+  is_super_admin?: boolean | null;
+}) {
+  return (
+    agent.is_super_admin === true ||
+    (agent.role === "admin" && agent.member_type === "agency_user") ||
+    agent.member_type === "brand_admin"
+  );
+}
 
 export async function GET() {
   const supabase = await createClient();
@@ -28,9 +43,14 @@ export async function GET() {
     .eq("organization_id", agent.organization_id)
     .order("created_at", { ascending: false });
 
+  const assignedBrandIds = await getAgentBrandIds(agent);
+  const visibleChannels = assignedBrandIds
+    ? (channels || []).filter((channel) => assignedBrandIds.includes(channel.brand_id))
+    : channels;
+
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
-  return Response.json({ channels });
+  return Response.json({ channels: visibleChannels || [] });
 }
 
 export async function POST(request: NextRequest) {
@@ -47,7 +67,7 @@ export async function POST(request: NextRequest) {
     .single();
   if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
 
-  if (agent.role !== "admin") {
+  if (!canManageChannels(agent)) {
     return Response.json({ error: "Solo los administradores pueden crear canales" }, { status: 403 });
   }
 
@@ -74,6 +94,10 @@ export async function POST(request: NextRequest) {
   const brand = await getBrandInOrganization(brandId, agent.organization_id);
   if (!brand) {
     return Response.json({ error: "La marca no pertenece a esta organización" }, { status: 403 });
+  }
+  const assignedBrandIds = await getAgentBrandIds(agent);
+  if (assignedBrandIds && !assignedBrandIds.includes(brand.id)) {
+    return Response.json({ error: "No autorizado para esta marca" }, { status: 403 });
   }
 
   const { data: channel, error } = await admin

@@ -1,10 +1,10 @@
-import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
 
 export interface PricingPlan {
   code: string;
   name: string;
-  price: number; // USD/mo
+  price: number;
+  currency?: string;
   featured?: boolean;
   tagline: string;
   features: string[];
@@ -16,6 +16,7 @@ export const DEFAULT_PLANS: PricingPlan[] = [
     code: "starter",
     name: "Starter",
     price: 99,
+    currency: "USD",
     tagline: "Para freelancers y agencias arrancando",
     features: [
       "1 cliente activo",
@@ -31,6 +32,7 @@ export const DEFAULT_PLANS: PricingPlan[] = [
     code: "growth",
     name: "Growth",
     price: 299,
+    currency: "USD",
     featured: true,
     tagline: "El favorito de las agencias en crecimiento",
     features: [
@@ -48,6 +50,7 @@ export const DEFAULT_PLANS: PricingPlan[] = [
     code: "agency",
     name: "Agency",
     price: 799,
+    currency: "USD",
     tagline: "Para agencias grandes con equipos completos",
     features: [
       "20 clientes activos",
@@ -69,6 +72,8 @@ interface PricingCardsProps {
 
 function PlanCard({ plan }: { plan: PricingPlan }) {
   const featured = plan.featured ?? false;
+  const currency = plan.currency ?? "USD";
+  const formattedPrice = plan.price.toLocaleString("es-CO");
   return (
     <article
       className={`relative flex flex-col rounded-[2rem] border p-7 ${
@@ -90,11 +95,11 @@ function PlanCard({ plan }: { plan: PricingPlan }) {
         {plan.name}
       </p>
       <div className="mt-5 flex items-end gap-2">
-        <span className="text-5xl font-black tracking-tight">${plan.price}</span>
+        <span className="text-5xl font-black tracking-tight">${formattedPrice}</span>
         <span
           className={`pb-2 text-sm ${featured ? "text-[#b6d8d3]" : "text-[#65706d]"}`}
         >
-          USD / mes
+          {currency} / mes
         </span>
       </div>
       <p
@@ -116,7 +121,7 @@ function PlanCard({ plan }: { plan: PricingPlan }) {
           </li>
         ))}
       </ul>
-      <Link
+      <a
         href={`/register?plan=${encodeURIComponent(plan.code)}`}
         className={`mt-8 inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-bold transition-transform hover:-translate-y-0.5 ${
           featured
@@ -126,22 +131,25 @@ function PlanCard({ plan }: { plan: PricingPlan }) {
       >
         {plan.cta ?? `Elegir ${plan.name}`}
         <ArrowRight className="h-4 w-4" />
-      </Link>
+      </a>
     </article>
   );
 }
 
 export function PricingCards({ plans = DEFAULT_PLANS }: PricingCardsProps) {
+  const currencies = [...new Set(plans.map((plan) => plan.currency ?? "USD"))];
+  const currencyLabel = currencies.length === 1 ? currencies[0] : "COP y USD";
+
   return (
-    <section className="px-5 py-16 sm:px-8 lg:px-12">
+    <section id="planes" className="scroll-mt-6 px-5 py-16 sm:px-8 lg:px-12">
       <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-3">
         {plans.map((plan) => (
           <PlanCard key={plan.code} plan={plan} />
         ))}
       </div>
       <p className="mx-auto mt-8 max-w-2xl text-center text-sm text-[#65706d]">
-        Precios en USD. Puedes cambiar de plan en cualquier momento. Facturación
-        mensual sin permanencia.
+        Precios en {currencyLabel}. Puedes cambiar de plan en cualquier momento.
+        Facturación mensual sin permanencia.
       </p>
     </section>
   );

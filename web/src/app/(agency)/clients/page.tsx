@@ -542,8 +542,18 @@ export default function ClientsPage() {
                         <div className="w-2 h-2 rounded-full bg-emerald-500" />
                         <span className="text-[11px] font-medium text-emerald-400">WhatsApp Conectado</span>
                       </div>
-                      <p className="text-[11px] text-slate-400">
-                        {whatsapp.verified_name || whatsapp.display_phone_number || whatsapp.phone_number_id}
+                      {whatsapp.verified_name && (
+                        <p className="text-[11px] text-slate-300">
+                          Empresa: <span className="text-emerald-300">{whatsapp.verified_name}</span>
+                        </p>
+                      )}
+                      <p className="mt-1 text-[11px] text-slate-300">
+                        Número:{' '}
+                        {whatsapp.display_phone_number ? (
+                          <span className="font-medium text-white">{whatsapp.display_phone_number}</span>
+                        ) : (
+                          <span className="text-amber-300">No disponible. Reconecta para actualizarlo.</span>
+                        )}
                       </p>
                       <a
                         href={`/clients/${client.id}/whatsapp`}
@@ -551,6 +561,15 @@ export default function ClientsPage() {
                       >
                         Ver WhatsApp
                       </a>
+                      <div className="mt-2">
+                        <WhatsAppConnectButton
+                          clientId={client.id}
+                          userId={user?.id}
+                          onConnected={loadData}
+                          compact
+                          label="Reconectar WhatsApp"
+                        />
+                      </div>
                     </div>
                   ) : (
                     <div className="mb-3">

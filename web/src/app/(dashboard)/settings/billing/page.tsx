@@ -130,7 +130,15 @@ export default function BillingSettingsPage() {
 
   // An approved payment creates the subscription first. Prefer that plan and
   // keep organizations.plan_id as a compatibility fallback for legacy data.
-  const currentPlan = subscription?.plan || org?.plan || null;
+  const isSuperAdmin = currentAgent?.is_super_admin === true;
+  const pendingActivation =
+    !subscription &&
+    ["pending_payment", "checkout_started", "payment_rejected", "payment_failed", "payment_expired", "cancelled"].includes(
+      org?.onboarding_status || ""
+    );
+  const currentPlan = isSuperAdmin
+    ? null
+    : subscription?.plan || (pendingActivation ? null : org?.plan) || null;
   const entitlementLimit = (featureCode: string, fallback: number | null = null) =>
     currentPlan?.entitlements?.find((item) => item.feature_code === featureCode)?.limit_value ?? fallback;
 
@@ -167,9 +175,11 @@ export default function BillingSettingsPage() {
                 <Crown className="h-5 w-5 text-blue-400" />
               </div>
               <div>
-                <h2 className="text-lg font-bold text-white">{currentPlan?.name || "Sin plan"}</h2>
+                <h2 className="text-lg font-bold text-white">{isSuperAdmin ? "Super Admin" : currentPlan?.name || "Sin plan"}</h2>
                 <p className="text-sm text-[#8b949e]">
-                  {currentPlan
+                  {isSuperAdmin
+                    ? "Acceso ilimitado de plataforma"
+                    : currentPlan
                     ? currentPlan.price_monthly === 0
                       ? "Gratis"
                       : `$${currentPlan.price_monthly}/mes`
@@ -230,6 +240,18 @@ export default function BillingSettingsPage() {
               )}
             </div>
           )}
+
+          {isSuperAdmin && (
+            <p className="mt-4 rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200">
+              Esta cuenta es el propietario de la plataforma y no requiere pagar una suscripción.
+            </p>
+          )}
+
+          {!isSuperAdmin && pendingActivation && (
+            <p className="mt-4 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+              Tu cuenta no está activa. Debes suscribirte a un plan y completar el pago para habilitar marcas, canales, contactos y equipo.
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -268,37 +290,37 @@ export default function BillingSettingsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <ProgressBar
               current={usage.agents}
-              max={currentPlan ? currentPlan.max_agents : 0}
+              max={isSuperAdmin ? null : currentPlan ? currentPlan.max_agents : 0}
               label="Usuarios de agencia"
             />
             <ProgressBar
               current={usage.advisors}
-              max={currentPlan ? entitlementLimit("brand.advisors_total") : 0}
+              max={isSuperAdmin ? null : currentPlan ? entitlementLimit("brand.advisors_total") : 0}
               label="Asesores de marca"
             />
             <ProgressBar
               current={usage.brands}
-              max={currentPlan ? entitlementLimit("brands.total") : 0}
+              max={isSuperAdmin ? null : currentPlan ? entitlementLimit("brands.total") : 0}
               label="Marcas"
             />
             <ProgressBar
               current={usage.channels}
-              max={currentPlan ? entitlementLimit("channels.active") : 0}
+              max={isSuperAdmin ? null : currentPlan ? entitlementLimit("channels.active") : 0}
               label="Canales activos"
             />
             <ProgressBar
               current={usage.contacts}
-              max={currentPlan ? currentPlan.max_contacts : 0}
+              max={isSuperAdmin ? null : currentPlan ? currentPlan.max_contacts : 0}
               label="Contactos"
             />
             <ProgressBar
               current={usage.broadcasts}
-              max={currentPlan?.max_broadcasts_per_month ?? 0}
+              max={isSuperAdmin ? null : currentPlan?.max_broadcasts_per_month ?? 0}
               label="Broadcasts este mes"
             />
             <ProgressBar
               current={usage.flows}
-              max={currentPlan?.max_chatbot_flows ?? 0}
+              max={isSuperAdmin ? null : currentPlan?.max_chatbot_flows ?? 0}
               label="Flujos de chatbot"
             />
           </div>
@@ -341,7 +363,7 @@ export default function BillingSettingsPage() {
         )}
 
         {/* Available Plans */}
-        <div>
+        {!isSuperAdmin && <div>
           <h2 className="text-sm font-semibold text-white mb-3">Cambiar plan</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {plans.map((plan) => {
@@ -442,7 +464,7 @@ export default function BillingSettingsPage() {
               );
             })}
           </div>
-        </div>
+        </div>}
 
         {/* Payment history */}
         {payments.length > 0 && (

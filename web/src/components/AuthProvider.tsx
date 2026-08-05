@@ -21,7 +21,12 @@ export function useAuth() {
 
 const PUBLIC_ROUTES = new Set([
   '/',
+  '/about',
+  '/docs',
+  '/features',
   '/login',
+  '/pricing',
+  '/register',
   '/st/login',
   '/privacy-policy',
   '/data-deletion',
@@ -41,7 +46,7 @@ const SMARTTALK_PREFIXES = [
 ]
 
 function isSmarttalkArea(pathname: string) {
-  if (pathname.startsWith('/register') || pathname.startsWith('/invite')) return true
+  if (pathname.startsWith('/invite')) return true
   return SMARTTALK_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 }
 

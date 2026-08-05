@@ -3,6 +3,8 @@ import { createHmac, randomUUID, timingSafeEqual } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findReusableConversation } from "@/lib/smarttalk/conversation-dedupe";
 import { resolveToken } from "@/lib/auth/token-crypto";
+import { checkBillingFeature } from "@/lib/billing/service";
+import { BILLING_FEATURES } from "@/lib/billing/features";
 import {
   buildDisplayName,
   extractContactId,
@@ -219,6 +221,25 @@ async function upsertContactAndConversation(
   let dbContactId = existingContact?.id as string | undefined;
 
   if (!dbContactId) {
+    const billingDecision = await checkBillingFeature({
+      organizationId: channel.organization_id,
+      featureCode: BILLING_FEATURES.CONTACTS_TOTAL,
+      requestedUnits: 1,
+      source: `webhook/${channel.type}/inbound-contact`,
+    });
+    if (!billingDecision.allowed) {
+      // Never reject a provider webhook because of a commercial quota. The
+      // event must remain deliverable; the blocked decision is audited and
+      // the customer can upgrade without losing the inbound message.
+      console.warn("[billing] inbound contact over limit; preserving webhook", {
+        organizationId: channel.organization_id,
+        brandId: channel.brand_id,
+        channelId: channel.id,
+        currentUsage: billingDecision.currentUsage,
+        limit: billingDecision.limitValue,
+      });
+    }
+
     const { data: inserted, error } = await admin
       .from("contacts")
       .insert({
@@ -339,9 +360,12 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
     const channelToken = resolveToken(channel.access_token_ciphertext, channel.access_token);
     if (channel.type === "facebook_messenger" && channelToken) {
       profile = await fetchMessengerProfile(channelToken, contactId);
-      if (!profile && channel.meta_business_id) {
+      const pageId = typeof channel.config?.legacy_id === "string"
+        ? channel.config.legacy_id
+        : channel.meta_business_id;
+      if (!profile && pageId) {
         profile = await fetchMessengerParticipantIdentity(
-          channel.meta_business_id,
+          pageId,
           channelToken,
           contactId
         );
@@ -399,31 +423,29 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
         ? parsed.content.text.slice(0, 100)
         : `[${parsed.type}]`;
 
-      // UNIQUE(conversation_id, wa_message_id) respalda la idempotencia:
-      // ignoreDuplicates→ INSERT ... ON CONFLICT DO NOTHING; array vacío = duplicado.
+      // Insert directly instead of using ON CONFLICT against the partial
+      // unique index. A 23505 is the expected duplicate-delivery case.
       const { data: insertedMessage, error: messageError } = await admin
         .from("messages")
-        .upsert(
-          {
-            conversation_id: conversationId,
-            contact_id: dbContactId,
-            direction,
-            type: parsed.type,
-            content: parsed.content,
-            wa_message_id: providerMessageId,
-            status: direction === "outbound" ? "sent" : "delivered",
-            is_bot: false,
-          },
-          { onConflict: "conversation_id,wa_message_id", ignoreDuplicates: true }
-        )
+        .insert({
+          conversation_id: conversationId,
+          contact_id: dbContactId,
+          direction,
+          type: parsed.type,
+          content: parsed.content,
+          wa_message_id: providerMessageId,
+          status: direction === "outbound" ? "sent" : "delivered",
+          is_bot: false,
+        })
         .select("id");
 
-      if (messageError) {
+      const isDuplicate = messageError?.code === "23505";
+      if (messageError && !isDuplicate) {
         console.error("[meta-webhook] error guardando mensaje", messageError.message);
-        continue;
+        throw messageError;
       }
 
-      const isDuplicate = !insertedMessage || insertedMessage.length === 0;
+      const duplicateDelivery = isDuplicate || !insertedMessage || insertedMessage.length === 0;
 
       await admin
         .from("conversations")
@@ -431,7 +453,7 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
           unread_count:
             direction === "outbound"
               ? 0
-              : isDuplicate
+              : duplicateDelivery
                 ? unreadCount
                 : unreadCount + 1,
           last_message_preview: preview,
@@ -440,7 +462,7 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
         })
         .eq("id", conversationId);
 
-      if (!isDuplicate) processed += 1;
+      if (!duplicateDelivery) processed += 1;
     }
 
     for (const change of entry.changes || []) {
@@ -487,27 +509,25 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
         const waMessageId = message.mid || message.id || randomUUID();
         const { data: insertedMessage, error: messageError } = await admin
           .from("messages")
-          .upsert(
-            {
-              conversation_id: conversationId,
-              contact_id: dbContactId,
-              direction: message.is_echo ? "outbound" : "inbound",
-              type: parsed.type,
-              content: parsed.content,
-              wa_message_id: waMessageId,
-              status: message.is_echo ? "sent" : "delivered",
-              is_bot: false,
-            },
-            { onConflict: "conversation_id,wa_message_id", ignoreDuplicates: true }
-          )
+          .insert({
+            conversation_id: conversationId,
+            contact_id: dbContactId,
+            direction: message.is_echo ? "outbound" : "inbound",
+            type: parsed.type,
+            content: parsed.content,
+            wa_message_id: waMessageId,
+            status: message.is_echo ? "sent" : "delivered",
+            is_bot: false,
+          })
           .select("id");
 
-        if (messageError) {
+        const isDuplicate = messageError?.code === "23505";
+        if (messageError && !isDuplicate) {
           console.error("[meta-webhook] error guardando mensaje", messageError.message);
-          continue;
+          throw messageError;
         }
 
-        const isDuplicate = !insertedMessage || insertedMessage.length === 0;
+        const duplicateDelivery = isDuplicate || !insertedMessage || insertedMessage.length === 0;
 
         await admin
           .from("conversations")
@@ -515,7 +535,7 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
             unread_count:
               message.is_echo
                 ? 0
-                : isDuplicate
+                : duplicateDelivery
                   ? unreadCount
                   : unreadCount + 1,
             last_message_preview: preview,
@@ -524,7 +544,7 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
           })
           .eq("id", conversationId);
 
-        if (!isDuplicate) processed += 1;
+        if (!duplicateDelivery) processed += 1;
       }
 
       const statuses = value.statuses || [];

@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAgentBrandIds, getBrandInOrganization } from "@/lib/smarttalk/brand-scope";
+import { checkBillingFeature } from "@/lib/billing/service";
+import { BILLING_FEATURES } from "@/lib/billing/features";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -132,6 +134,20 @@ export async function POST(request: NextRequest) {
 
           updated++;
         } else {
+          const billingDecision = await checkBillingFeature({
+            organizationId: agent.organization_id,
+            featureCode: BILLING_FEATURES.CONTACTS_TOTAL,
+            requestedUnits: 1,
+            source: "contacts/import",
+          });
+          if (!billingDecision.allowed) {
+            skipped++;
+            errors.push(
+              `Fila ${rowIdx + 2}: limite de contactos alcanzado (${billingDecision.currentUsage ?? 0}/${billingDecision.limitValue ?? 0})`
+            );
+            continue;
+          }
+
           // Create new contact
           await admin
             .from("contacts")

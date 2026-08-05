@@ -22,6 +22,10 @@ import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { rateLimit } from "@/lib/rate-limit";
 import { makeConversationKey } from "@/lib/inbox/conversation-key";
+import {
+  agentCanAccessBrand,
+  getBrandScopeAgent,
+} from "@/lib/smarttalk/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -128,15 +132,8 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminClient("public");
 
-  // Verificar que el user pertenece a la org del client via smarttalk.agents.
-  const smart = await createServerClient();
-  const { data: agentRow } = await smart
-    .from("agents")
-    .select("organization_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (!agentRow?.organization_id) {
+  const agentRow = await getBrandScopeAgent(user.id);
+  if (!agentRow || !(await agentCanAccessBrand(agentRow, clientId))) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
@@ -225,9 +222,10 @@ export async function GET(req: NextRequest) {
     let stQ = stAdmin
       .from("conversations")
       .select(
-        "id, channel_type, contact_id, last_message_at, last_message_preview, unread_count, status, assigned_agent_id, organization_id",
+        "id, channel_type, contact_id, last_message_at, last_message_preview, unread_count, status, assigned_agent_id, organization_id, brand_id",
       )
       .eq("organization_id", agentRow.organization_id)
+      .eq("brand_id", clientId)
       .order("last_message_at", { ascending: false })
       .limit(200);
     if (platform) stQ = stQ.eq("channel_type", platform);

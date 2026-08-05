@@ -1,7 +1,8 @@
 "use client";
 import { useCurrentAgent } from "@/hooks/useCurrentAgent";
-import { createClient } from "@/lib/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, usePathname } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import { Bell } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -38,11 +39,19 @@ export function Header() {
   const { data: agent } = useCurrentAgent();
   const router = useRouter();
   const pathname = usePathname();
+  const queryClient = useQueryClient();
   const supabase = createClient();
 
   async function handleStatusChange(status: "online" | "away" | "offline") {
     if (!agent) return;
-    await supabase.from("agents").update({ status }).eq("id", agent.id);
+    const response = await fetch("/api/agents/status", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    if (response.ok) {
+      await queryClient.invalidateQueries({ queryKey: ["current-agent"] });
+    }
   }
 
   async function handleLogout() {

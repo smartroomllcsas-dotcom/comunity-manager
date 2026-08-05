@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getAccessibleConversation } from "@/lib/smarttalk/brand-scope";
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -21,13 +22,7 @@ export async function GET(request: NextRequest) {
     return Response.json({ error: "conversationId is required" }, { status: 400 });
   }
 
-  // Verify conversation belongs to agent's org
-  const { data: conversation } = await admin
-    .from("conversations")
-    .select("id")
-    .eq("id", conversationId)
-    .eq("organization_id", agent.organization_id)
-    .single();
+  const conversation = await getAccessibleConversation(agent, conversationId);
 
   if (!conversation) {
     return Response.json({ error: "Conversation not found" }, { status: 404 });
@@ -63,13 +58,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "conversationId and content are required" }, { status: 400 });
   }
 
-  // Verify conversation belongs to agent's org
-  const { data: conversation } = await admin
-    .from("conversations")
-    .select("id")
-    .eq("id", conversationId)
-    .eq("organization_id", agent.organization_id)
-    .single();
+  const conversation = await getAccessibleConversation(agent, conversationId);
 
   if (!conversation) {
     return Response.json({ error: "Conversation not found" }, { status: 404 });

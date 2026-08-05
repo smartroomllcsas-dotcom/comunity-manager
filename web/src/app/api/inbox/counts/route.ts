@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { rateLimit } from "@/lib/rate-limit";
+import { getAgentBrandIds, getBrandScopeAgent } from "@/lib/smarttalk/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -32,21 +33,24 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const { data: agentRow } = await supabase
-    .from("agents")
-    .select("organization_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const agentRow = await getBrandScopeAgent(user.id);
   if (!agentRow?.organization_id) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
+  const assignedBrandIds = await getAgentBrandIds(agentRow);
+  if (assignedBrandIds && assignedBrandIds.length === 0) {
+    return NextResponse.json({ unread_total: 0, by_client: [], by_platform: [] });
+  }
+
   const admin = createAdminClient("public");
-  const { data: rows, error } = await admin
+  let mentionsQuery = admin
     .from("cm_mentions")
     .select("client_id, platform, is_processed, responded_at, metadata")
     .eq("organization_id", agentRow.organization_id)
     .limit(5000);
+  if (assignedBrandIds) mentionsQuery = mentionsQuery.in("client_id", assignedBrandIds);
+  const { data: rows, error } = await mentionsQuery;
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -73,12 +77,14 @@ export async function GET(req: NextRequest) {
   // Merge unread de smarttalk si el schema existe (best-effort).
   try {
     const st = createAdminClient("smarttalk");
-    const { data: convs } = await st
+    let conversationsQuery = st
       .from("conversations")
       .select("channel_type, unread_count")
       .eq("organization_id", agentRow.organization_id)
       .gt("unread_count", 0)
       .limit(2000);
+    if (assignedBrandIds) conversationsQuery = conversationsQuery.in("brand_id", assignedBrandIds);
+    const { data: convs } = await conversationsQuery;
     for (const c of convs ?? []) {
       const n = (c as { unread_count: number }).unread_count ?? 0;
       const p = (c as { channel_type: string }).channel_type;

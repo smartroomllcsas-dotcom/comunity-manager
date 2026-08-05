@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
+import { BILLING_FEATURES } from "@/lib/billing/features";
 
 type LegacySocialAccount = {
   id: string;
   client_id: string;
   meta_user_id: string;
-  access_token: string;
+  access_token: string | null;
+  access_token_ciphertext: string | null;
   page_id: string | null;
   page_name: string | null;
   page_access_token: string | null;
+  page_access_token_ciphertext: string | null;
   instagram_id: string | null;
   instagram_username: string | null;
   business_id: string | null;
@@ -125,7 +129,7 @@ export async function POST(_request: NextRequest) {
 
   const { data: socialRows, error: socialError } = await publicAdmin
     .from("cm_social_accounts")
-    .select("id,client_id,meta_user_id,access_token,page_id,page_name,page_access_token,instagram_id,instagram_username,business_id,connected_at,updated_at")
+    .select("id,client_id,meta_user_id,access_token,access_token_ciphertext,page_id,page_name,page_access_token,page_access_token_ciphertext,instagram_id,instagram_username,business_id,connected_at,updated_at")
     .in("client_id", brandIds);
 
   if (socialError) {
@@ -149,7 +153,10 @@ export async function POST(_request: NextRequest) {
         whatsapp_phone_number_id: null,
         whatsapp_business_account_id: null,
         whatsapp_phone_number: null,
-        access_token: account.page_access_token || account.access_token || null,
+        access_token: account.page_access_token_ciphertext || account.access_token_ciphertext
+          ? null
+          : account.page_access_token || account.access_token || null,
+        access_token_ciphertext: account.page_access_token_ciphertext || account.access_token_ciphertext || null,
         facebook_app_id: null,
         meta_business_id: account.business_id || account.page_id,
         config: {
@@ -171,6 +178,14 @@ export async function POST(_request: NextRequest) {
         }
         results.push({ type: "facebook_messenger", action: "updated", name: payload.name });
       } else {
+        const billingDecision = await checkBillingFeature({
+          organizationId: org.organizationId,
+          featureCode: BILLING_FEATURES.CHANNELS_ACTIVE,
+          requestedUnits: 1,
+          source: "channels/sync-legacy/facebook",
+        });
+        if (!billingDecision.allowed) return billingDeniedResponse(billingDecision);
+
         const { error } = await smarttalk.from("channels").insert(payload);
         if (error) {
           return NextResponse.json({ error: error.message }, { status: 500 });
@@ -196,7 +211,10 @@ export async function POST(_request: NextRequest) {
         whatsapp_phone_number_id: null,
         whatsapp_business_account_id: null,
         whatsapp_phone_number: null,
-        access_token: account.page_access_token || account.access_token || null,
+        access_token: account.page_access_token_ciphertext || account.access_token_ciphertext
+          ? null
+          : account.page_access_token || account.access_token || null,
+        access_token_ciphertext: account.page_access_token_ciphertext || account.access_token_ciphertext || null,
         facebook_app_id: null,
         meta_business_id: account.business_id || null,
         config: {
@@ -218,6 +236,14 @@ export async function POST(_request: NextRequest) {
         }
         results.push({ type: "instagram", action: "updated", name: payload.name });
       } else {
+        const billingDecision = await checkBillingFeature({
+          organizationId: org.organizationId,
+          featureCode: BILLING_FEATURES.CHANNELS_ACTIVE,
+          requestedUnits: 1,
+          source: "channels/sync-legacy/instagram",
+        });
+        if (!billingDecision.allowed) return billingDeniedResponse(billingDecision);
+
         const { error } = await smarttalk.from("channels").insert(payload);
         if (error) {
           return NextResponse.json({ error: error.message }, { status: 500 });

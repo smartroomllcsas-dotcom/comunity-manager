@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { RespondIoWebhookEvent } from "@/lib/respond-io/types";
 import { clientIp, rateLimitWithWhitelist } from "@/lib/rate-limit";
+import { checkBillingFeature } from "@/lib/billing/service";
+import { BILLING_FEATURES } from "@/lib/billing/features";
 
 export const dynamic = "force-dynamic";
 
@@ -108,6 +110,22 @@ export async function POST(request: NextRequest) {
   const fullName = [contact.firstName, contact.lastName].filter(Boolean).join(" ").trim() || null;
 
   if (!contactRowId) {
+    const billingDecision = await checkBillingFeature({
+      organizationId: channel.organization_id,
+      featureCode: BILLING_FEATURES.CONTACTS_TOTAL,
+      requestedUnits: 1,
+      source: "webhook/respond-io/inbound-contact",
+    });
+    if (!billingDecision.allowed) {
+      console.warn("[billing] inbound Respond.io contact over limit; preserving webhook", {
+        organizationId: channel.organization_id,
+        brandId: channel.brand_id,
+        channelId: channel.id,
+        currentUsage: billingDecision.currentUsage,
+        limit: billingDecision.limitValue,
+      });
+    }
+
     const { data: inserted } = await admin
       .from("contacts")
       .insert({

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { PricingCards, DEFAULT_PLANS } from "@/components/marketing/PricingCards";
+import { PricingCards, type PricingPlan } from "@/components/marketing/PricingCards";
+import { getPublicPlans, type PublicPlan } from "@/lib/billing/public-plans";
 
 export const metadata: Metadata = {
   title: "Precios · ComunityManager",
@@ -32,7 +33,39 @@ const FAQ = [
   },
 ];
 
-export default function PricingPage() {
+export const dynamic = "force-dynamic";
+
+function formatLimit(value: number | null, singular: string, plural = `${singular}s`) {
+  if (value === null) return `${plural[0].toUpperCase()}${plural.slice(1)} ilimitados`;
+  return `${value} ${value === 1 ? singular : plural}`;
+}
+
+function toPricingPlan(plan: PublicPlan, index: number, total: number): PricingPlan {
+  return {
+    code: plan.code,
+    name: plan.name,
+    price: plan.amountMinor / 100,
+    currency: plan.currency,
+    featured: total >= 3 && index === 1,
+    tagline: plan.description || "Gestión multicanal para tu agencia y sus marcas.",
+    features: [
+      formatLimit(plan.maxAgencyUsers, "usuario de agencia", "usuarios de agencia"),
+      formatLimit(plan.maxBrandAdvisors, "asesor de marca", "asesores de marca"),
+      formatLimit(plan.maxBrands, "marca", "marcas"),
+      formatLimit(plan.maxChannels, "canal conectado", "canales conectados"),
+      formatLimit(plan.maxContacts, "contacto", "contactos"),
+      plan.aiEnabled ? "Acceso a inteligencia artificial" : "Sin inteligencia artificial",
+    ],
+    cta: `Elegir ${plan.name}`,
+  };
+}
+
+export default async function PricingPage() {
+  const activePlans = await getPublicPlans();
+  const pricingPlans = activePlans.map((plan, index) =>
+    toPricingPlan(plan, index, activePlans.length)
+  );
+
   return (
     <main>
       <section className="px-5 pb-6 pt-20 sm:px-8 lg:px-12">
@@ -50,7 +83,13 @@ export default function PricingPage() {
         </div>
       </section>
 
-      <PricingCards plans={DEFAULT_PLANS} />
+      {pricingPlans.length > 0 ? (
+        <PricingCards plans={pricingPlans} />
+      ) : (
+        <p className="px-5 pb-16 text-center text-sm text-[#65706d]">
+          No hay planes disponibles en este momento.
+        </p>
+      )}
 
       {/* FAQ */}
       <section className="px-5 py-20 sm:px-8 lg:px-12">

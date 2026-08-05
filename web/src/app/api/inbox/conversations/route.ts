@@ -182,7 +182,12 @@ export async function GET(request: NextRequest) {
 
   let rows = (data ?? []).filter((conversation) => {
     const metadata = conversation.metadata as Record<string, unknown> | null;
-    return !metadata?.merged_into;
+    if (metadata?.merged_into) return false;
+
+    // Instagram can expose a contact/conversation shell without a readable
+    // message. Keep the contact, but do not put an empty thread in the inbox.
+    const channel = conversation.channel as { type?: string } | null;
+    return channel?.type !== "instagram" || Boolean(conversation.last_message_preview);
   });
 
   // Búsqueda por texto (server-side no soportada por Supabase sobre join sin RPC dedicado;

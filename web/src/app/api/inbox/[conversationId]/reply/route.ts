@@ -31,6 +31,11 @@ import {
   type ResponseDraftInput,
 } from "@/lib/ai/response-drafting";
 import { sendMetaTextMessage } from "@/lib/meta";
+import {
+  agentCanAccessBrand,
+  getAccessibleConversation,
+  getBrandScopeAgent,
+} from "@/lib/smarttalk/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -46,16 +51,6 @@ async function requireUser() {
     };
   }
   return { user, response: null };
-}
-
-async function assertOrg(userId: string) {
-  const smart = await createServerClient();
-  const { data } = await smart
-    .from("agents")
-    .select("organization_id")
-    .eq("user_id", userId)
-    .maybeSingle();
-  return data?.organization_id ?? null;
 }
 
 interface ReplyBody {
@@ -105,8 +100,8 @@ export async function POST(
     );
   }
 
-  const orgId = await assertOrg(user.id);
-  if (!orgId) {
+  const agent = await getBrandScopeAgent(user.id);
+  if (!agent) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
@@ -115,8 +110,12 @@ export async function POST(
   let incomingMessage = "";
   let targetMentionIds: string[] = [];
   let recipientHandle: string | null = null;
+  let channelId: string | null = null;
 
   if (parsed.source === "cm_mentions") {
+    if (!(await agentCanAccessBrand(agent, clientId))) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
     const admin = createAdminClient("public");
     const { data: all } = await admin
       .from("cm_mentions")
@@ -124,7 +123,7 @@ export async function POST(
         "id, client_id, platform, source_type, source_url, author_handle, content, fetched_at, metadata",
       )
       .eq("client_id", clientId)
-      .eq("organization_id", orgId)
+      .eq("organization_id", agent.organization_id)
       .order("fetched_at", { ascending: false })
       .limit(2000);
     const matching = (all ?? []).filter((m) => {
@@ -151,16 +150,13 @@ export async function POST(
     // smarttalk
     try {
       const st = createAdminClient("smarttalk");
-      const { data: conv } = await st
-        .from("conversations")
-        .select("id, channel_type, contact_id, organization_id")
-        .eq("id", parsed.ref)
-        .maybeSingle();
-      if (!conv || (conv as { organization_id: string }).organization_id !== orgId) {
+      const conv = await getAccessibleConversation(agent, parsed.ref);
+      if (!conv) {
         return NextResponse.json({ error: "not_found" }, { status: 404 });
       }
-      platform = (conv as { channel_type: string }).channel_type;
-      recipientHandle = (conv as { contact_id: string | null }).contact_id;
+      platform = conv.channel_type;
+      recipientHandle = conv.contact_id;
+      channelId = conv.channel_id;
       const { data: lastMsg } = await st
         .from("messages")
         .select("content")
@@ -223,9 +219,13 @@ export async function POST(
       // Necesitamos access token del canal — placeholder: leer desde channels
       // por platform+client. Si no hay, devolvemos error explícito.
       const admin = createAdminClient("smarttalk");
-      const { data: channel } = await admin
+      let channelQuery = admin
         .from("channels")
-        .select("access_token, meta_recipient_id_field")
+        .select("access_token, meta_recipient_id_field");
+      channelQuery = channelId
+        ? channelQuery.eq("id", channelId)
+        : channelQuery.eq("brand_id", clientId);
+      const { data: channel } = await channelQuery
         .eq("channel_type", p)
         .eq("status", "active")
         .limit(1)
@@ -243,9 +243,13 @@ export async function POST(
       }
     } else if (p === "whatsapp") {
       const admin = createAdminClient("smarttalk");
-      const { data: channel } = await admin
+      let channelQuery = admin
         .from("channels")
-        .select("whatsapp_phone_number_id, access_token")
+        .select("whatsapp_phone_number_id, access_token");
+      channelQuery = channelId
+        ? channelQuery.eq("id", channelId)
+        : channelQuery.eq("brand_id", clientId);
+      const { data: channel } = await channelQuery
         .eq("channel_type", "whatsapp")
         .eq("status", "active")
         .limit(1)

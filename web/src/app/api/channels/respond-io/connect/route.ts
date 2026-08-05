@@ -4,6 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { verifyRespondIoToken } from "@/lib/respond-io/api";
 import type { RespondIoChannelSource } from "@/lib/respond-io/types";
 import { getBrandInOrganization } from "@/lib/smarttalk/brand-scope";
+import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
+import { BILLING_FEATURES } from "@/lib/billing/features";
 
 interface ConnectBody {
   name: string;
@@ -51,6 +53,14 @@ export async function POST(request: NextRequest) {
   if (!brand) {
     return NextResponse.json({ error: "La marca no pertenece a esta organización" }, { status: 403 });
   }
+
+  const billingDecision = await checkBillingFeature({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.CHANNELS_ACTIVE,
+    requestedUnits: 1,
+    source: "channels/respond-io/connect",
+  });
+  if (!billingDecision.allowed) return billingDeniedResponse(billingDecision);
 
   const verification = await verifyRespondIoToken(apiToken);
   if (!verification.ok) {

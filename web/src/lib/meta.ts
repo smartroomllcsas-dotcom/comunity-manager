@@ -74,7 +74,11 @@ async function metaFetch(url: string, options: RequestInit = {}, maxRetries = 3)
 export function getOAuthUrl(
   redirectUri: string,
   state: string,
-  options: { includeInstagramMessaging?: boolean; includeAds?: boolean } = {}
+  options: {
+    includeInstagramMessaging?: boolean
+    includeAds?: boolean
+    configId?: string
+  } = {}
 ): string {
   const scopes = [
     'pages_manage_metadata',
@@ -100,6 +104,13 @@ export function getOAuthUrl(
     state,
     response_type: 'code',
   })
+
+  // Facebook Login for Business requires its own configuration. Keep this
+  // separate from the WhatsApp Embedded Signup configuration.
+  if (options.configId) {
+    params.set('config_id', options.configId)
+    params.set('override_default_response_type', 'true')
+  }
 
   return `https://www.facebook.com/v21.0/dialog/oauth?${params}`
 }

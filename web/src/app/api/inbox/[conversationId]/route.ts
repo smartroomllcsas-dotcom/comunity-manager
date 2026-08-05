@@ -17,6 +17,11 @@ import {
   makeConversationKey,
   parseConversationKey,
 } from "@/lib/inbox/conversation-key";
+import {
+  agentCanAccessBrand,
+  getAccessibleConversation,
+  getBrandScopeAgent,
+} from "@/lib/smarttalk/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -32,16 +37,6 @@ async function requireUser() {
     };
   }
   return { user, response: null };
-}
-
-async function assertOrg(userId: string) {
-  const smart = await createServerClient();
-  const { data: agentRow } = await smart
-    .from("agents")
-    .select("organization_id")
-    .eq("user_id", userId)
-    .maybeSingle();
-  return agentRow?.organization_id ?? null;
 }
 
 export async function GET(
@@ -68,8 +63,8 @@ export async function GET(
     );
   }
 
-  const orgId = await assertOrg(user.id);
-  if (!orgId) {
+  const agent = await getBrandScopeAgent(user.id);
+  if (!agent) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
@@ -82,6 +77,9 @@ export async function GET(
   }
 
   if (parsed.source === "cm_mentions") {
+    if (!(await agentCanAccessBrand(agent, clientId))) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
     // Recuperamos todas las mentions del mismo grupo. El hash no es reversible,
     // así que traemos todas las del client y filtramos por hash coincidente.
     const admin = createAdminClient("public");
@@ -91,7 +89,7 @@ export async function GET(
         "id, client_id, platform, source_type, source_url, author_handle, author_followers, content, sentiment_score, sentiment_label, urgency_score, is_processed, responded_at, responded_by, fetched_at, metadata",
       )
       .eq("client_id", clientId)
-      .eq("organization_id", orgId)
+      .eq("organization_id", agent.organization_id)
       .order("fetched_at", { ascending: true })
       .limit(2000);
     if (error) {
@@ -138,12 +136,8 @@ export async function GET(
   // parsed.source === 'smarttalk'
   try {
     const stAdmin = createAdminClient("smarttalk");
-    const { data: conv } = await stAdmin
-      .from("conversations")
-      .select("id, channel_type, contact_id, organization_id, assigned_agent_id, status")
-      .eq("id", parsed.ref)
-      .maybeSingle();
-    if (!conv || (conv as { organization_id: string }).organization_id !== orgId) {
+    const conv = await getAccessibleConversation(agent, parsed.ref);
+    if (!conv) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
     const { data: msgs } = await stAdmin
@@ -157,15 +151,14 @@ export async function GET(
         id: conversationId,
         source: "smarttalk" as const,
         client_id: clientId,
-        platform: (conv as { channel_type: string }).channel_type,
+        platform: conv.channel_type,
         author: {
-          handle: (conv as { contact_id: string | null }).contact_id,
+          handle: conv.contact_id,
           followers: null,
           avatar_url: null,
         },
-        assigned_to:
-          (conv as { assigned_agent_id: string | null }).assigned_agent_id ?? null,
-        status: (conv as { status: string }).status,
+        assigned_to: conv.assigned_agent_id ?? null,
+        status: conv.status,
       },
       messages: (msgs ?? []).map((m) => ({
         id: (m as { id: string }).id,
@@ -207,8 +200,8 @@ export async function PATCH(
     );
   }
 
-  const orgId = await assertOrg(user.id);
-  if (!orgId) {
+  const agent = await getBrandScopeAgent(user.id);
+  if (!agent) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
@@ -233,13 +226,16 @@ export async function PATCH(
   }
 
   if (parsed.source === "cm_mentions") {
+    if (!(await agentCanAccessBrand(agent, clientId!))) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
     const admin = createAdminClient("public");
     // Recuperar filas del grupo para actualizar todas.
     const { data: all } = await admin
       .from("cm_mentions")
       .select("id, client_id, platform, author_handle, metadata, responded_at, is_processed")
       .eq("client_id", clientId!)
-      .eq("organization_id", orgId)
+      .eq("organization_id", agent.organization_id)
       .limit(2000);
     const targetIds: string[] = [];
     for (const m of all ?? []) {
@@ -286,6 +282,10 @@ export async function PATCH(
 
   // smarttalk
   try {
+    const conversation = await getAccessibleConversation(agent, parsed.ref);
+    if (!conversation) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
     const stAdmin = createAdminClient("smarttalk");
     const update: Record<string, unknown> = {};
     if (patch.assigned_to !== undefined) update.assigned_agent_id = patch.assigned_to;
@@ -296,7 +296,7 @@ export async function PATCH(
       .from("conversations")
       .update(update)
       .eq("id", parsed.ref)
-      .eq("organization_id", orgId);
+      .eq("organization_id", agent.organization_id);
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }

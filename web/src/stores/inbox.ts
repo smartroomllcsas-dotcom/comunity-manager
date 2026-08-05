@@ -21,7 +21,7 @@ export const useInboxStore = create<InboxState>((set) => ({
   selectedConversationId: null,
   filter: "all",
   searchQuery: "",
-  contactPanelOpen: true,
+  contactPanelOpen: false,
   statusFilter: "open",
   channelFilter: "all",
   setSelectedConversation: (id) => set({ selectedConversationId: id }),

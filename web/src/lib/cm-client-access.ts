@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { mysqlQuery, quoteId } from "@/lib/mysql";
 import { isGlobalAdminEmail } from "@/lib/platform-admin";
+import { isBrandScopedMember } from "@/lib/smarttalk/brand-scope";
 
 interface CmClientAccess {
   clientId: string;
@@ -72,7 +73,7 @@ export async function getCmClientAccess(
     Boolean(agent?.organization_id) &&
     client.smarttalk_organization_id === agent?.organization_id;
   if (!isSuperAdmin && !ownsClient && !belongsToAgency) return null;
-  if (!isSuperAdmin && agent?.member_type === "brand_advisor") {
+  if (!isSuperAdmin && agent && isBrandScopedMember(agent)) {
     const { data: assignment } = await smarttalkAdmin
       .from("brand_advisor_assignments")
       .select("id")

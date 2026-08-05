@@ -8,6 +8,8 @@ import {
 } from "@/lib/whatsapp/token-manager";
 import { encryptToken } from "@/lib/auth/token-crypto";
 import { getBrandInOrganization } from "@/lib/smarttalk/brand-scope";
+import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
+import { BILLING_FEATURES } from "@/lib/billing/features";
 
 const FB_APP_ID = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID!;
 const FB_APP_SECRET = process.env.FACEBOOK_APP_SECRET!;
@@ -40,6 +42,24 @@ export async function POST(request: NextRequest) {
   const brand = await getBrandInOrganization(brandId, agent.organization_id);
   if (!brand) {
     return Response.json({ error: "La marca no pertenece a esta organización" }, { status: 403 });
+  }
+
+  const { data: existingChannel } = await admin
+    .from("channels")
+    .select("id")
+    .eq("organization_id", agent.organization_id)
+    .eq("brand_id", brand.id)
+    .eq("type", "whatsapp_business_api")
+    .neq("status", "disconnected")
+    .maybeSingle();
+  if (!existingChannel) {
+    const billingDecision = await checkBillingFeature({
+      organizationId: agent.organization_id,
+      featureCode: BILLING_FEATURES.CHANNELS_ACTIVE,
+      requestedUnits: 1,
+      source: "oauth/whatsapp-connect",
+    });
+    if (!billingDecision.allowed) return billingDeniedResponse(billingDecision);
   }
 
   try {

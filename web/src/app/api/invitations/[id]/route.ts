@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
 
 export async function DELETE(
   _request: NextRequest,
@@ -20,7 +21,11 @@ export async function DELETE(
     .single();
   if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
 
-  if (agent.role !== "admin") {
+  const isAgencyAdmin =
+    agent.is_super_admin === true ||
+    (agent.role === "admin" && agent.member_type === "agency_user");
+  const isBrandAdmin = agent.member_type === "brand_admin";
+  if (!isAgencyAdmin && !isBrandAdmin) {
     return Response.json({ error: "Only admins can cancel invitations" }, { status: 403 });
   }
 
@@ -34,6 +39,28 @@ export async function DELETE(
 
   if (!invitation) {
     return Response.json({ error: "Invitation not found" }, { status: 404 });
+  }
+
+  if (isBrandAdmin) {
+    if (invitation.member_type !== "brand_advisor") {
+      return Response.json({ error: "No autorizado para esta invitación" }, { status: 403 });
+    }
+    const [assignedBrandIds, invitationAssignments] = await Promise.all([
+      getAgentBrandIds(agent),
+      admin
+        .from("invitation_brand_assignments")
+        .select("brand_id")
+        .eq("invitation_id", invitation.id),
+    ]);
+    const invitationBrandIds = (invitationAssignments.data || []).map(
+      (assignment) => assignment.brand_id as string
+    );
+    if (
+      !assignedBrandIds ||
+      !invitationBrandIds.some((brandId) => assignedBrandIds.includes(brandId))
+    ) {
+      return Response.json({ error: "No autorizado para esta invitación" }, { status: 403 });
+    }
   }
 
   const { error } = await admin
