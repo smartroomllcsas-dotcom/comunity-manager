@@ -1,5 +1,41 @@
 # Checklist de pruebas pendientes
 
+## Estado actualizado de auditoría - 2026-08-05
+
+**Dictamen:** CommunityManager todavía no debe declararse aprobado para salida
+comercial. La base de planes, suscripciones, pagos, límites y aislamiento por
+marca está implementada, pero faltan pruebas E2E y varios controles de
+enforcement antes de activar `BILLING_ENFORCEMENT_MODE=hard` en Production.
+
+### Evidencia disponible
+
+- [x] Commit local y remoto revisado: `7dba8e5` (`fix: enforce advisor brand data isolation`).
+- [x] `npm run test`: 9 archivos Vitest, 127 pruebas aprobadas, más 6 pruebas Node aprobadas.
+- [x] `npm run lint -- --quiet`: aprobado, sin errores.
+- [x] `npm run build`: aprobado en la validación local posterior al último cambio.
+- [x] `git diff --check`: aprobado.
+- [x] El propietario confirmó en Supabase `Success. No rows returned` para las migraciones `027` y `028`.
+- [x] Migraciones locales presentes hasta `20260805000200_028_advisor_brand_rls_hardening.sql`.
+- [x] Fixture QA inicial y script de limpieza presentes; todavía no constituyen un proyecto QA separado.
+
+### Hallazgos que bloquean la aprobación
+
+- [ ] Los webhooks conservan el payload técnico, pero un contacto sobre el límite no genera una conversación ni un mensaje consultable. Debe implementarse un registro de excedente/pending con retención y auditoría propia; la retención actual de `webhook_events` es de 7 días.
+- [ ] Completar enforcement en las rutas heredadas de publicaciones y flujos. La ruta general de posts y el editor de flujos escriben directamente sin `checkBillingFeature`.
+- [ ] Aplicar `reports.access` y `storage.bytes`; existen en el catálogo, pero no hay enforcement real en las rutas de reportes/almacenamiento.
+- [ ] Hacer atómicos los límites de recursos sujetos a concurrencia. Hoy varias decisiones son consulta de uso seguida de insert/update separado; falta probar y proteger el caso simultáneo de límite + 1.
+- [ ] Separar QA en otro proyecto Supabase y Preview de Vercel. El seed actual apunta a una organización QA dentro del proyecto conectado.
+- [ ] Ejecutar aceptación E2E por cada plan con ePayco sandbox y registrar referencia, estado de pago, suscripción y límites observados.
+- [ ] Probar cambio, cancelación, vencimiento, gracia, suspensión y reactivación en una cuenta no productiva.
+- [ ] Completar worker de outbox y notificaciones de billing; las tablas existen, pero no hay evidencia de procesamiento completo.
+- [ ] Confirmar en Vercel el valor actual de `BILLING_ENFORCEMENT_MODE`. La documentación histórica registra `off`; no se debe asumir que Production está en `hard` sin verificarlo.
+
+### Regla de lectura
+
+Las casillas de la sección histórica inferior conservan evidencia de la fecha
+original. Este bloque es el estado vigente de la auditoría y debe prevalecer
+para decidir si se habilita Production.
+
 Manual principal:
 `GUIA_OPERATIVA_FASE_2_DESPLIEGUE.md`
 
@@ -10,7 +46,7 @@ Manual principal:
 - [x] Renovacion predeterminada en modo manual.
 - [x] Checkout Wompi/PayU bloqueado hasta certificar webhooks.
 - [x] Activacion ePayco movida a funcion PostgreSQL transaccional e idempotente.
-- [x] `npm test`: 99 pruebas aprobadas, 93 Vitest y 6 Node.
+- [x] `npm test` histórico: 99 pruebas aprobadas, 93 Vitest y 6 Node.
 - [x] `npm run lint -- --quiet`: aprobado.
 - [x] `npm run build`: aprobado.
 - [x] `git diff --check`: aprobado.
