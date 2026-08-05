@@ -17,6 +17,10 @@
 --   brands.total       5 / 5
 --   channels.active    3 / 3
 --   contacts.total     1,000 / 1,000
+--   agency.users       2 / 2 (one existing admin + one synthetic invitation)
+--   brand.advisors     5 / 5 (synthetic invitations, one per brand)
+--   broadcasts.month   10 / 10 (completed synthetic records, never sent)
+--   automations.flows  2 / 2 (inactive synthetic flows)
 --   One synthetic inbound conversation per channel is added to the Inbox.
 
 BEGIN;
@@ -439,6 +443,193 @@ BEGIN
     (SELECT COUNT(*) FROM smarttalk.contacts WHERE organization_id = v_org_id);
 END $$;
 
+-- Fill team, broadcast, and automation entitlements without creating real
+-- accounts, sending invitations by email, or calling any provider.
+DO $$
+DECLARE
+  v_org_id UUID;
+  v_plan_id UUID;
+  v_admin_id UUID;
+  v_max_agency_users INTEGER;
+  v_max_advisors INTEGER;
+  v_max_brands INTEGER;
+  v_max_broadcasts INTEGER;
+  v_max_flows INTEGER;
+  v_agency_users INTEGER;
+  v_advisors INTEGER;
+  v_broadcasts INTEGER;
+  v_flows INTEGER;
+  v_invitation_id UUID;
+  v_brand_id UUID;
+  v_template_id UUID;
+  v_name TEXT;
+  v_index INTEGER;
+BEGIN
+  SELECT id, plan_id INTO v_org_id, v_plan_id
+  FROM smarttalk.organizations
+  WHERE name = 'QA Agencia Inicial'
+  ORDER BY created_at DESC
+  LIMIT 1;
+
+  SELECT id INTO v_admin_id
+  FROM smarttalk.agents
+  WHERE organization_id = v_org_id
+    AND role = 'admin'
+  ORDER BY created_at
+  LIMIT 1;
+
+  SELECT limit_value INTO v_max_agency_users
+  FROM smarttalk.plan_entitlements
+  WHERE plan_id = v_plan_id AND feature_code = 'agency.users' AND enabled;
+  SELECT limit_value INTO v_max_advisors
+  FROM smarttalk.plan_entitlements
+  WHERE plan_id = v_plan_id AND feature_code = 'brand.advisors_total' AND enabled;
+  SELECT limit_value INTO v_max_brands
+  FROM smarttalk.plan_entitlements
+  WHERE plan_id = v_plan_id AND feature_code = 'brands.total' AND enabled;
+  SELECT limit_value INTO v_max_broadcasts
+  FROM smarttalk.plan_entitlements
+  WHERE plan_id = v_plan_id AND feature_code = 'broadcasts.month' AND enabled;
+  SELECT limit_value INTO v_max_flows
+  FROM smarttalk.plan_entitlements
+  WHERE plan_id = v_plan_id AND feature_code = 'automations.flows' AND enabled;
+
+  SELECT
+    (SELECT COUNT(*) FROM smarttalk.agents WHERE organization_id = v_org_id AND member_type = 'agency_user')
+    + (SELECT COUNT(*) FROM smarttalk.invitations WHERE organization_id = v_org_id AND member_type = 'agency_user' AND status = 'pending'),
+    (SELECT COUNT(*) FROM smarttalk.agents WHERE organization_id = v_org_id AND member_type = 'brand_advisor')
+    + (SELECT COUNT(*) FROM smarttalk.invitations WHERE organization_id = v_org_id AND member_type = 'brand_advisor' AND status = 'pending'),
+    (SELECT COUNT(*) FROM smarttalk.broadcasts WHERE organization_id = v_org_id AND status <> 'draft' AND created_at >= DATE_TRUNC('month', NOW())),
+    (SELECT COUNT(*) FROM smarttalk.chatbot_flows WHERE organization_id = v_org_id)
+  INTO v_agency_users, v_advisors, v_broadcasts, v_flows;
+
+  IF v_agency_users > v_max_agency_users OR v_advisors > v_max_advisors
+     OR v_broadcasts > v_max_broadcasts OR v_flows > v_max_flows THEN
+    RAISE EXCEPTION 'QA seed stopped: an existing usage count exceeds the active plan limits.';
+  END IF;
+
+  IF v_agency_users < v_max_agency_users THEN
+    INSERT INTO smarttalk.invitations (
+      organization_id, email, role, member_type, status, invited_by, expires_at
+    ) VALUES (
+      v_org_id, 'qa-agency-user-02@communitymanager.invalid', 'agent', 'agency_user', 'pending', v_admin_id, NOW() + INTERVAL '30 days'
+    ) ON CONFLICT (organization_id, email) DO NOTHING;
+  END IF;
+
+  FOR v_index IN 1..v_max_advisors LOOP
+    SELECT id INTO v_brand_id
+    FROM public.cm_clients
+    WHERE smarttalk_organization_id = v_org_id
+    ORDER BY created_at
+    OFFSET (v_index - 1) % v_max_brands
+    LIMIT 1;
+
+    INSERT INTO smarttalk.invitations (
+      organization_id, email, role, member_type, status, invited_by, expires_at
+    ) VALUES (
+      v_org_id,
+      FORMAT('qa-brand-advisor-%s@communitymanager.invalid', LPAD(v_index::TEXT, 2, '0')),
+      'agent',
+      'brand_advisor',
+      'pending',
+      v_admin_id,
+      NOW() + INTERVAL '30 days'
+    ) ON CONFLICT (organization_id, email) DO NOTHING;
+
+    SELECT id INTO v_invitation_id
+    FROM smarttalk.invitations
+    WHERE organization_id = v_org_id
+      AND email = FORMAT('qa-brand-advisor-%s@communitymanager.invalid', LPAD(v_index::TEXT, 2, '0'));
+
+    INSERT INTO smarttalk.invitation_brand_assignments (organization_id, invitation_id, brand_id)
+    VALUES (v_org_id, v_invitation_id, v_brand_id)
+    ON CONFLICT (invitation_id, brand_id) DO NOTHING;
+  END LOOP;
+
+  FOR v_index IN 1..v_max_brands LOOP
+    SELECT id INTO v_brand_id
+    FROM public.cm_clients
+    WHERE smarttalk_organization_id = v_org_id
+    ORDER BY created_at
+    OFFSET (v_index - 1)
+    LIMIT 1;
+
+    INSERT INTO smarttalk.invitations (
+      organization_id, email, role, member_type, status, invited_by, expires_at
+    ) VALUES (
+      v_org_id,
+      FORMAT('qa-brand-admin-%s@communitymanager.invalid', LPAD(v_index::TEXT, 2, '0')),
+      'supervisor',
+      'brand_admin',
+      'pending',
+      v_admin_id,
+      NOW() + INTERVAL '30 days'
+    ) ON CONFLICT (organization_id, email) DO NOTHING;
+
+    SELECT id INTO v_invitation_id
+    FROM smarttalk.invitations
+    WHERE organization_id = v_org_id
+      AND email = FORMAT('qa-brand-admin-%s@communitymanager.invalid', LPAD(v_index::TEXT, 2, '0'));
+
+    INSERT INTO smarttalk.invitation_brand_assignments (organization_id, invitation_id, brand_id)
+    VALUES (v_org_id, v_invitation_id, v_brand_id)
+    ON CONFLICT (invitation_id, brand_id) DO NOTHING;
+  END LOOP;
+
+  SELECT id INTO v_template_id
+  FROM smarttalk.message_templates
+  WHERE organization_id = v_org_id
+    AND name = '[QA] Plantilla Sintética'
+  ORDER BY created_at
+  LIMIT 1;
+
+  IF v_template_id IS NULL THEN
+    INSERT INTO smarttalk.message_templates (
+      organization_id, name, language, category, components, status
+    ) VALUES (
+      v_org_id, '[QA] Plantilla Sintética', 'es', 'utility', '[]'::JSONB, 'approved'
+    ) RETURNING id INTO v_template_id;
+  END IF;
+
+  FOR v_index IN 1..v_max_broadcasts LOOP
+    v_name := FORMAT('[QA] Difusión Sintética %s', LPAD(v_index::TEXT, 2, '0'));
+    IF NOT EXISTS (
+      SELECT 1 FROM smarttalk.broadcasts
+      WHERE organization_id = v_org_id AND name = v_name
+    ) THEN
+      INSERT INTO smarttalk.broadcasts (
+        organization_id, name, template_id, channel_id, contact_filter, status
+      ) VALUES (
+        v_org_id,
+        v_name,
+        v_template_id,
+        (SELECT channel_id FROM qa_seed_channels ORDER BY seed_code LIMIT 1),
+        '{"qa_seed": true, "synthetic": true}'::JSONB,
+        'completed'
+      );
+    END IF;
+  END LOOP;
+
+  FOR v_index IN 1..v_max_flows LOOP
+    v_name := FORMAT('[QA] Flujo Sintético %s', LPAD(v_index::TEXT, 2, '0'));
+    IF NOT EXISTS (
+      SELECT 1 FROM smarttalk.chatbot_flows
+      WHERE organization_id = v_org_id AND name = v_name
+    ) THEN
+      INSERT INTO smarttalk.chatbot_flows (
+        organization_id, name, trigger_type, trigger_value, flow_data, is_active
+      ) VALUES (
+        v_org_id,
+        v_name,
+        'keyword',
+        FORMAT('qa-flow-%s', LPAD(v_index::TEXT, 2, '0')),
+        '{"nodes": []}'::JSONB,
+        FALSE
+      );
+    END IF;
+  END LOOP;
+END $$;
+
 SELECT jsonb_build_object(
   'organization', organization.name,
   'plan', plan.name,
@@ -463,6 +654,54 @@ SELECT jsonb_build_object(
     SELECT COUNT(*)
     FROM smarttalk.contacts AS contact
     WHERE contact.organization_id = organization.id
+  ),
+  'agency_users', (
+    SELECT COUNT(*)
+    FROM smarttalk.agents AS agent
+    WHERE agent.organization_id = organization.id
+      AND agent.member_type = 'agency_user'
+  ) + (
+    SELECT COUNT(*)
+    FROM smarttalk.invitations AS invitation
+    WHERE invitation.organization_id = organization.id
+      AND invitation.member_type = 'agency_user'
+      AND invitation.status = 'pending'
+  ),
+  'brand_advisors', (
+    SELECT COUNT(*)
+    FROM smarttalk.agents AS agent
+    WHERE agent.organization_id = organization.id
+      AND agent.member_type = 'brand_advisor'
+  ) + (
+    SELECT COUNT(*)
+    FROM smarttalk.invitations AS invitation
+    WHERE invitation.organization_id = organization.id
+      AND invitation.member_type = 'brand_advisor'
+      AND invitation.status = 'pending'
+  ),
+  'brand_administrators', (
+    SELECT COUNT(*)
+    FROM smarttalk.agents AS agent
+    WHERE agent.organization_id = organization.id
+      AND agent.member_type = 'brand_admin'
+  ) + (
+    SELECT COUNT(*)
+    FROM smarttalk.invitations AS invitation
+    WHERE invitation.organization_id = organization.id
+      AND invitation.member_type = 'brand_admin'
+      AND invitation.status = 'pending'
+  ),
+  'broadcasts', (
+    SELECT COUNT(*)
+    FROM smarttalk.broadcasts AS broadcast
+    WHERE broadcast.organization_id = organization.id
+      AND broadcast.status <> 'draft'
+      AND broadcast.created_at >= DATE_TRUNC('month', NOW())
+  ),
+  'flows', (
+    SELECT COUNT(*)
+    FROM smarttalk.chatbot_flows AS flow
+    WHERE flow.organization_id = organization.id
   ),
   'synthetic_conversations', (
     SELECT COUNT(*)

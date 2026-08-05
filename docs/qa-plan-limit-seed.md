@@ -10,6 +10,11 @@ El script `web/supabase/seed/qa_demo_inicial_limit.sql` prepara la organizacion
 - Los canales se distribuyen entre las primeras tres marcas.
 - Contactos sinteticos hasta `max_contacts` del plan, actualmente 1.000.
 - Una conversacion y un mensaje entrante de prueba por cada canal simulado.
+- Usuarios de agencia hasta el limite, usando una invitacion sintetica pendiente.
+- Asesores de marca hasta el limite, uno por marca mediante invitaciones sinteticas.
+- Un administrador de marca pendiente por cada marca, asignado de forma aislada.
+- Broadcasts completados sinteticos hasta el limite mensual, sin destinatarios ni envio.
+- Flujos de chatbot inactivos sinteticos hasta el limite.
 
 Todos los registros simulados llevan `qa_seed = true` o la etiqueta
 `qa-seed`. No se crean tokens, cuentas OAuth ni conexiones reales con Meta o
@@ -24,10 +29,18 @@ WhatsApp.
    - Marcas: `5 / 5`.
    - Canales activos: `3 / 3`.
    - Contactos: `1.000 / 1.000`.
-5. Abrir Inbox y confirmar un mensaje QA de Facebook, Instagram y WhatsApp.
-6. Intentar crear una sexta marca: el boton debe estar bloqueado o el backend
+   - Usuarios de agencia: `2 / 2`.
+   - Asesores de marca: `5 / 5`.
+   - Broadcasts del mes: `10 / 10`.
+   - Flujos: `2 / 2`.
+5. En Equipo confirmar las invitaciones QA y sus marcas asignadas. Los correos
+   usan el dominio `.invalid`, por lo que no se envian invitaciones reales.
+6. Abrir Inbox y confirmar un mensaje QA de Facebook, Instagram y WhatsApp.
+7. Intentar crear una sexta marca: el boton debe estar bloqueado o el backend
    debe responder con limite excedido.
-7. Intentar conectar un cuarto canal real solo despues de verificar que el
+8. Intentar crear otro asesor, usuario, broadcast o flujo. Cada operacion debe
+   ser bloqueada por el backend al alcanzar su limite.
+9. Intentar conectar un cuarto canal real solo despues de verificar que el
    tercero ya aparece como activo. La operacion debe ser rechazada por el
    limite, sin llamar al proveedor si el backend la valida antes.
 
@@ -41,3 +54,8 @@ solamente los datos sinteticos. La marca `[QA] Marca Demo Inicial` se conserva.
 `channels.active` es un limite total por organizacion, no por marca. La
 seleccion de Instagram, Facebook o WhatsApp en una marca no consume el limite;
 lo consume el registro de canal cuyo estado es `active`.
+
+Los canales, contactos, invitaciones, broadcasts y flujos de este dataset son
+solo para QA. Los tres canales no tienen credenciales de proveedor y no pueden
+enviar mensajes reales. Las invitaciones y los registros de broadcast no
+generan correo ni llamadas externas.

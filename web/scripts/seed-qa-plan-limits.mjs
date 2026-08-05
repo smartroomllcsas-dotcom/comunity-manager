@@ -70,7 +70,15 @@ const [plans, entitlements, agents] = await Promise.all([
   query(smarttalk, "plan_entitlements", (table) => table
     .select("feature_code,enabled,limit_value")
     .eq("plan_id", planId)
-    .in("feature_code", ["brands.total", "channels.active"])),
+    .in("feature_code", [
+      "agency.users",
+      "brand.advisors_total",
+      "brand.advisors_per_brand",
+      "brands.total",
+      "channels.active",
+      "broadcasts.month",
+      "automations.flows",
+    ])),
   query(smarttalk, "agents", (table) => table
     .select("id,email,role,created_at")
     .eq("organization_id", organization.id)
@@ -81,11 +89,18 @@ const [plans, entitlements, agents] = await Promise.all([
 const plan = plans[0];
 if (!plan) fail("active subscription plan was not found");
 const entitlement = (code) => entitlements.find((item) => item.feature_code === code && item.enabled);
+const entitlementLimit = (code) => entitlement(code)?.limit_value;
+const maxAgencyUsers = entitlementLimit("agency.users");
+const maxAdvisors = entitlementLimit("brand.advisors_total");
+const maxAdvisorsPerBrand = entitlementLimit("brand.advisors_per_brand");
 const maxBrands = entitlement("brands.total")?.limit_value;
 const maxChannels = entitlement("channels.active")?.limit_value;
+const maxBroadcasts = entitlementLimit("broadcasts.month");
+const maxFlows = entitlementLimit("automations.flows");
 const maxContacts = plan.max_contacts;
-if (![maxBrands, maxChannels, maxContacts].every((value) => Number.isInteger(value) && value > 0)) {
-  fail("the active plan must have finite positive limits for brands, channels, and contacts");
+if (![maxAgencyUsers, maxAdvisors, maxAdvisorsPerBrand, maxBrands, maxChannels, maxBroadcasts, maxFlows, maxContacts]
+  .every((value) => Number.isInteger(value) && value > 0)) {
+  fail("the active plan must have finite positive limits for the QA dataset");
 }
 if (maxChannels < 3) fail(`plan exposes only ${maxChannels} channel slots; three are required for this QA dataset`);
 
@@ -263,11 +278,167 @@ for (const channel of seededChannels) {
   }).eq("id", conversation.id));
 }
 
-const [finalBrands, finalChannels, finalContacts, finalConversations] = await Promise.all([
+const qaAdmin = agents[0];
+if (!qaAdmin) fail("no agency administrator is available to own QA invitations");
+
+async function ensureInvitation({ email, role, memberType, brandIds = [] }) {
+  let existing = await query(
+    smarttalk,
+    "invitations",
+    (table) => table
+      .select("id,email,role,status,member_type")
+      .eq("organization_id", organization.id)
+      .eq("email", email)
+      .limit(1)
+  );
+  let invitation = existing[0];
+  if (invitation && (invitation.member_type !== memberType || invitation.role !== role)) {
+    fail(`existing QA invitation ${email} has a different member type or role`);
+  }
+  if (!invitation) {
+    const created = await query(smarttalk, "invitations", (table) => table.insert({
+      organization_id: organization.id,
+      email,
+      role,
+      member_type: memberType,
+      status: "pending",
+      invited_by: qaAdmin.id,
+      expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    }).select("id,email,role,status,member_type"));
+    invitation = created[0];
+  }
+
+  if (brandIds.length > 0) {
+    const assignments = await query(
+      smarttalk,
+      "invitation_brand_assignments",
+      (table) => table
+        .select("brand_id")
+        .eq("organization_id", organization.id)
+        .eq("invitation_id", invitation.id)
+    );
+    const assigned = new Set(assignments.map((item) => item.brand_id));
+    const missingBrandIds = brandIds.filter((brandId) => !assigned.has(brandId));
+    if (missingBrandIds.length > 0) {
+      await query(smarttalk, "invitation_brand_assignments", (table) => table.insert(
+        missingBrandIds.map((brandId) => ({
+          organization_id: organization.id,
+          invitation_id: invitation.id,
+          brand_id: brandId,
+        }))
+      ).select("id"));
+    }
+  }
+  return invitation;
+}
+
+const agencyUsers = await query(
+  smarttalk,
+  "agents",
+  (table) => table.select("id").eq("organization_id", organization.id).eq("member_type", "agency_user")
+);
+const pendingAgencyInvitations = await query(
+  smarttalk,
+  "invitations",
+  (table) => table.select("id").eq("organization_id", organization.id).eq("member_type", "agency_user").eq("status", "pending")
+);
+if (agencyUsers.length + pendingAgencyInvitations.length > maxAgencyUsers) {
+  fail(`agency user count exceeds limit ${maxAgencyUsers}`);
+}
+if (agencyUsers.length + pendingAgencyInvitations.length < maxAgencyUsers) {
+  await ensureInvitation({
+    email: "qa-agency-user-02@communitymanager.invalid",
+    role: "agent",
+    memberType: "agency_user",
+  });
+}
+
+const advisorInvitations = [];
+for (let index = 0; index < maxAdvisors; index += 1) {
+  const brand = brands[index % brands.length];
+  advisorInvitations.push(await ensureInvitation({
+    email: `qa-brand-advisor-${String(index + 1).padStart(2, "0")}@communitymanager.invalid`,
+    role: "agent",
+    memberType: "brand_advisor",
+    brandIds: [brand.id],
+  }));
+}
+
+const brandAdminInvitations = [];
+for (let index = 0; index < maxBrands; index += 1) {
+  const brand = brands[index];
+  brandAdminInvitations.push(await ensureInvitation({
+    email: `qa-brand-admin-${String(index + 1).padStart(2, "0")}@communitymanager.invalid`,
+    role: "supervisor",
+    memberType: "brand_admin",
+    brandIds: [brand.id],
+  }));
+}
+
+const qaTemplateName = "[QA] Plantilla Sintética";
+let templates = await query(
+  smarttalk,
+  "message_templates",
+  (table) => table.select("id,name").eq("organization_id", organization.id).eq("name", qaTemplateName).limit(1)
+);
+let qaTemplate = templates[0];
+if (!qaTemplate) {
+  const created = await query(smarttalk, "message_templates", (table) => table.insert({
+    organization_id: organization.id,
+    name: qaTemplateName,
+    language: "es",
+    category: "utility",
+    components: [],
+    status: "approved",
+  }).select("id,name"));
+  qaTemplate = created[0];
+}
+
+for (let index = 1; index <= maxBroadcasts; index += 1) {
+  const name = `[QA] Difusión Sintética ${String(index).padStart(2, "0")}`;
+  const existing = await query(
+    smarttalk,
+    "broadcasts",
+    (table) => table.select("id").eq("organization_id", organization.id).eq("name", name).limit(1)
+  );
+  if (existing.length > 0) continue;
+  await query(smarttalk, "broadcasts", (table) => table.insert({
+    organization_id: organization.id,
+    name,
+    template_id: qaTemplate.id,
+    channel_id: seededChannels[(index - 1) % seededChannels.length].id,
+    contact_filter: { qa_seed: true, synthetic: true },
+    status: "completed",
+  }).select("id"));
+}
+
+for (let index = 1; index <= maxFlows; index += 1) {
+  const name = `[QA] Flujo Sintético ${String(index).padStart(2, "0")}`;
+  const existing = await query(
+    smarttalk,
+    "chatbot_flows",
+    (table) => table.select("id").eq("organization_id", organization.id).eq("name", name).limit(1)
+  );
+  if (existing.length > 0) continue;
+  await query(smarttalk, "chatbot_flows", (table) => table.insert({
+    organization_id: organization.id,
+    name,
+    trigger_type: "keyword",
+    trigger_value: `qa-flow-${String(index).padStart(2, "0")}`,
+    flow_data: { nodes: [] },
+    is_active: false,
+  }).select("id"));
+}
+
+const [finalBrands, finalChannels, finalContacts, finalConversations, finalAgents, finalInvitations, finalBroadcasts, finalFlows] = await Promise.all([
   query(publicDb, "cm_clients", (table) => table.select("id").eq("smarttalk_organization_id", organization.id)),
   query(smarttalk, "channels", (table) => table.select("id,brand_id,name,config").eq("organization_id", organization.id).eq("status", "active")),
   query(smarttalk, "contacts", (table) => table.select("id,brand_id,custom_fields").eq("organization_id", organization.id)),
   query(smarttalk, "conversations", (table) => table.select("id,metadata").eq("organization_id", organization.id)),
+  query(smarttalk, "agents", (table) => table.select("id,member_type").eq("organization_id", organization.id)),
+  query(smarttalk, "invitations", (table) => table.select("id,member_type,status").eq("organization_id", organization.id)),
+  query(smarttalk, "broadcasts", (table) => table.select("id,status").eq("organization_id", organization.id).neq("status", "draft")),
+  query(smarttalk, "chatbot_flows", (table) => table.select("id").eq("organization_id", organization.id)),
 ]);
 
 const channelDistribution = seededChannels.map((channel) => ({
@@ -285,6 +456,11 @@ console.log(JSON.stringify({
   brands: `${finalBrands.length}/${maxBrands}`,
   activeChannels: `${finalChannels.length}/${maxChannels}`,
   contacts: `${finalContacts.length}/${maxContacts}`,
+  agencyUsers: `${finalAgents.filter((item) => item.member_type === "agency_user").length + finalInvitations.filter((item) => item.member_type === "agency_user" && item.status === "pending").length}/${maxAgencyUsers}`,
+  brandAdvisors: `${finalAgents.filter((item) => item.member_type === "brand_advisor").length + finalInvitations.filter((item) => item.member_type === "brand_advisor" && item.status === "pending").length}/${maxAdvisors}`,
+  brandAdministrators: `${finalAgents.filter((item) => item.member_type === "brand_admin").length + finalInvitations.filter((item) => item.member_type === "brand_admin" && item.status === "pending").length}/${maxBrands}`,
+  broadcasts: `${finalBroadcasts.length}/${maxBroadcasts}`,
+  flows: `${finalFlows.length}/${maxFlows}`,
   syntheticConversations: finalConversations.filter((item) => item.metadata?.qa_seed === true).length,
   channelDistribution,
 }, null, 2));
