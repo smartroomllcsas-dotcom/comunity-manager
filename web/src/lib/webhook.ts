@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import { supabaseAdmin } from '@/lib/supabase'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { checkBillingFeature } from '@/lib/billing/service'
+import { BILLING_FEATURES } from '@/lib/billing/features'
 
 function getVerifyToken() {
   return process.env.META_WEBHOOK_VERIFY_TOKEN || ''
@@ -115,6 +118,9 @@ function extractMessageText(message: NonNullable<WhatsAppWebhookValue['messages'
 }
 
 export async function persistWhatsAppWebhook(payload: unknown) {
+  const smarttalkAdmin = process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? createAdminClient('smarttalk')
+    : null
   const entries = Array.isArray((payload as { entry?: unknown[] })?.entry)
     ? ((payload as { entry?: WhatsAppWebhookEntry[] }).entry as WhatsAppWebhookEntry[])
     : []
@@ -127,6 +133,21 @@ export async function persistWhatsAppWebhook(payload: unknown) {
         (entry.id && typeof entry.id === 'string' ? entry.id : null)
 
       if (!phoneNumberId) continue
+
+      // The legacy history path must not bypass the quota privacy rule used by
+      // the canonical SmartTalk processor. Old accounts without a SmartTalk
+      // channel keep their existing behavior.
+      const { data: smarttalkChannel, error: smarttalkChannelError } = smarttalkAdmin
+        ? await smarttalkAdmin
+            .from('channels')
+            .select('id,organization_id,brand_id')
+            .eq('whatsapp_phone_number_id', phoneNumberId)
+            .eq('status', 'active')
+            .maybeSingle()
+        : { data: null, error: null }
+      if (smarttalkChannelError) {
+        console.error('[meta-webhook:whatsapp] error consultando canal SmartTalk', smarttalkChannelError.message)
+      }
 
       const { data: account, error: accountError } = await supabaseAdmin
         .from('cm_whatsapp_accounts')
@@ -163,6 +184,33 @@ export async function persistWhatsAppWebhook(payload: unknown) {
 
       const messages = Array.isArray(value.messages) ? value.messages : []
       for (const message of messages) {
+        if (smarttalkChannel && smarttalkAdmin) {
+          const { data: existingContact } = await smarttalkAdmin
+            .from('contacts')
+            .select('id,visibility_status')
+            .eq('organization_id', smarttalkChannel.organization_id)
+            .eq('brand_id', smarttalkChannel.brand_id)
+            .eq('wa_id', message.from || '')
+            .maybeSingle()
+
+          if (!existingContact || existingContact.visibility_status === 'restricted') {
+            const billingDecision = await checkBillingFeature({
+              organizationId: smarttalkChannel.organization_id,
+              featureCode: BILLING_FEATURES.CONTACTS_TOTAL,
+              requestedUnits: 1,
+              source: 'webhook/whatsapp/legacy-history',
+            })
+            if (!billingDecision.allowed) {
+              console.warn('[billing] skipping legacy WhatsApp history for over-limit contact', {
+                organizationId: smarttalkChannel.organization_id,
+                brandId: smarttalkChannel.brand_id,
+                channelId: smarttalkChannel.id,
+              })
+              continue
+            }
+          }
+        }
+
         const content = extractMessageText(message)
         const direction = 'inbound'
         const from = message.from || 'WhatsApp'

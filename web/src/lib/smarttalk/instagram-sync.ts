@@ -4,6 +4,7 @@ import { BILLING_FEATURES } from "@/lib/billing/features";
 import { findReusableConversation } from "@/lib/smarttalk/conversation-dedupe";
 import { resolveToken } from "@/lib/auth/token-crypto";
 import { upsertRestrictedContact } from "@/lib/smarttalk/contact-privacy";
+import { recordContactOverageEvent } from "@/lib/smarttalk/contact-overage";
 import type { MessageContent, MessageType } from "@/types/database";
 
 type SmarttalkChannel = {
@@ -448,7 +449,7 @@ async function upsertInstagramContact(
     source: "sync/instagram/inbound-contact",
   });
   if (!billingDecision.allowed) {
-    await upsertRestrictedContact({
+    const restrictedContact = await upsertRestrictedContact({
       organizationId: channel.organization_id,
       brandId: channel.brand_id,
       channelId: channel.id,
@@ -463,7 +464,7 @@ async function upsertInstagramContact(
       currentUsage: billingDecision.currentUsage,
       limit: billingDecision.limitValue,
     });
-    return { id: null, restricted: true };
+    return { id: restrictedContact.id, restricted: true };
   }
 
   const { data: inserted, error } = await admin
@@ -603,7 +604,6 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
           ? new Date(conversation.updated_time).toISOString()
           : new Date().toISOString();
         const contactResult = await upsertInstagramContact(channel, externalContact, updatedAt);
-        if (contactResult.restricted || !contactResult.id) continue;
         const contactId = contactResult.id;
 
         // Cursor persistente por conversación: si el sync anterior paró mid-way, retomamos.
@@ -631,6 +631,33 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
         // disponible). No la mostramos como una conversación vacía.
         const readableMessages = messageRows.filter((message) => Boolean(parseInstagramMessage(message)));
         if (readableMessages.length === 0) continue;
+
+        if (contactResult.restricted) {
+          for (const message of readableMessages) {
+            const isOutbound = message.from?.id === socialAccount.instagram_id;
+            if (isOutbound || !contactId) continue;
+
+            const parsed = parseInstagramMessage(message);
+            if (!parsed) continue;
+
+            await recordContactOverageEvent({
+              organizationId: channel.organization_id,
+              brandId: channel.brand_id,
+              channelId: channel.id,
+              contactId,
+              source: "instagram",
+              providerContactId: externalContact.id || externalContact.username || "unknown",
+              providerMessageId: message.id,
+              messageType: parsed.type,
+              contactName: externalContact.username || null,
+              payload: message as unknown as Record<string, unknown>,
+            });
+            result.skippedMessages += 1;
+          }
+          continue;
+        }
+
+        if (!contactId) continue;
 
         const conversationId = await upsertInstagramConversation(
           channel,

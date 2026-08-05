@@ -5,6 +5,7 @@ import { processIncomingWithChatbot } from "@/lib/chatbot/engine";
 import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { upsertRestrictedContact } from "@/lib/smarttalk/contact-privacy";
+import { recordContactOverageEvent } from "@/lib/smarttalk/contact-overage";
 
 export async function processIncomingMessage(
   message: WebhookMessage,
@@ -51,6 +52,19 @@ export async function processIncomingMessage(
         last_message_at: new Date().toISOString(),
       })
       .eq("id", existingContact.id);
+    const { type } = parseMessageContent(message);
+    await recordContactOverageEvent({
+      organizationId: org.id,
+      brandId: channel.brand_id,
+      channelId: channel.id,
+      contactId: existingContact.id,
+      source: "whatsapp",
+      providerContactId: contact.wa_id,
+      providerMessageId: message.id,
+      messageType: type,
+      contactName: contact.profile.name,
+      payload: message as unknown as Record<string, unknown>,
+    });
     return;
   }
 
@@ -64,12 +78,25 @@ export async function processIncomingMessage(
     if (!billingDecision.allowed) {
       // A hard quota keeps the lead traceable, but does not create a
       // conversation/message or expose its phone number in the CRM.
-      await upsertRestrictedContact({
+      const restrictedContact = await upsertRestrictedContact({
         organizationId: org.id,
         brandId: channel.brand_id,
         channelId: channel.id,
         externalContactId: contact.wa_id,
         name: contact.profile.name,
+      });
+      const { type } = parseMessageContent(message);
+      await recordContactOverageEvent({
+        organizationId: org.id,
+        brandId: channel.brand_id,
+        channelId: channel.id,
+        contactId: restrictedContact.id,
+        source: "whatsapp",
+        providerContactId: contact.wa_id,
+        providerMessageId: message.id,
+        messageType: type,
+        contactName: contact.profile.name,
+        payload: message as unknown as Record<string, unknown>,
       });
       console.warn("[billing] inbound WhatsApp contact over limit; preserving webhook", {
         organizationId: org.id,

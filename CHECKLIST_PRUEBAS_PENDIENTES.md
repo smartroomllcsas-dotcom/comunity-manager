@@ -20,7 +20,8 @@ enforcement antes de activar `BILLING_ENFORCEMENT_MODE=hard` en Production.
 
 ### Hallazgos que bloquean la aprobación
 
-- [ ] Los webhooks conservan el payload técnico, pero un contacto sobre el límite no genera una conversación ni un mensaje consultable. Debe implementarse un registro de excedente/pending con retención y auditoría propia; la retención actual de `webhook_events` es de 7 días.
+- [x] Los webhooks conservan el payload técnico y ahora cada mensaje entrante sobre el límite se registra de forma durable en `smarttalk.contact_overage_events`, privado para `service_role` y deduplicado por canal/evento.
+- [ ] Implementar el worker que libere y reprocesa automáticamente los eventos `pending` cuando la organización amplíe el plan.
 - [ ] Completar enforcement en las rutas heredadas de publicaciones y flujos. La ruta general de posts y el editor de flujos escriben directamente sin `checkBillingFeature`.
 - [ ] Aplicar `reports.access` y `storage.bytes`; existen en el catálogo, pero no hay enforcement real en las rutas de reportes/almacenamiento.
 - [ ] Hacer atómicos los límites de recursos sujetos a concurrencia. Hoy varias decisiones son consulta de uso seguida de insert/update separado; falta probar y proteger el caso simultáneo de límite + 1.
@@ -29,6 +30,23 @@ enforcement antes de activar `BILLING_ENFORCEMENT_MODE=hard` en Production.
 - [ ] Probar cambio, cancelación, vencimiento, gracia, suspensión y reactivación en una cuenta no productiva.
 - [ ] Completar worker de outbox y notificaciones de billing; las tablas existen, pero no hay evidencia de procesamiento completo.
 - [ ] Confirmar en Vercel el valor actual de `BILLING_ENFORCEMENT_MODE`. La documentación histórica registra `off`; no se debe asumir que Production está en `hard` sin verificarlo.
+
+### Evidencia de prueba sintética ejecutada
+
+- [x] El 5 de agosto de 2026 se ejecutó un webhook firmado en local con
+  `BILLING_ENFORCEMENT_MODE=hard` contra `QA Agencia Inicial`, que tenía
+  `1.000/1.000` contactos.
+- [x] Messenger, Instagram y WhatsApp respondieron `200`; cada evento quedó
+  en `smarttalk.contact_overage_events` con estado `pending`.
+- [x] Cada contacto quedó con `visibility_status=restricted` y
+  `restricted_reason=contacts_limit`; no se creó conversación ni mensaje
+  visible.
+- [x] Se reenvió el mismo webhook Messenger y la deduplicación mantuvo una
+  sola fila de excedente.
+- [x] Los identificadores temporales se retiraron de los tres canales QA. Se
+  dejaron los tres contactos sintéticos para evidenciar que los leads nuevos
+  se registran sin exponer contenido ni número; por eso el contador QA ahora
+  muestra `1.003/1.000`.
 
 ### Regla de lectura
 

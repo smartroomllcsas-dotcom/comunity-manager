@@ -6,6 +6,7 @@ import { resolveToken } from "@/lib/auth/token-crypto";
 import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { upsertRestrictedContact } from "@/lib/smarttalk/contact-privacy";
+import { recordContactOverageEvent } from "@/lib/smarttalk/contact-overage";
 import {
   buildDisplayName,
   extractContactId,
@@ -245,7 +246,7 @@ async function upsertContactAndConversation(
       source: `webhook/${channel.type}/inbound-contact`,
     });
     if (!billingDecision.allowed) {
-      await upsertRestrictedContact({
+      const restrictedContact = await upsertRestrictedContact({
         organizationId: channel.organization_id,
         brandId: channel.brand_id,
         channelId: channel.id,
@@ -261,7 +262,7 @@ async function upsertContactAndConversation(
         limit: billingDecision.limitValue,
       });
       return {
-        dbContactId: undefined,
+        dbContactId: restrictedContact.id,
         conversationId: null,
         unreadCount: 0,
         restricted: true,
@@ -438,17 +439,34 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
       const contactId = extractContactId(event);
       const contactName = extractContactName(event);
       const contactIdentity = await resolveContactIdentity(channel, contactId, contactName);
+      const parsed = parseMetaMessage(payloadMessage);
+      const providerMessageId = payloadMessage.mid || payloadMessage.id || null;
       const { dbContactId, conversationId, unreadCount, restricted } = await upsertContactAndConversation(
         channel,
         contactId,
         contactIdentity
       );
 
-      if (restricted || !dbContactId || !conversationId) continue;
+      if (restricted) {
+        await recordContactOverageEvent({
+          organizationId: channel.organization_id,
+          brandId: channel.brand_id,
+          channelId: channel.id,
+          contactId: dbContactId,
+          source: channel.type === "instagram" ? "instagram" : "messenger",
+          providerContactId: contactId,
+          providerMessageId,
+          messageType: parsed.type,
+          contactName: contactIdentity.name,
+          payload: payloadMessage as unknown as Record<string, unknown>,
+        });
+        continue;
+      }
 
-      const parsed = parseMetaMessage(payloadMessage);
+      if (!dbContactId || !conversationId) continue;
+
       const direction = getMessageDirection(event, payloadMessage);
-      const providerMessageId = payloadMessage.mid || payloadMessage.id || randomUUID();
+      const providerMessageIdForInsert = providerMessageId || randomUUID();
       const preview = parsed.content.type === "text"
         ? parsed.content.text.slice(0, 100)
         : `[${parsed.type}]`;
@@ -463,7 +481,7 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
           direction,
           type: parsed.type,
           content: parsed.content,
-          wa_message_id: providerMessageId,
+          wa_message_id: providerMessageIdForInsert,
           status: direction === "outbound" ? "sent" : "delivered",
           is_bot: false,
         })
@@ -525,20 +543,37 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
           value
         );
         const contactIdentity = await resolveContactIdentity(channel, contactId, contactName);
+        const parsed = parseMetaMessage(message);
+        const providerMessageId = message.mid || message.id || null;
         const { dbContactId, conversationId, unreadCount, restricted } = await upsertContactAndConversation(
           channel,
           contactId,
           contactIdentity
         );
 
-        if (restricted || !dbContactId || !conversationId) continue;
+        if (restricted) {
+          await recordContactOverageEvent({
+            organizationId: channel.organization_id,
+            brandId: channel.brand_id,
+            channelId: channel.id,
+            contactId: dbContactId,
+            source: channel.type === "instagram" ? "instagram" : "messenger",
+            providerContactId: contactId,
+            providerMessageId,
+            messageType: parsed.type,
+            contactName: contactIdentity.name,
+            payload: message as unknown as Record<string, unknown>,
+          });
+          continue;
+        }
 
-        const parsed = parseMetaMessage(message);
+        if (!dbContactId || !conversationId) continue;
+
         const preview = parsed.content.type === "text"
           ? parsed.content.text.slice(0, 100)
           : `[${parsed.type}]`;
 
-        const waMessageId = message.mid || message.id || randomUUID();
+        const waMessageId = providerMessageId || randomUUID();
         const { data: insertedMessage, error: messageError } = await admin
           .from("messages")
           .insert({

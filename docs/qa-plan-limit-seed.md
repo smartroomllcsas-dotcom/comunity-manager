@@ -75,19 +75,30 @@ acceso global y no necesita una asignacion de marca.
 
 ## Prueba de contacto sobre el limite
 
-La migracion `20260805000100_027_contact_quota_restrictions.sql` agrega el
-estado `restricted` a los contactos. Con `BILLING_ENFORCEMENT_MODE=hard`:
+Las migraciones `20260805000100_027_contact_quota_restrictions.sql` y
+`20260805000300_029_contact_overage_events.sql` agregan el estado `restricted`
+y una cola privada de excedentes. Con `BILLING_ENFORCEMENT_MODE=hard`:
 
 1. Enviar un lead nuevo por Facebook Messenger, Instagram o WhatsApp cuando
    el contador ya este en `1.000/1.000`.
 2. Confirmar que el webhook responde correctamente y que el lead queda en la
    marca y canal propietarios con su nombre.
-3. Confirmar que no se crea conversacion ni mensaje para ese lead.
+3. Confirmar que no se crea conversacion ni mensaje visible para ese lead.
 4. Confirmar que Contactos muestra `Oculto por limite del plan` y no muestra
    telefono, identificador del proveedor ni contenido del mensaje.
 5. Solicitar el detalle o los mensajes directamente por API: debe responder
    `402 contact_restricted`.
-6. Eliminar/liberar un contacto valido o ampliar el plan y repetir el flujo.
+6. En Supabase verificar el excedente, sin exponerlo al cliente:
+
+   ```sql
+   SELECT source, status, COUNT(*)
+   FROM smarttalk.contact_overage_events
+   GROUP BY source, status;
+   ```
+
+   Debe existir un registro `pending` por cada mensaje entrante nuevo. Las
+   redeliveries del mismo proveedor no deben duplicarlo.
+7. Eliminar/liberar un contacto valido o ampliar el plan y repetir el flujo.
    Los nuevos leads deben volver a tener contacto completo y conversacion.
 
 Los contactos restringidos también cuentan para el límite hasta que un
@@ -95,15 +106,24 @@ administrador los elimine desde Contactos. El botón y la API validan la
 organización y la marca antes de borrar, por lo que no es posible liberar cupo
 eliminando información de otra cuenta.
 
-El identificador original no se guarda en `smarttalk.contacts`. Solo se
-conserva un hash con alcance de organizacion, marca y canal en
+El identificador original no se guarda en `smarttalk.contacts`. El hash con
+alcance de organizacion, marca y canal sigue en
 `smarttalk.contact_private_identifiers`, accesible exclusivamente por
-`service_role`, para evitar duplicados sin exponer el numero.
+`service_role`, para evitar duplicados sin exponer el numero. El mensaje
+excedente y el identificador necesario para una futura re-procesacion se
+conservan en `smarttalk.contact_overage_events`, tambien solo para
+`service_role`; no son seleccionables por el frontend ni por asesores.
+
+La captura durable esta implementada. La re-procesacion automatica de eventos
+`pending` cuando se amplia el plan requiere un worker de liberacion posterior;
+hasta que ese worker exista, el backend debe mantenerlos pendientes y nunca
+eliminarlos como parte de la limpieza de `smarttalk.webhook_events`.
 
 ## Orden de despliegue
 
-1. Ejecutar primero la migracion en el SQL Editor del proyecto Supabase
-   correcto.
+1. Ejecutar primero las migraciones `027`, `028` y `029` en el SQL Editor del
+   proyecto Supabase correcto. La nueva `029` es obligatoria para conservar
+   mensajes excedentes sin perderlos.
 2. En Vercel establecer `BILLING_ENFORCEMENT_MODE=hard` en Production. No se
    agrega otra variable para esta funcionalidad.
 3. Desplegar la aplicacion.
