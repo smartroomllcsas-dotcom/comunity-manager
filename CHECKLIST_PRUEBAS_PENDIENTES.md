@@ -9,12 +9,12 @@ enforcement antes de activar `BILLING_ENFORCEMENT_MODE=hard` en Production.
 
 ### Evidencia disponible
 
-- [x] Commit local y remoto revisado: `ee77782` (`fix: preserve over-limit inbound messages`).
-- [x] `npm run test`: 12 archivos Vitest, 139 pruebas aprobadas, más 6 pruebas Node aprobadas.
+- [x] Commits integrados: `31c6cd9` (enforcement) y `f73fd39` (reprocesamiento de excedentes), sobre `ee77782`.
+- [x] `npm run test`: 12 archivos Vitest, 140 pruebas aprobadas, más 6 pruebas Node aprobadas.
 - [x] `npm run lint -- --quiet`: aprobado, sin errores.
 - [x] `npm run build`: aprobado en la validación local posterior al último cambio.
 - [x] `git diff --check`: aprobado.
-- [x] El propietario confirmó en Supabase `Success. No rows returned` para las migraciones `027` y `028`.
+- [x] El propietario confirmó en Supabase `Success. No rows returned` para las migraciones `027`, `028`, `029` y `030`.
 - [x] Migraciones locales presentes hasta `20260805000400_030_contact_overage_release_queue.sql`.
 - [x] Fixture QA inicial y script de limpieza presentes; todavía no constituyen un proyecto QA separado.
 
@@ -22,9 +22,8 @@ enforcement antes de activar `BILLING_ENFORCEMENT_MODE=hard` en Production.
 
 - [x] Los webhooks conservan el payload técnico y ahora cada mensaje entrante sobre el límite se registra de forma durable en `smarttalk.contact_overage_events`, privado para `service_role` y deduplicado por canal/evento.
 - [x] Implementar el worker que reclama, libera y reprocesa automáticamente los eventos `pending` cuando la organización amplíe el plan. La migración `030` usa una cola con lease y `SKIP LOCKED`; el cron es `/api/cron/release-contact-overage`.
-- [ ] Ejecutar y verificar remotamente la migración `030` en el proyecto Supabase de producción antes de desplegar el cron.
-- [ ] Completar enforcement en las rutas heredadas de publicaciones y flujos. La ruta general de posts y el editor de flujos escriben directamente sin `checkBillingFeature`.
-- [ ] Aplicar `reports.access` y `storage.bytes`; existen en el catálogo, pero no hay enforcement real en las rutas de reportes/almacenamiento.
+- [x] Enforcement backend implementado en posts, flujos/chatbot, reportes, almacenamiento, IA y broadcasts mediante `checkBillingFeature` y respuestas HTTP 402.
+- [x] La migración `030` fue confirmada por el propietario en Supabase antes de desplegar el cron de reprocesamiento.
 - [ ] Hacer atómicos los límites de recursos sujetos a concurrencia. Hoy varias decisiones son consulta de uso seguida de insert/update separado; falta probar y proteger el caso simultáneo de límite + 1.
 - [ ] Separar QA en otro proyecto Supabase y Preview de Vercel. El seed actual apunta a una organización QA dentro del proyecto conectado.
 - [ ] Ejecutar aceptación E2E por cada plan con ePayco sandbox y registrar referencia, estado de pago, suscripción y límites observados.
