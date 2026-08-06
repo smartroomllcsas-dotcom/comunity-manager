@@ -24,6 +24,10 @@
       "schedule": "15 4 * * *"
     },
     {
+      "path": "/api/cron/release-contact-overage",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/reap-scheduled",
       "schedule": "*/5 * * * *"
     }

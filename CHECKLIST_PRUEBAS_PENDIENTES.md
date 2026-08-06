@@ -9,19 +9,20 @@ enforcement antes de activar `BILLING_ENFORCEMENT_MODE=hard` en Production.
 
 ### Evidencia disponible
 
-- [x] Commit local y remoto revisado: `7dba8e5` (`fix: enforce advisor brand data isolation`).
-- [x] `npm run test`: 9 archivos Vitest, 127 pruebas aprobadas, más 6 pruebas Node aprobadas.
+- [x] Commit local y remoto revisado: `ee77782` (`fix: preserve over-limit inbound messages`).
+- [x] `npm run test`: 12 archivos Vitest, 139 pruebas aprobadas, más 6 pruebas Node aprobadas.
 - [x] `npm run lint -- --quiet`: aprobado, sin errores.
 - [x] `npm run build`: aprobado en la validación local posterior al último cambio.
 - [x] `git diff --check`: aprobado.
 - [x] El propietario confirmó en Supabase `Success. No rows returned` para las migraciones `027` y `028`.
-- [x] Migraciones locales presentes hasta `20260805000200_028_advisor_brand_rls_hardening.sql`.
+- [x] Migraciones locales presentes hasta `20260805000400_030_contact_overage_release_queue.sql`.
 - [x] Fixture QA inicial y script de limpieza presentes; todavía no constituyen un proyecto QA separado.
 
 ### Hallazgos que bloquean la aprobación
 
 - [x] Los webhooks conservan el payload técnico y ahora cada mensaje entrante sobre el límite se registra de forma durable en `smarttalk.contact_overage_events`, privado para `service_role` y deduplicado por canal/evento.
-- [ ] Implementar el worker que libere y reprocesa automáticamente los eventos `pending` cuando la organización amplíe el plan.
+- [x] Implementar el worker que reclama, libera y reprocesa automáticamente los eventos `pending` cuando la organización amplíe el plan. La migración `030` usa una cola con lease y `SKIP LOCKED`; el cron es `/api/cron/release-contact-overage`.
+- [ ] Ejecutar y verificar remotamente la migración `030` en el proyecto Supabase de producción antes de desplegar el cron.
 - [ ] Completar enforcement en las rutas heredadas de publicaciones y flujos. La ruta general de posts y el editor de flujos escriben directamente sin `checkBillingFeature`.
 - [ ] Aplicar `reports.access` y `storage.bytes`; existen en el catálogo, pero no hay enforcement real en las rutas de reportes/almacenamiento.
 - [ ] Hacer atómicos los límites de recursos sujetos a concurrencia. Hoy varias decisiones son consulta de uso seguida de insert/update separado; falta probar y proteger el caso simultáneo de límite + 1.

@@ -13,6 +13,8 @@ interface BillingCheckInput {
   excludeInvitationId?: string;
   requestedUnits?: number;
   source?: string;
+  /** Internal worker override for state transitions that must never run in observe/soft mode. */
+  forceHard?: boolean;
 }
 
 interface EntitlementRow {
@@ -80,9 +82,12 @@ function parseMode(value: string | null | undefined): BillingEnforcementMode {
 }
 
 function resolveMode(
-  organizationMode: BillingEnforcementMode | null
+  organizationMode: BillingEnforcementMode | null,
+  forceHard = false,
 ): BillingEnforcementMode {
-  const globalMode = parseMode(process.env.BILLING_ENFORCEMENT_MODE);
+  const globalMode = forceHard
+    ? "hard"
+    : parseMode(process.env.BILLING_ENFORCEMENT_MODE);
   if (globalMode === "off") return "off";
 
   const orgMode = parseMode(organizationMode);
@@ -361,10 +366,15 @@ async function getCurrentUsage(
 export async function checkBillingFeature(
   input: BillingCheckInput
 ): Promise<BillingDecision> {
-  const requestedUnits = Math.max(1, Math.floor(input.requestedUnits ?? 1));
+  // A zero-unit check is used by the overage release worker when the contact
+  // already exists and only needs its restricted visibility promoted. Normal
+  // resource creation callers continue to use the default minimum of one.
+  const requestedUnits = Math.max(0, Math.floor(input.requestedUnits ?? 1));
   const normalizedInput = { ...input, requestedUnits };
   const fallbackPeriod = defaultPeriod();
-  const globalMode = parseMode(process.env.BILLING_ENFORCEMENT_MODE);
+  const globalMode = input.forceHard
+    ? "hard"
+    : parseMode(process.env.BILLING_ENFORCEMENT_MODE);
 
   // The platform owner is outside customer plan limits, but the check remains
   // in the backend so every channel and resource creation path is consistent.
@@ -426,7 +436,7 @@ export async function checkBillingFeature(
       ? organizationRow.plan[0] || null
       : organizationRow.plan,
   };
-  const mode = resolveMode(org.billing_enforcement_mode);
+  const mode = resolveMode(org.billing_enforcement_mode, input.forceHard === true);
   const { data: subscriptionData } = await admin
     .from("subscriptions")
     .select(

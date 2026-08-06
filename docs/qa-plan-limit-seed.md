@@ -114,16 +114,21 @@ excedente y el identificador necesario para una futura re-procesacion se
 conservan en `smarttalk.contact_overage_events`, tambien solo para
 `service_role`; no son seleccionables por el frontend ni por asesores.
 
-La captura durable esta implementada. La re-procesacion automatica de eventos
-`pending` cuando se amplia el plan requiere un worker de liberacion posterior;
-hasta que ese worker exista, el backend debe mantenerlos pendientes y nunca
-eliminarlos como parte de la limpieza de `smarttalk.webhook_events`.
+La captura durable y el worker de liberacion estan implementados. La migracion
+`20260805000400_030_contact_overage_release_queue.sql` agrega leases con
+`SKIP LOCKED` para evitar reprocesamiento concurrente. El cron protegido por
+`CRON_SECRET` (`/api/cron/release-contact-overage`) restaura el identificador
+del proveedor, cambia el contacto a `full`, crea la conversacion y reinyecta
+el mensaje de forma idempotente. Si el plan sigue sin permitir la liberacion,
+el evento vuelve a `pending`; los errores nunca eliminan el payload. No agrega
+variables nuevas: reutiliza `CRON_SECRET` y evalua la suscripcion con
+semantica estricta aunque el modo global este en `observe` o `soft`.
 
 ## Orden de despliegue
 
-1. Ejecutar primero las migraciones `027`, `028` y `029` en el SQL Editor del
-   proyecto Supabase correcto. La nueva `029` es obligatoria para conservar
-   mensajes excedentes sin perderlos.
+1. Ejecutar primero las migraciones `027`, `028`, `029` y `030` en el SQL
+   Editor del proyecto Supabase correcto. Las nuevas `029` y `030` son
+   obligatorias para conservar y reprocesar mensajes excedentes sin perderlos.
 2. En Vercel establecer `BILLING_ENFORCEMENT_MODE=hard` en Production. No se
    agrega otra variable para esta funcionalidad.
 3. Desplegar la aplicacion.
