@@ -385,6 +385,43 @@ En Vercel:
 Los cambios de variables solo aplican a nuevos deployments. Después de
 modificarlas debes volver a desplegar.
 
+### Procedimiento obligatorio para no desplegar el directorio equivocado
+
+Este repositorio es un monorepo. El proyecto Vercel `cg-moda/comunityagent`
+usa **`web` como Root Directory**. Por eso no se debe ejecutar `vercel deploy`
+desde la raíz del repositorio: Vercel puede no detectar Next.js o puede tomar
+una configuración distinta.
+
+Usa siempre este flujo desde un checkout limpio de `master`:
+
+```bash
+git fetch origin
+git worktree add --detach /tmp/comunity-manager-master origin/master
+cd /tmp/comunity-manager-master/web
+npx vercel link --yes --project comunityagent --scope cg-moda
+npx vercel deploy --prod --yes --force --logs
+```
+
+La salida válida debe incluir `Detected Next.js version`, `Build Completed`,
+`readyState: READY` y el alias de Production. Comprueba después:
+
+```bash
+npx vercel inspect <DEPLOYMENT_ID> --scope cg-moda
+curl -sS -o /dev/null -w 'status=%{http_code} url=%{url_effective}\n' https://www.comunitymanager.io/
+```
+
+Esperado: estado `Ready` y HTTP `200`. El worktree temporal debe eliminarse
+cuando termine la verificación:
+
+```bash
+cd <REPOSITORIO>
+git worktree remove --force /tmp/comunity-manager-master
+```
+
+En el Dashboard, si se usa la interfaz, filtra por la rama `master` y confirma
+el commit antes de pulsar **Redeploy**. No redeployes el deployment superior si
+pertenece a `codex/*`; esa acción reconstruye ese branch, no `master`.
+
 ### Estado Production verificado el 2026-07-30
 
 - Proyecto Vercel: `cg-moda/comunityagent`.
@@ -400,6 +437,16 @@ modificarlas debes volver a desplegar.
 - Webhooks al verificar: `pending=0`, `failed=0`, `dead=0`.
 - Las siete variables operativas de billing aparecen configuradas en
   `Production`; Vercel mantiene sus valores cifrados.
+
+### Estado Production verificado el 2026-08-06
+
+- `BILLING_ENFORCEMENT_MODE=hard` quedó configurado en `Production`.
+- Deployment desde `origin/master` (`1ec490d`):
+  `dpl_CtXr95p4vkJaTypfy3uW9zY1DdJ2`.
+- Estado: `Ready`; alias activo: `https://www.comunitymanager.io`.
+- Smoke test de `/`: HTTP `200`.
+- El primer intento desde la raíz falló por el Root Directory incorrecto; no
+  fue promovido. El deployment válido se ejecutó desde `web/` con build limpio.
 
 ### Cron configurado
 

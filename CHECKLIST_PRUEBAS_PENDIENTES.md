@@ -29,7 +29,7 @@ enforcement antes de activar `BILLING_ENFORCEMENT_MODE=hard` en Production.
 - [ ] Ejecutar aceptación E2E por cada plan con ePayco sandbox y registrar referencia, estado de pago, suscripción y límites observados.
 - [ ] Probar cambio, cancelación, vencimiento, gracia, suspensión y reactivación en una cuenta no productiva.
 - [ ] Completar worker de outbox y notificaciones de billing; las tablas existen, pero no hay evidencia de procesamiento completo.
-- [ ] Confirmar en Vercel el valor actual de `BILLING_ENFORCEMENT_MODE`. La documentación histórica registra `off`; no se debe asumir que Production está en `hard` sin verificarlo.
+- [x] Confirmar en Vercel el valor actual de `BILLING_ENFORCEMENT_MODE`: `hard`, aplicado en Production el 2026-08-06 y cargado en el deployment `dpl_CtXr95p4vkJaTypfy3uW9zY1DdJ2` (`Ready`, smoke test HTTP 200).
 
 ### Evidencia de prueba sintética ejecutada
 
