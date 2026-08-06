@@ -1,0 +1,162 @@
+// Supabase en memoria para las pruebas E2E de QA.
+// ---------------------------------------------------------------------------
+// Reproduce el subconjunto del query-builder de supabase-js que usan los
+// módulos bajo prueba (checkBillingFeature, brand-scope, billing-lifecycle,
+// public-plans): from().select()/insert()/update()/delete() con filtros
+// encadenados (eq/neq/in/gte/lte/contains/overlaps), maybeSingle()/single(),
+// conteos { count, head } y await directo del builder.
+//
+// NO toca red ni la base real: es un almacén de objetos en memoria. Se usa
+// mockeando "@/lib/supabase/admin" y "@/lib/supabase/server" desde cada spec.
+
+export type Rows = Record<string, unknown>[];
+export interface Seed {
+  tables?: Record<string, Rows>;
+  currentUserId?: string;
+}
+
+type Filter = (row: Record<string, unknown>) => boolean;
+
+export interface FakeSupabase {
+  store: Record<string, Rows>;
+  admin: (schema?: string) => FakeClient;
+  server: { auth: { getUser: () => Promise<{ data: { user: { id: string } | null } }> } };
+  // Registro de llamadas a rpc() para poder aseverar el RPC de activación.
+  rpcCalls: Array<{ name: string; args: unknown }>;
+}
+
+interface FakeClient {
+  from: (table: string) => FakeQuery;
+  rpc: (name: string, args?: unknown) => Promise<{ data: unknown; error: null }>;
+  storage: { from: () => { remove: () => Promise<{ error: null }> } };
+}
+
+// Builder mínimo pero fiel. Cada método de filtro devuelve el mismo builder.
+interface FakeQuery {
+  select: (cols?: string, opts?: { count?: string; head?: boolean }) => FakeQuery;
+  insert: (payload: unknown) => FakeQuery;
+  update: (payload: Record<string, unknown>) => FakeQuery;
+  delete: () => FakeQuery;
+  eq: (c: string, v: unknown) => FakeQuery;
+  neq: (c: string, v: unknown) => FakeQuery;
+  in: (c: string, v: unknown[]) => FakeQuery;
+  gt: (c: string, v: unknown) => FakeQuery;
+  gte: (c: string, v: unknown) => FakeQuery;
+  lt: (c: string, v: unknown) => FakeQuery;
+  lte: (c: string, v: unknown) => FakeQuery;
+  contains: (c: string, v: unknown[]) => FakeQuery;
+  overlaps: (c: string, v: unknown[]) => FakeQuery;
+  order: () => FakeQuery;
+  limit: (n: number) => FakeQuery;
+  maybeSingle: () => Promise<{ data: unknown; error: unknown }>;
+  single: () => Promise<{ data: unknown; error: unknown }>;
+  then: (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) => Promise<unknown>;
+}
+
+export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
+  const store: Record<string, Rows> = {};
+  for (const [name, rows] of Object.entries(seed.tables || {})) {
+    store[name] = rows.map((r) => ({ ...r }));
+  }
+  const currentUserId = seed.currentUserId ?? "user-default";
+  const rpcCalls: Array<{ name: string; args: unknown }> = [];
+  let idSeq = 0;
+
+  function from(table: string): FakeQuery {
+    if (!store[table]) store[table] = [];
+    let op: "select" | "insert" | "update" | "delete" = "select";
+    let opts: { count?: string; head?: boolean } = {};
+    let payload: unknown = null;
+    let limitN: number | null = null;
+    const filters: Filter[] = [];
+
+    const match = () => store[table].filter((row) => filters.every((f) => f(row)));
+
+    async function terminate(mode: "await" | "maybeSingle" | "single") {
+      if (op === "insert") {
+        const list = Array.isArray(payload) ? payload : [payload];
+        const inserted = list.map((r) => {
+          const copy = { ...(r as Record<string, unknown>) };
+          // Genera un id sintético cuando la fila no lo trae (INSERT ... RETURNING id).
+          if (copy.id === undefined) copy.id = `${table}-${++idSeq}`;
+          return copy;
+        });
+        store[table].push(...inserted);
+        if (mode === "single" || mode === "maybeSingle") {
+          return { data: inserted[0] ?? null, error: null };
+        }
+        return { data: inserted, error: null };
+      }
+      if (op === "update") {
+        const matched = match();
+        for (const row of matched) Object.assign(row, payload as Record<string, unknown>);
+        return { data: matched, error: null, count: matched.length };
+      }
+      if (op === "delete") {
+        const keep = store[table].filter((row) => !filters.every((f) => f(row)));
+        const removed = store[table].length - keep.length;
+        store[table] = keep;
+        return { data: null, error: null, count: removed };
+      }
+      // select
+      let rows = match();
+      if (limitN != null) rows = rows.slice(0, limitN);
+      if (opts.head) return { data: null, error: null, count: rows.length };
+      if (mode === "maybeSingle") return { data: rows[0] ?? null, error: null };
+      if (mode === "single") {
+        return rows[0]
+          ? { data: rows[0], error: null }
+          : { data: null, error: { message: "no rows", code: "PGRST116" } };
+      }
+      return { data: rows, error: null, count: rows.length };
+    }
+
+    const builder: FakeQuery = {
+      select(_cols, o) {
+        if (op !== "insert") op = "select";
+        opts = o || {};
+        return builder;
+      },
+      insert(p) { op = "insert"; payload = p; return builder; },
+      update(p) { op = "update"; payload = p; return builder; },
+      delete() { op = "delete"; return builder; },
+      eq(c, v) { filters.push((r) => r[c] === v); return builder; },
+      neq(c, v) { filters.push((r) => r[c] !== v); return builder; },
+      in(c, v) { filters.push((r) => v.includes(r[c])); return builder; },
+      gt(c, v) { filters.push((r) => (r[c] as number) > (v as number)); return builder; },
+      gte(c, v) { filters.push((r) => (r[c] as number) >= (v as number)); return builder; },
+      lt(c, v) { filters.push((r) => (r[c] as number) < (v as number)); return builder; },
+      lte(c, v) { filters.push((r) => (r[c] as number) <= (v as number)); return builder; },
+      contains(c, v) {
+        filters.push((r) => Array.isArray(r[c]) && v.every((x) => (r[c] as unknown[]).includes(x)));
+        return builder;
+      },
+      overlaps(c, v) {
+        filters.push((r) => Array.isArray(r[c]) && v.some((x) => (r[c] as unknown[]).includes(x)));
+        return builder;
+      },
+      order() { return builder; },
+      limit(n) { limitN = n; return builder; },
+      maybeSingle: () => terminate("maybeSingle"),
+      single: () => terminate("single"),
+      then: (res, rej) => Promise.resolve(terminate("await")).then(res, rej),
+    };
+    return builder;
+  }
+
+  const client: FakeClient = {
+    from,
+    rpc: async (name: string, args?: unknown) => {
+      rpcCalls.push({ name, args });
+      return { data: null, error: null };
+    },
+    storage: { from: () => ({ remove: async () => ({ error: null }) }) },
+  };
+
+  return {
+    store,
+    admin: () => client,
+    server: { auth: { getUser: async () => ({ data: { user: { id: currentUserId } } }) } },
+    rpcCalls,
+  };
+}
