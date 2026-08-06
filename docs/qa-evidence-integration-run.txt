@@ -3,15 +3,15 @@
 
  RUN  v4.1.10
 
- ✓ subscription-lifecycle.test.ts > Ciclo de vida — acceso según estado > trial vigente => permite
- ✓ subscription-lifecycle.test.ts > Ciclo de vida — acceso según estado > trial vencido => 402 (subscription_inactive)
- ✓ subscription-lifecycle.test.ts > Ciclo de vida — acceso según estado > active => permite
- ✓ subscription-lifecycle.test.ts > Ciclo de vida — acceso según estado > past_due dentro de gracia => permite
- ✓ subscription-lifecycle.test.ts > Ciclo de vida — acceso según estado > past_due gracia vencida => 402
- ✓ subscription-lifecycle.test.ts > Ciclo de vida — acceso según estado > suspended => 402
- ✓ subscription-lifecycle.test.ts > Ciclo de vida — acceso según estado > cancelled => 402
- ✓ subscription-lifecycle.test.ts > Ciclo de vida — transiciones del cron > rechaza sin CRON_SECRET válido (401)
- ✓ subscription-lifecycle.test.ts > Ciclo de vida — transiciones del cron > active->past_due, cancel->cancelled, past_due->suspended
+ ✓ epayco.test.ts > ePayco mapeo de estado (función real) > x_cod_response=1 => approved
+ ✓ epayco.test.ts > ePayco mapeo de estado (función real) > x_cod_response=2 => rejected
+ ✓ epayco.test.ts > ePayco mapeo de estado (función real) > x_cod_response=3 => pending
+ ✓ epayco.test.ts > ePayco mapeo de estado (función real) > x_cod_response=4 => failed
+ ✓ epayco.test.ts > ePayco mapeo de estado (función real) > código desconocido o vacío => pending (fail-safe)
+ ✓ epayco.test.ts > POST /api/epayco/confirmation (ruta real) > APROBADO: pago approved + invoca finalize_epayco_approved_payment + evento processed
+ ✓ epayco.test.ts > POST /api/epayco/confirmation (ruta real) > RECHAZADO: pago rejected + checkout rejected + sin RPC
+ ✓ epayco.test.ts > POST /api/epayco/confirmation (ruta real) > PENDIENTE: pago pending + checkout pending sin completar + sin RPC
+ ✓ epayco.test.ts > POST /api/epayco/confirmation (ruta real) > FIRMA INVÁLIDA: 400 y no registra pago
  ✓ limits.test.ts > Límites > 'marcas': límite -1 permite
  ✓ limits.test.ts > Límites > 'canales': límite -1 permite
  ✓ limits.test.ts > Límites > 'asesores': límite -1 permite
@@ -36,12 +36,15 @@
  ✓ brand-isolation.test.ts > Aislamiento > puede acceder a Marca A pero NO a Marca B
  ✓ brand-isolation.test.ts > Aislamiento > ve la conversación de A y NO la de B
  ✓ brand-isolation.test.ts > Aislamiento > superadmin tiene alcance global
- ✓ epayco.test.ts > ePayco > x_cod_response=1 => approved
- ✓ epayco.test.ts > ePayco > x_cod_response=2 => rejected
- ✓ epayco.test.ts > ePayco > x_cod_response=3 => pending
- ✓ epayco.test.ts > ePayco > x_cod_response=4 => failed
- ✓ epayco.test.ts > ePayco > aprobado es el ÚNICO estado que activa/renueva
- ✓ epayco.test.ts > ePayco > código desconocido/vacío => pending (no activa)
+ ✓ subscription-lifecycle.test.ts > Acceso según estado > trial vigente => permite
+ ✓ subscription-lifecycle.test.ts > Acceso según estado > trial vencido => 402
+ ✓ subscription-lifecycle.test.ts > Acceso según estado > active => permite
+ ✓ subscription-lifecycle.test.ts > Acceso según estado > past_due dentro de gracia => permite
+ ✓ subscription-lifecycle.test.ts > Acceso según estado > past_due gracia vencida => 402
+ ✓ subscription-lifecycle.test.ts > Acceso según estado > suspended => 402
+ ✓ subscription-lifecycle.test.ts > Acceso según estado > cancelled => 402
+ ✓ subscription-lifecycle.test.ts > Transiciones del cron > rechaza sin CRON_SECRET válido (401)
+ ✓ subscription-lifecycle.test.ts > Transiciones del cron > active->past_due, cancel->cancelled, past_due->suspended
 
  Test Files  5 passed (5)
-      Tests  39 passed (39)
+      Tests  42 passed (42)

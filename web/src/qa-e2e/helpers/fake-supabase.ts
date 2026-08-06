@@ -21,6 +21,8 @@ export interface FakeSupabase {
   store: Record<string, Rows>;
   admin: (schema?: string) => FakeClient;
   server: { auth: { getUser: () => Promise<{ data: { user: { id: string } | null } }> } };
+  // Registro de llamadas a rpc() para poder aseverar el RPC de activación.
+  rpcCalls: Array<{ name: string; args: unknown }>;
 }
 
 interface FakeClient {
@@ -57,6 +59,8 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
     store[name] = rows.map((r) => ({ ...r }));
   }
   const currentUserId = seed.currentUserId ?? "user-default";
+  const rpcCalls: Array<{ name: string; args: unknown }> = [];
+  let idSeq = 0;
 
   function from(table: string): FakeQuery {
     if (!store[table]) store[table] = [];
@@ -71,7 +75,12 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
     async function terminate(mode: "await" | "maybeSingle" | "single") {
       if (op === "insert") {
         const list = Array.isArray(payload) ? payload : [payload];
-        const inserted = list.map((r) => ({ ...(r as Record<string, unknown>) }));
+        const inserted = list.map((r) => {
+          const copy = { ...(r as Record<string, unknown>) };
+          // Genera un id sintético cuando la fila no lo trae (INSERT ... RETURNING id).
+          if (copy.id === undefined) copy.id = `${table}-${++idSeq}`;
+          return copy;
+        });
         store[table].push(...inserted);
         if (mode === "single" || mode === "maybeSingle") {
           return { data: inserted[0] ?? null, error: null };
@@ -137,7 +146,10 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
 
   const client: FakeClient = {
     from,
-    rpc: async () => ({ data: true, error: null }),
+    rpc: async (name: string, args?: unknown) => {
+      rpcCalls.push({ name, args });
+      return { data: null, error: null };
+    },
     storage: { from: () => ({ remove: async () => ({ error: null }) }) },
   };
 
@@ -145,5 +157,6 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
     store,
     admin: () => client,
     server: { auth: { getUser: async () => ({ data: { user: { id: currentUserId } } }) } },
+    rpcCalls,
   };
 }
