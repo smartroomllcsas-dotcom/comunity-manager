@@ -7,8 +7,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(
   _request: NextRequest,
-  { params }: { params: { channelId: string } }
+  { params }: { params: Promise<{ channelId: string }> }
 ) {
+  const { channelId } = await params;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -25,7 +26,7 @@ export async function GET(
   const { data: channel } = await admin
     .from("channels")
     .select("id, organization_id, brand_id")
-    .eq("id", params.channelId)
+    .eq("id", channelId)
     .maybeSingle();
   if (!channel) return NextResponse.json({ error: "Channel not found" }, { status: 404 });
   if (channel.organization_id !== agent.organization_id) {
@@ -35,7 +36,7 @@ export async function GET(
   const { data: sess } = await admin
     .from("waha_sessions")
     .select("session_name, status")
-    .eq("channel_id", params.channelId)
+    .eq("channel_id", channelId)
     .maybeSingle();
   if (!sess) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
@@ -54,7 +55,7 @@ export async function GET(
   await admin
     .from("waha_sessions")
     .update({ last_qr_at: new Date().toISOString() })
-    .eq("channel_id", params.channelId);
+    .eq("channel_id", channelId);
 
   return new NextResponse(Buffer.from(qr.data, "base64"), {
     status: 200,

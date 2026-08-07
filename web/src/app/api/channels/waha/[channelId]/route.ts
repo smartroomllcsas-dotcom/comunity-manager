@@ -7,8 +7,9 @@ export const dynamic = "force-dynamic";
 
 export async function DELETE(
   _request: NextRequest,
-  { params }: { params: { channelId: string } }
+  { params }: { params: Promise<{ channelId: string }> }
 ) {
+  const { channelId } = await params;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -25,7 +26,7 @@ export async function DELETE(
   const { data: channel } = await admin
     .from("channels")
     .select("id, organization_id")
-    .eq("id", params.channelId)
+    .eq("id", channelId)
     .maybeSingle();
   if (!channel) return NextResponse.json({ error: "Channel not found" }, { status: 404 });
   if (channel.organization_id !== agent.organization_id) {
@@ -35,7 +36,7 @@ export async function DELETE(
   const { data: sess } = await admin
     .from("waha_sessions")
     .select("session_name")
-    .eq("channel_id", params.channelId)
+    .eq("channel_id", channelId)
     .maybeSingle();
 
   if (sess?.session_name) {
@@ -47,12 +48,12 @@ export async function DELETE(
   await admin
     .from("waha_sessions")
     .delete()
-    .eq("channel_id", params.channelId);
+    .eq("channel_id", channelId);
 
   await admin
     .from("channels")
     .update({ status: "disconnected" })
-    .eq("id", params.channelId);
+    .eq("id", channelId);
 
   return NextResponse.json({ ok: true });
 }
