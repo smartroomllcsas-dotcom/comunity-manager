@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SegmentBuilder } from "@/components/contacts/SegmentBuilder";
 import { ImportDialog } from "@/components/contacts/ImportDialog";
+import { AddContactDialog } from "@/components/contacts/AddContactDialog";
 import { Search, Plus, Upload, Download, Users, Ban, Filter, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -55,6 +56,7 @@ export default function ContactsPage() {
   const [page, setPage] = useState(0);
   const [segmentBuilderOpen, setSegmentBuilderOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [addContactDialogOpen, setAddContactDialogOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   const { data: segments } = useSegments();
@@ -262,7 +264,12 @@ export default function ContactsPage() {
             <Download className="h-4 w-4 mr-1.5" />
             Exportar
           </Button>
-          <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white">
+          <Button
+            size="sm"
+            onClick={() => setAddContactDialogOpen(true)}
+            disabled={!brandId}
+            className="bg-blue-600 hover:bg-blue-700 text-white"
+          >
             <Plus className="h-4 w-4 mr-1.5" />
             Anadir contacto
           </Button>
@@ -445,6 +452,11 @@ export default function ContactsPage() {
       <ImportDialog
         open={importDialogOpen}
         onOpenChange={setImportDialogOpen}
+        brandId={brandId}
+      />
+      <AddContactDialog
+        open={addContactDialogOpen}
+        onOpenChange={setAddContactDialogOpen}
         brandId={brandId}
       />
     </div>
