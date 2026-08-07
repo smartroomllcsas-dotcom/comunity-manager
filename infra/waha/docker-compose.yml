@@ -4,7 +4,7 @@ services:
     container_name: waha
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3010:3000"   # bind to localhost only; Caddy exposes 443
+      - "127.0.0.1:3011:3000"   # bind to localhost only; cloudflared-smartmedia exposes waha.smartgenapp.com (3010 is taken on `server`)
     environment:
       WAHA_API_KEY: ${WAHA_API_KEY}
       WAHA_DASHBOARD_ENABLED: "true"
