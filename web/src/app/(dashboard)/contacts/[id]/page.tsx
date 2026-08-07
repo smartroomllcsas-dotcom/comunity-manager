@@ -130,14 +130,14 @@ export default function ContactDetailPage() {
                     {contact.wa_id}
                   </span>
                 )}
-                {contact.custom_fields?.email && (
+                {contact.visibility_status !== "restricted" && contact.custom_fields?.email && (
                   <span className="flex items-center gap-1.5">
                     <Mail className="h-3.5 w-3.5" />
                     {contact.custom_fields.email}
                   </span>
                 )}
               </div>
-              <div className="flex gap-1.5 mt-2.5 flex-wrap">
+              {contact.visibility_status !== "restricted" && <div className="flex gap-1.5 mt-2.5 flex-wrap">
                 {contact.tags?.map((tag: string) => (
                   <span
                     key={tag}
@@ -147,7 +147,7 @@ export default function ContactDetailPage() {
                     {tag}
                   </span>
                 ))}
-              </div>
+              </div>}
             </div>
           </div>
         </div>

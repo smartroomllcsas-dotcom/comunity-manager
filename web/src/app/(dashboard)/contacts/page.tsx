@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { SegmentBuilder } from "@/components/contacts/SegmentBuilder";
 import { ImportDialog } from "@/components/contacts/ImportDialog";
 import { AddContactDialog } from "@/components/contacts/AddContactDialog";
+import { useRestrictedLeads } from "@/hooks/useRestrictedLeads";
 import { Search, Plus, Upload, Download, Users, Ban, Filter, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -60,6 +61,7 @@ export default function ContactsPage() {
   const [exporting, setExporting] = useState(false);
 
   const { data: segments } = useSegments();
+  const { data: restrictedLeads } = useRestrictedLeads(brandId || undefined);
 
   useEffect(() => {
     void fetch("/api/cm/clients")
@@ -81,6 +83,7 @@ export default function ContactsPage() {
     searchQuery: search,
     page,
     pageSize: PAGE_SIZE,
+    visibilityStatus: activeSegment === "blocked" ? "restricted" : undefined,
   });
 
   const contacts = contactsData?.contacts;
@@ -173,7 +176,7 @@ export default function ContactsPage() {
           >
             <Ban className="h-4 w-4 shrink-0" />
             <span className="flex-1 text-left truncate">Bloqueados</span>
-            <span className="text-xs text-[#8b949e]">0</span>
+            <span className="text-xs text-[#8b949e]">{restrictedLeads?.count ?? 0}</span>
           </button>
 
           {/* Custom segments from DB */}
@@ -324,9 +327,10 @@ export default function ContactsPage() {
                 contacts?.map((contact) => {
                   const displayName = contact.name || "Sin nombre";
                   const initials = displayName.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
-                  const lifecycle = contact.custom_fields?.lifecycle;
-                  const email = contact.custom_fields?.email;
-                  const assignedTo = contact.custom_fields?.assigned_to;
+                  const restricted = contact.visibility_status === "restricted";
+                  const lifecycle = restricted ? null : contact.custom_fields?.lifecycle;
+                  const email = restricted ? null : contact.custom_fields?.email;
+                  const assignedTo = restricted ? null : contact.custom_fields?.assigned_to;
 
                   return (
                     <tr
@@ -352,7 +356,7 @@ export default function ContactsPage() {
                         </Link>
                       </td>
                       <td className="px-3 py-2.5 text-sm text-[#8b949e]">
-                        {contact.wa_id || "---"}
+                        {restricted ? <span className="text-amber-300">Oculto por límite del plan</span> : contact.wa_id || "---"}
                       </td>
                       <td className="px-3 py-2.5">
                         {lifecycle ? (
@@ -367,11 +371,11 @@ export default function ContactsPage() {
                         {email || "---"}
                       </td>
                       <td className="px-3 py-2.5 text-sm text-[#8b949e]">
-                        {contact.wa_id || "---"}
+                        {restricted ? <span className="text-amber-300">Oculto por límite del plan</span> : contact.wa_id || "---"}
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex gap-1 flex-wrap">
-                          {contact.tags?.length ? (
+                        {!restricted && contact.tags?.length ? (
                             contact.tags.map((tag: string, idx: number) => (
                               <span
                                 key={tag}

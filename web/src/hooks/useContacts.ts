@@ -8,6 +8,7 @@ interface UseContactsOptions {
   brandId?: string;
   searchQuery?: string;
   tags?: string[];
+  visibilityStatus?: "full" | "restricted";
   page?: number;
   pageSize?: number;
 }
@@ -31,6 +32,7 @@ export function useContacts(searchQueryOrOptions?: string | UseContactsOptions, 
     searchQuery,
     brandId,
     tags: optionTags,
+    visibilityStatus,
     page = 0,
     pageSize = 100,
   } = options;
@@ -38,7 +40,7 @@ export function useContacts(searchQueryOrOptions?: string | UseContactsOptions, 
   const effectiveTags = optionTags ?? tags;
 
   return useQuery<UseContactsResult>({
-    queryKey: ["contacts", agent?.organization_id, brandId, searchQuery, effectiveTags, page, pageSize],
+    queryKey: ["contacts", agent?.organization_id, brandId, searchQuery, effectiveTags, visibilityStatus, page, pageSize],
     queryFn: async () => {
       const from = page * pageSize;
       const to = from + pageSize - 1;
@@ -53,6 +55,7 @@ export function useContacts(searchQueryOrOptions?: string | UseContactsOptions, 
 
       if (searchQuery) query = query.or(`name.ilike.%${searchQuery}%,wa_id.ilike.%${searchQuery}%`);
       if (effectiveTags && effectiveTags.length > 0) query = query.overlaps("tags", effectiveTags);
+      if (visibilityStatus) query = query.eq("visibility_status", visibilityStatus);
 
       const { data, error, count } = await query;
       if (error) throw error;
