@@ -44,6 +44,31 @@ async function processBatch() {
   const errors: Array<{ id: string; error: string }> = [];
 
   for (const row of rows ?? []) {
+    if (row.channel === "waha") {
+      const { processWahaWebhookEvent } = await import("@/lib/waha/webhook-handler");
+      const wahaResult = await processWahaWebhookEvent({
+        id: row.id as string,
+        payload: row.payload as import("@/lib/waha/types").WahaMessageEvent,
+        admin,
+      });
+      const newAttempts = (row.attempts as number) + 1;
+      if (wahaResult.ok) {
+        await admin
+          .from("webhook_events")
+          .update({ status: "processed", processed_at: new Date().toISOString(), attempts: newAttempts })
+          .eq("id", row.id as string);
+        processed++;
+      } else {
+        await admin
+          .from("webhook_events")
+          .update({ status: "failed", last_error: wahaResult.error, attempts: newAttempts })
+          .eq("id", row.id as string);
+        failed++;
+        errors.push({ id: row.id as string, error: wahaResult.error });
+      }
+      continue; // skip the meta path
+    }
+
     const result = await processWebhookEventRow({
       id: row.id as string,
       channel: row.channel as string,
