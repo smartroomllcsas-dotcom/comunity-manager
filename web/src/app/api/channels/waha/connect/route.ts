@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getBrandInOrganization } from "@/lib/smarttalk/brand-scope";
+import { agentCanAccessBrand, getBrandInOrganization } from "@/lib/smarttalk/brand-scope";
 import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { wahaFromEnv } from "@/lib/waha/client";
@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
 
   const { data: agent } = await admin
     .from("agents")
-    .select("id, organization_id, member_type")
+    .select("id, organization_id, member_type, is_super_admin")
     .eq("id", user.id)
     .maybeSingle();
   if (!agent) return NextResponse.json({ error: "Agent not found" }, { status: 404 });
@@ -38,6 +38,9 @@ export async function POST(request: NextRequest) {
   const brand = await getBrandInOrganization(brandId, agent.organization_id);
   if (!brand) {
     return NextResponse.json({ error: "La marca no pertenece a esta organización" }, { status: 403 });
+  }
+  if (!(await agentCanAccessBrand(agent, brand.id))) {
+    return NextResponse.json({ error: "No tienes acceso a esta marca" }, { status: 403 });
   }
 
   const billingDecision = await checkBillingFeature({
@@ -116,7 +119,10 @@ export async function POST(request: NextRequest) {
       webhookHmacSecret: hmac,
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    // H2: sanitize — WahaError.message may include the upstream body which
+    // could echo secret headers. Log the full error server-side, return generic.
+    const fullMsg = err instanceof Error ? err.message : String(err);
+    console.error("[waha/connect] createSession failed:", fullMsg);
 
     await admin
       .from("channels")
@@ -125,10 +131,13 @@ export async function POST(request: NextRequest) {
 
     await admin
       .from("waha_sessions")
-      .update({ last_error: msg, status: "FAILED" })
+      .update({ last_error: fullMsg, status: "FAILED" })
       .eq("channel_id", channel.id);
 
-    return NextResponse.json({ error: msg }, { status: 502 });
+    return NextResponse.json(
+      { error: "Upstream WAHA error creating session" },
+      { status: 502 }
+    );
   }
 
   return NextResponse.json(

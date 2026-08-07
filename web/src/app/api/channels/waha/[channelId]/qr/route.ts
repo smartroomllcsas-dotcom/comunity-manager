@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { agentCanAccessBrand } from "@/lib/smarttalk/brand-scope";
 import { wahaFromEnv } from "@/lib/waha/client";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ export async function GET(
 
   const { data: agent } = await admin
     .from("agents")
-    .select("id, organization_id, member_type")
+    .select("id, organization_id, member_type, is_super_admin")
     .eq("id", user.id)
     .maybeSingle();
   if (!agent) return NextResponse.json({ error: "Agent not found" }, { status: 404 });
@@ -30,6 +31,9 @@ export async function GET(
     .maybeSingle();
   if (!channel) return NextResponse.json({ error: "Channel not found" }, { status: 404 });
   if (channel.organization_id !== agent.organization_id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  if (channel.brand_id && !(await agentCanAccessBrand(agent, channel.brand_id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

@@ -7,6 +7,7 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 vi.mock("@/lib/smarttalk/brand-scope", () => ({
   getBrandInOrganization: vi.fn(),
+  agentCanAccessBrand: vi.fn().mockResolvedValue(true),
 }));
 vi.mock("@/lib/billing/service", () => ({
   checkBillingFeature: vi.fn().mockResolvedValue({ allowed: true }),
@@ -205,7 +206,10 @@ describe("POST /api/channels/waha/connect", () => {
     expect(res.status).toBe(502);
 
     const json = await res.json();
-    expect(json.error).toContain("WAHA connection refused");
+    // H2 sanitization: upstream error message is logged server-side but NOT leaked
+    // to the client (WahaError.body may echo the X-Api-Key header).
+    expect(json.error).toBe("Upstream WAHA error creating session");
+    expect(json.error).not.toContain("WAHA connection refused");
 
     // channel.status → "error"
     expect(channelUpdateMock).toHaveBeenCalledWith({ status: "error" });

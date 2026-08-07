@@ -31,7 +31,18 @@ async function reconcile() {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const waha = wahaFromEnv();
+  // H3: cold-start guard — if WAHA env vars are missing, don't 500 the cron
+  // (that would page an on-call). Fail-soft with 200 so it's observable but
+  // doesn't trigger Vercel error alerts on every 5-min tick.
+  let waha;
+  try {
+    waha = wahaFromEnv();
+  } catch (envErr) {
+    const msg = envErr instanceof Error ? envErr.message : String(envErr);
+    console.error("[waha-watchdog] env missing, skipping reconcile:", msg);
+    return NextResponse.json({ ok: false, skipped: true, reason: msg }, { status: 200 });
+  }
+
   let checked = 0;
   let updated = 0;
   const now = new Date().toISOString();
