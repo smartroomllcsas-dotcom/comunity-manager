@@ -1,0 +1,10 @@
+waha.smartgenapp.com {
+  encode zstd gzip
+  reverse_proxy 127.0.0.1:3010 {
+    header_up Host {host}
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Forwarded-Proto {scheme}
+  }
+  # Protect the admin dashboard extra: WAHA has its own Basic Auth via env vars.
+}
