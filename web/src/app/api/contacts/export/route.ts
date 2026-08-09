@@ -93,8 +93,8 @@ export async function GET(request: NextRequest) {
   const rows = (contacts || []).map((c) => [
     escapeCsvField(c.name || ""),
     escapeCsvField(c.visibility_status === "restricted" ? "Oculto por límite del plan" : c.wa_id || ""),
-    escapeCsvField(c.custom_fields?.email || ""),
-    escapeCsvField((c.tags || []).join(", ")),
+    escapeCsvField(c.visibility_status === "restricted" ? "Oculto por límite del plan" : c.custom_fields?.email || ""),
+    escapeCsvField(c.visibility_status === "restricted" ? "" : (c.tags || []).join(", ")),
     escapeCsvField(c.lifecycle_stage?.name || ""),
     escapeCsvField(c.created_at ? new Date(c.created_at).toLocaleDateString("es-CO") : ""),
   ]);

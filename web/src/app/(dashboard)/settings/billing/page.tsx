@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import type { Organization, Plan, Subscription, Payment } from "@/types/database";
 import { PaymentCheckout } from "@/components/billing/PaymentCheckout";
+import { useRestrictedLeads } from "@/hooks/useRestrictedLeads";
 import type { PaymentGatewayCode } from "@/lib/payments/types";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +54,7 @@ export default function BillingSettingsPage() {
     broadcasts: 0,
     flows: 0,
   });
+  const { data: restrictedLeads } = useRestrictedLeads();
 
   useEffect(() => {
     if (!currentAgent?.organization_id) return;
@@ -137,6 +139,8 @@ export default function BillingSettingsPage() {
   // An approved payment creates the subscription first. Prefer that plan and
   // keep organizations.plan_id as a compatibility fallback for legacy data.
   const isSuperAdmin = currentAgent?.is_super_admin === true;
+  const isAgencyAdmin = currentAgent?.role === "admin" && currentAgent.member_type === "agency_user";
+  const restrictedLeadCount = restrictedLeads?.count ?? 0;
   const pendingActivation =
     !subscription &&
     ["pending_payment", "checkout_started", "payment_rejected", "payment_failed", "payment_expired", "cancelled"].includes(
@@ -173,6 +177,16 @@ export default function BillingSettingsPage() {
       </div>
 
       <div className="p-6 max-w-5xl space-y-6">
+        {isAgencyAdmin && restrictedLeadCount > 0 && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-5 py-4 text-sm text-amber-100">
+            <p className="font-semibold">Tienes {restrictedLeadCount} lead{restrictedLeadCount === 1 ? "" : "s"} retenido{restrictedLeadCount === 1 ? "" : "s"} por límite de contactos.</p>
+            <p className="mt-1 text-amber-100/80">Amplía tu plan o libera un cupo para poder ver sus datos y atenderlos.</p>
+            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
+              <Link href="/contacts" className="text-sm font-medium text-amber-200 underline underline-offset-4 hover:text-white">Ver leads retenidos en Contactos</Link>
+              <Link href="/settings/billing" className="text-sm font-medium text-amber-200 underline underline-offset-4 hover:text-white">Revisar opciones de plan</Link>
+            </div>
+          </div>
+        )}
         {/* Current Plan Card */}
         <div className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg p-5">
           <div className="flex items-start justify-between mb-4">
