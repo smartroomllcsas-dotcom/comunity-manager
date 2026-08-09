@@ -34,6 +34,10 @@ export async function POST(request: NextRequest) {
   if (!brandId || typeof brandId !== "string" || !brandId.trim()) {
     return NextResponse.json({ error: "brandId es requerido" }, { status: 400 });
   }
+  // #8: cap name length to prevent oversized payloads reaching channels.name
+  if (typeof name === "string" && name.length > 100) {
+    return NextResponse.json({ error: "name debe tener máximo 100 caracteres" }, { status: 400 });
+  }
 
   const brand = await getBrandInOrganization(brandId, agent.organization_id);
   if (!brand) {
@@ -124,15 +128,10 @@ export async function POST(request: NextRequest) {
     const fullMsg = err instanceof Error ? err.message : String(err);
     console.error("[waha/connect] createSession failed:", fullMsg);
 
-    await admin
-      .from("channels")
-      .update({ status: "error" })
-      .eq("id", channel.id);
-
-    await admin
-      .from("waha_sessions")
-      .update({ last_error: fullMsg, status: "FAILED" })
-      .eq("channel_id", channel.id);
+    // #3 rollback: DELETE the channel row instead of marking it 'error'.
+    // Orphan 'error' rows would count against CHANNELS_ACTIVE billing quota.
+    // CASCADE removes the waha_sessions row we just upserted.
+    await admin.from("channels").delete().eq("id", channel.id);
 
     return NextResponse.json(
       { error: "Upstream WAHA error creating session" },

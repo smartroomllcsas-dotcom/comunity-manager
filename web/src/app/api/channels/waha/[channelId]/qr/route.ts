@@ -44,16 +44,34 @@ export async function GET(
     .maybeSingle();
   if (!sess) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
-  if (sess.status === "WORKING") {
-    return NextResponse.json({ error: "session already connected" }, { status: 409 });
+  // #9: don't trust stale DB status — always ask WAHA for the live state
+  // before returning 409. Watchdog runs every 5 min so DB can lag.
+  const waha = wahaFromEnv();
+  try {
+    const live = await waha.getSession(sess.session_name);
+    if (live.status === "WORKING") {
+      // sync DB and short-circuit
+      await admin
+        .from("waha_sessions")
+        .update({ status: "WORKING", last_status_at: new Date().toISOString() })
+        .eq("channel_id", channelId);
+      return NextResponse.json({ error: "session already connected" }, { status: 409 });
+    }
+  } catch {
+    // If WAHA is unreachable and DB says WORKING, honor the stale value.
+    if (sess.status === "WORKING") {
+      return NextResponse.json({ error: "session already connected" }, { status: 409 });
+    }
   }
 
   let qr: { mimetype: string; data: string };
   try {
-    qr = await wahaFromEnv().getQr(sess.session_name);
+    qr = await waha.getQr(sess.session_name);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: msg }, { status: 502 });
+    // sanitize upstream detail
+    const fullMsg = err instanceof Error ? err.message : String(err);
+    console.error("[waha/qr] getQr failed:", fullMsg);
+    return NextResponse.json({ error: "Upstream WAHA error fetching QR" }, { status: 502 });
   }
 
   await admin

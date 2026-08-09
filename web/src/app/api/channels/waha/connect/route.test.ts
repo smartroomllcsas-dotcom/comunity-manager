@@ -163,11 +163,11 @@ describe("POST /api/channels/waha/connect", () => {
 
   // ── 3. 502 when WAHA fails ────────────────────────────────────────────
 
-  it("returns 502 and updates channel/session on WAHA error", async () => {
-    const channelUpdateEqMock = vi.fn().mockResolvedValue({ error: null });
-    const channelUpdateMock = vi.fn().mockReturnValue({ eq: channelUpdateEqMock });
-    const sessionUpdateEqMock = vi.fn().mockResolvedValue({ error: null });
-    const sessionUpdateMock = vi.fn().mockReturnValue({ eq: sessionUpdateEqMock });
+  it("returns 502 and deletes the orphan channel row on WAHA error", async () => {
+    // #3 rollback: on WAHA failure we DELETE the channels row (CASCADE
+    // cleans waha_sessions) so it doesn't count against billing quota.
+    const channelDeleteEqMock = vi.fn().mockResolvedValue({ error: null });
+    const channelDeleteMock = vi.fn().mockReturnValue({ eq: channelDeleteEqMock });
 
     const adminMock = {
       from: vi.fn((table: string) => {
@@ -183,13 +183,12 @@ describe("POST /api/channels/waha/connect", () => {
             insert: vi.fn().mockReturnThis(),
             select: vi.fn().mockReturnThis(),
             single: vi.fn().mockResolvedValue({ data: FAKE_CHANNEL, error: null }),
-            update: channelUpdateMock,
+            delete: channelDeleteMock,
           };
         }
         if (table === "waha_sessions") {
           return {
             upsert: vi.fn().mockResolvedValue({ error: null }),
-            update: sessionUpdateMock,
           };
         }
         return {};
@@ -211,11 +210,18 @@ describe("POST /api/channels/waha/connect", () => {
     expect(json.error).toBe("Upstream WAHA error creating session");
     expect(json.error).not.toContain("WAHA connection refused");
 
-    // channel.status → "error"
-    expect(channelUpdateMock).toHaveBeenCalledWith({ status: "error" });
-    // waha_sessions.last_error + status → "FAILED"
-    expect(sessionUpdateMock).toHaveBeenCalledWith(
-      expect.objectContaining({ last_error: expect.any(String), status: "FAILED" })
-    );
+    // channels row DELETED (CASCADE cleans waha_sessions)
+    expect(channelDeleteMock).toHaveBeenCalled();
+    expect(channelDeleteEqMock).toHaveBeenCalledWith("id", "channel-uuid-1");
+  });
+
+  // ── 4. 400 on oversized name ────────────────────────────────────────────
+  it("returns 400 when name exceeds 100 chars", async () => {
+    const { adminMock } = buildAdminMock();
+    vi.mocked(createAdminClient).mockReturnValue(adminMock as never);
+    const res = await POST(makeRequest({ brandId: "brand-1", name: "x".repeat(101) }));
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toMatch(/100/);
   });
 });
