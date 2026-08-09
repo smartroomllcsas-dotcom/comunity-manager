@@ -186,6 +186,41 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
+    } else if (channelType === "waha") {
+      // WAHA beta channel — self-hosted WhatsApp HTTP API.
+      // Only text is wired for beta; media requires per-format uploads to WAHA.
+      if (content.type !== "text") {
+        return NextResponse.json(
+          { error: `WAHA beta channel only supports text messages for now (got ${content.type})` },
+          { status: 400 }
+        );
+      }
+      const toPhone = conversation.contact.wa_id;
+      if (!toPhone) {
+        return NextResponse.json(
+          { error: "Conversation contact is missing wa_id (phone) for WAHA send" },
+          { status: 400 }
+        );
+      }
+      const { sendWahaText } = await import("@/lib/waha/sender");
+      const { wahaFromEnv } = await import("@/lib/waha/client");
+      try {
+        const r = await sendWahaText({
+          admin,
+          channelId: conversation.channel_id,
+          toPhone,
+          text: content.text,
+          client: wahaFromEnv(),
+        });
+        providerMessageId = r.externalId;
+      } catch (err) {
+        const fullMsg = err instanceof Error ? err.message : String(err);
+        console.error("[waha/send] sendText failed:", fullMsg);
+        return NextResponse.json(
+          { error: "Upstream WAHA error sending message" },
+          { status: 502 }
+        );
+      }
     } else {
       const { phoneNumberId, accessToken } = await getOrgWhatsAppCredentials(
         agent.organization_id,

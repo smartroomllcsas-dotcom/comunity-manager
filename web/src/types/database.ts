@@ -135,7 +135,23 @@ export type BroadcastStatus = "draft" | "scheduled" | "sending" | "completed";
 export type RecipientStatus = "pending" | "sent" | "delivered" | "read" | "failed";
 export type TriggerType = "keyword" | "first_message" | "menu_option";
 export type AIProvider = "openai" | "anthropic";
-export type ChannelType = "whatsapp_business_api" | "whatsapp_cloud_api" | "facebook_messenger" | "instagram" | "telegram" | "tiktok" | "webchat" | "custom";
+export type ChannelType = "whatsapp_business_api" | "whatsapp_cloud_api" | "facebook_messenger" | "instagram" | "telegram" | "tiktok" | "webchat" | "custom" | "respond_io" | "waha";
+
+// Runtime state for a WAHA session (self-hosted WhatsApp HTTP API).
+// One row per WhatsApp number connected via the WAHA channel.
+export interface WahaSession {
+  id: string;
+  channel_id: string;
+  session_name: string;
+  status: "STARTING" | "SCAN_QR_CODE" | "WORKING" | "FAILED" | "STOPPED";
+  phone_number: string | null;
+  push_name: string | null;
+  last_qr_at: string | null;
+  last_status_at: string;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
 export type ChannelStatus = "active" | "disconnected" | "pending" | "error";
 export type CustomFieldType = "text" | "number" | "date" | "time" | "list" | "checkbox" | "url";
 

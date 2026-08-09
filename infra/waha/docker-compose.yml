@@ -1,0 +1,26 @@
+services:
+  waha:
+    image: devlikeapro/waha:latest
+    container_name: waha
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3011:3000"   # bind to localhost only; cloudflared-smartmedia exposes waha.smartgenapp.com (3010 is taken on `server`)
+    environment:
+      WAHA_API_KEY: ${WAHA_API_KEY}
+      WAHA_DASHBOARD_ENABLED: "true"
+      WAHA_DASHBOARD_USERNAME: ${WAHA_DASHBOARD_USERNAME}
+      WAHA_DASHBOARD_PASSWORD: ${WAHA_DASHBOARD_PASSWORD}
+      WHATSAPP_DEFAULT_ENGINE: NOWEB
+      WHATSAPP_RESTART_ALL_SESSIONS: "true"
+      WAHA_LOG_LEVEL: info
+      WAHA_LOG_FORMAT: JSON
+      TZ: America/Bogota
+    volumes:
+      - ./data/sessions:/app/.sessions
+      - ./data/files:/app/.files
+      - ./data/media:/app/.media
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

@@ -1,0 +1,36 @@
+# WAHA — ingress rule for the existing `smartmedia` Cloudflare Tunnel on `server`.
+#
+# Insert this block into /etc/cloudflared/config-smartmedia.yml on `server`,
+# BEFORE the final `- service: http_status:503` catch-all.
+#
+# Config path : /etc/cloudflared/config-smartmedia.yml
+# Systemd unit: cloudflared-smartmedia.service
+# Tunnel      : smartmedia (id a01217a1-964e-4ae9-a81d-d4199d278eb0)
+#
+# Operator steps (run as user with sudo on `server`):
+#
+#   # 1. Backup current config
+#   sudo cp /etc/cloudflared/config-smartmedia.yml \
+#     /etc/cloudflared/config-smartmedia.yml.bak-$(date +%F-%H%M)
+#
+#   # 2. Edit the file — insert the block below before `- service: http_status:503`
+#   sudo nano /etc/cloudflared/config-smartmedia.yml
+#
+#   # 3. Validate the ingress rules
+#   sudo cloudflared tunnel --config /etc/cloudflared/config-smartmedia.yml \
+#     ingress validate
+#
+#   # 4. Restart the tunnel
+#   sudo systemctl restart cloudflared-smartmedia
+#   sudo systemctl status cloudflared-smartmedia --no-pager | head -20
+#
+#   # 5. Register DNS (creates a proxied CNAME in Cloudflare automatically)
+#   sudo cloudflared tunnel route dns smartmedia waha.smartgenapp.com
+#
+#   # 6. Smoke test (WAHA container must be running on 127.0.0.1:3011 first)
+#   curl -sS -o /dev/null -w '%{http_code}\n' https://waha.smartgenapp.com/ping
+
+- hostname: waha.smartgenapp.com
+  service: http://localhost:3011
+  originRequest:
+    keepAliveTimeout: 600s
