@@ -16,7 +16,15 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { rateLimit } from "@/lib/rate-limit";
 import { BILLING_FEATURES } from "@/lib/billing/features";
-import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
+import {
+  billingCapacityDeniedResponse,
+  billingCapacityErrorResponse,
+  billingDeniedResponse,
+  checkBillingFeature,
+  consumeBillingCapacity,
+  releaseBillingCapacity,
+  reserveBillingCapacity,
+} from "@/lib/billing/service";
 
 const ALLOWED_TRIGGER_TYPES = new Set(["keyword", "first_message", "menu_option"]);
 
@@ -93,6 +101,15 @@ export async function POST(request: NextRequest) {
   });
   if (!decision.allowed) return billingDeniedResponse(decision);
 
+  const capacity = await reserveBillingCapacity({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.AUTOMATION_FLOWS,
+    requestedUnits: 1,
+  });
+  if (capacity.status === "denied") return billingCapacityDeniedResponse(decision, capacity);
+  if (capacity.status === "error") return billingCapacityErrorResponse();
+  const reservationId = capacity.status === "reserved" ? capacity.reservationId : null;
+
   const admin = createAdminClient();
   const { data: inserted, error } = await admin
     .from("chatbot_flows")
@@ -101,10 +118,15 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error || !inserted) {
+    if (reservationId) await releaseBillingCapacity(reservationId);
     return Response.json(
       { error: error?.message || "No se pudo crear el flujo" },
       { status: 500 },
     );
+  }
+
+  if (reservationId && !(await consumeBillingCapacity(reservationId, inserted.id))) {
+    await releaseBillingCapacity(reservationId);
   }
 
   return Response.json({ id: inserted.id }, { status: 201 });

@@ -9,6 +9,12 @@ import {
 } from "@/lib/payments/types";
 import { getPaymentGateway } from "@/lib/payments/gateways";
 import { getGatewayEnvironment } from "@/lib/payments/config";
+import { rateLimit } from "@/lib/rate-limit";
+import {
+  BILLING_CHECKOUT_RATE_LIMIT,
+  BILLING_CHECKOUT_RATE_WINDOW_MS,
+  checkoutRateLimitKey,
+} from "@/lib/billing/rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,6 +25,24 @@ export async function POST(request: NextRequest) {
     } = await supabase.auth.getUser();
     if (!user) {
       return Response.json({ error: "No autenticado" }, { status: 401 });
+    }
+
+    const rl = await rateLimit(
+      checkoutRateLimitKey(user.id),
+      BILLING_CHECKOUT_RATE_LIMIT,
+      BILLING_CHECKOUT_RATE_WINDOW_MS,
+    );
+    if (!rl.ok) {
+      return Response.json(
+        {
+          error: "Demasiados intentos de checkout. Intenta más tarde.",
+          retry_after_seconds: rl.retryAfterSeconds,
+        },
+        {
+          status: 429,
+          headers: { "Retry-After": String(rl.retryAfterSeconds) },
+        },
+      );
     }
 
     const { data: agent } = await supabase

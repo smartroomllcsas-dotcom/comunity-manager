@@ -8,6 +8,12 @@ import {
   sanitizeEpaycoPayload,
   validateEpaycoSignature,
 } from "@/lib/epayco/client";
+import { clientIp, rateLimitWithWhitelist } from "@/lib/rate-limit";
+import {
+  EPAYCO_CONFIRMATION_RATE_LIMIT,
+  EPAYCO_CONFIRMATION_RATE_WINDOW_MS,
+  epaycoConfirmationRateLimitKey,
+} from "@/lib/billing/rate-limit";
 
 async function readParams(request: NextRequest) {
   const params: Record<string, string> = {};
@@ -42,6 +48,28 @@ async function markWebhook(
 }
 
 async function processConfirmation(request: NextRequest) {
+  // The fallback keeps the pure route tests (which use a minimal request
+  // double) equivalent to a real request with no forwarding headers.
+  const ip = clientIp(request.headers || new Headers());
+  const rl = await rateLimitWithWhitelist(
+    ip,
+    epaycoConfirmationRateLimitKey(ip),
+    EPAYCO_CONFIRMATION_RATE_LIMIT,
+    EPAYCO_CONFIRMATION_RATE_WINDOW_MS,
+  );
+  if (!rl.ok) {
+    return Response.json(
+      {
+        error: "Demasiadas confirmaciones. Intenta más tarde.",
+        retry_after_seconds: rl.retryAfterSeconds,
+      },
+      {
+        status: 429,
+        headers: { "Retry-After": String(rl.retryAfterSeconds) },
+      },
+    );
+  }
+
   const params = await readParams(request);
   const signatureValid = validateEpaycoSignature({
     x_cust_id_cliente: params.x_cust_id_cliente || "",

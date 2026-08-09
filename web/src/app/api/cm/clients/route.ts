@@ -3,7 +3,12 @@ import { NextRequest } from "next/server";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import {
   billingDeniedResponse,
+  billingCapacityDeniedResponse,
+  billingCapacityErrorResponse,
   checkBillingFeature,
+  consumeBillingCapacity,
+  releaseBillingCapacity,
+  reserveBillingCapacity,
 } from "@/lib/billing/service";
 import { mysqlQuery, quoteId } from "@/lib/mysql";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -177,6 +182,17 @@ export async function POST(request: NextRequest) {
   });
   if (!billingDecision.allowed) return billingDeniedResponse(billingDecision);
 
+  const capacity = await reserveBillingCapacity({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.BRANDS_TOTAL,
+    requestedUnits: 1,
+  });
+  if (capacity.status === "denied") {
+    return billingCapacityDeniedResponse(billingDecision, capacity);
+  }
+  if (capacity.status === "error") return billingCapacityErrorResponse();
+  const reservationId = capacity.status === "reserved" ? capacity.reservationId : null;
+
   const { data: client, error } = await publicAdmin
     .from("cm_clients")
     .insert({
@@ -192,6 +208,7 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) {
+    if (reservationId) await releaseBillingCapacity(reservationId);
     console.error("[cm/clients] create failed", {
       code: error.code,
       organizationId: agent.organization_id,
@@ -200,6 +217,10 @@ export async function POST(request: NextRequest) {
       { error: "No fue posible crear la marca." },
       { status: 500 }
     );
+  }
+
+  if (reservationId && !(await consumeBillingCapacity(reservationId, client.id))) {
+    await releaseBillingCapacity(reservationId);
   }
 
   const { error: activityError } = await publicAdmin

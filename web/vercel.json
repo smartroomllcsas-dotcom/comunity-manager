@@ -28,6 +28,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/billing-outbox",
+      "schedule": "*/2 * * * *"
+    },
+    {
       "path": "/api/cron/reap-scheduled",
       "schedule": "*/5 * * * *"
     }

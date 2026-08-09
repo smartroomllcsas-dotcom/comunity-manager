@@ -598,6 +598,122 @@ export async function recordBillingUsage(input: {
   return { recorded: Boolean(data), reason: "ok" as const };
 }
 
+export type BillingCapacityResult =
+  | { status: "disabled" }
+  | { status: "reserved"; reservationId: string }
+  | { status: "unlimited" }
+  | {
+      status: "denied";
+      reason: "limit_reached" | "feature_disabled";
+      currentUsage: number;
+      limitValue: number;
+    }
+  | { status: "error" };
+
+/**
+ * Atomically reserves capacity for count-based resources.
+ *
+ * The feature flag keeps existing deployments safe until migration 031 is
+ * applied. Once enabled, callers must consume or release the reservation after
+ * the resource write completes.
+ */
+export async function reserveBillingCapacity(input: {
+  organizationId: string;
+  featureCode: BillingFeatureCode;
+  requestedUnits?: number;
+}): Promise<BillingCapacityResult> {
+  if (process.env.BILLING_ATOMIC_QUOTA_MODE !== "on") {
+    return { status: "disabled" };
+  }
+
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("reserve_billing_capacity", {
+    p_organization_id: input.organizationId,
+    p_feature_code: input.featureCode,
+    p_quantity: Math.max(1, Math.floor(input.requestedUnits ?? 1)),
+  });
+  if (error || !data) {
+    console.error("[billing] atomic quota reservation failed", {
+      code: error?.code,
+      featureCode: input.featureCode,
+    });
+    return { status: "error" };
+  }
+
+  const row = (Array.isArray(data) ? data[0] : data) as {
+    allowed?: boolean;
+    reservation_id?: string | null;
+    reason?: string;
+    current_usage?: number | null;
+    limit_value?: number | null;
+  };
+  if (row.reason === "unlimited") return { status: "unlimited" };
+  if (!row.allowed && (row.reason === "limit_reached" || row.reason === "feature_disabled")) {
+    return {
+      status: "denied",
+      reason: row.reason,
+      currentUsage: Number(row.current_usage || 0),
+      limitValue: Number(row.limit_value || 0),
+    };
+  }
+  if (!row.allowed || !row.reservation_id) return { status: "error" };
+  return { status: "reserved", reservationId: row.reservation_id };
+}
+
+export async function consumeBillingCapacity(
+  reservationId: string,
+  resourceId?: string,
+) {
+  if (process.env.BILLING_ATOMIC_QUOTA_MODE !== "on") return true;
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("consume_billing_capacity", {
+    p_reservation_id: reservationId,
+    p_resource_id: resourceId || null,
+  });
+  if (error) {
+    console.error("[billing] atomic quota consumption failed", { code: error.code });
+    return false;
+  }
+  return Boolean(data);
+}
+
+export async function releaseBillingCapacity(reservationId: string) {
+  if (process.env.BILLING_ATOMIC_QUOTA_MODE !== "on") return true;
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("release_billing_capacity", {
+    p_reservation_id: reservationId,
+  });
+  if (error) {
+    console.error("[billing] atomic quota release failed", { code: error.code });
+    return false;
+  }
+  return Boolean(data);
+}
+
+export function billingCapacityErrorResponse() {
+  return Response.json(
+    {
+      error: "No fue posible reservar el límite contratado. Intenta nuevamente.",
+      code: "BILLING_QUOTA_UNAVAILABLE",
+    },
+    { status: 503 },
+  );
+}
+
+export function billingCapacityDeniedResponse(
+  decision: BillingDecision,
+  result: Extract<BillingCapacityResult, { status: "denied" }>,
+) {
+  return billingDeniedResponse({
+    ...decision,
+    allowed: false,
+    wouldBlock: true,
+    reason: result.reason,
+    currentUsage: result.currentUsage,
+    limitValue: result.limitValue,
+  });
+}
+
 export function billingDeniedResponse(decision: BillingDecision) {
   const subscriptionRequired =
     decision.reason === "subscription_inactive" ||

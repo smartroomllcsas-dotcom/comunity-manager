@@ -1,11 +1,26 @@
 # Checklist de pruebas pendientes
 
-## Estado actualizado de auditoría - 2026-08-05
+## Estado actualizado de auditoría - 2026-08-09
 
 **Dictamen:** CommunityManager todavía no debe declararse aprobado para salida
 comercial. La base de planes, suscripciones, pagos, límites y aislamiento por
-marca está implementada, pero faltan pruebas E2E y varios controles de
-enforcement antes de activar `BILLING_ENFORCEMENT_MODE=hard` en Production.
+marca está implementada y `BILLING_ENFORCEMENT_MODE=hard` ya está activo en
+Production, pero faltan pruebas E2E operativas y controles de seguridad antes de
+declarar salida comercial.
+
+### Confirmación manual más reciente — 2026-08-09
+
+- [x] Credenciales sandbox de ePayco configuradas y aceptadas por el flujo de
+  checkout.
+- [x] Compras sandbox ejecutadas para Demo Inicial, Demo Crecimiento y Demo
+  Escala; cada cuenta alcanzó los límites del plan desde la aplicación.
+- [x] Revisadas visualmente las vistas autenticadas `/admin/plans`,
+  `/admin/payment-gateways` y `/settings/billing`.
+
+Esta confirmación cierra la validación funcional de planes y la revisión visual
+indicadas en esta actualización. Deben conservarse en el registro QA las
+referencias de pago, organización, suscripción, deployment y capturas; no se
+consideran sustituto de las pruebas de concurrencia, ciclo de vida u outbox.
 
 ### Evidencia disponible
 
@@ -29,7 +44,7 @@ enforcement antes de activar `BILLING_ENFORCEMENT_MODE=hard` en Production.
 - [ ] Ejecutar aceptación E2E por cada plan con ePayco sandbox y registrar referencia, estado de pago, suscripción y límites observados.
 - [ ] Probar cambio, cancelación, vencimiento, gracia, suspensión y reactivación en una cuenta no productiva.
 - [ ] Completar worker de outbox y notificaciones de billing; las tablas existen, pero no hay evidencia de procesamiento completo.
-- [ ] Confirmar en Vercel el valor actual de `BILLING_ENFORCEMENT_MODE`. La documentación histórica registra `off`; no se debe asumir que Production está en `hard` sin verificarlo.
+- [x] Confirmar en Vercel el valor actual de `BILLING_ENFORCEMENT_MODE`: `hard`, aplicado en Production el 2026-08-06 y cargado en el deployment `dpl_CtXr95p4vkJaTypfy3uW9zY1DdJ2` (`Ready`, smoke test HTTP 200).
 
 ### Evidencia de prueba sintética ejecutada
 
@@ -53,6 +68,146 @@ enforcement antes de activar `BILLING_ENFORCEMENT_MODE=hard` en Production.
 Las casillas de la sección histórica inferior conservan evidencia de la fecha
 original. Este bloque es el estado vigente de la auditoría y debe prevalecer
 para decidir si se habilita Production.
+
+### Lista ejecutiva de pendientes — 2026-08-06
+
+La integración QA de 42 pruebas y el deployment con
+`BILLING_ENFORCEMENT_MODE=hard` ya están completados. La suite usa un Supabase
+en memoria y no sustituye la aceptación real con cuentas de QA.
+
+#### P0 — bloqueadores para declarar salida comercial
+
+- [ ] Proteger los límites contra concurrencia y probar dos altas simultáneas en
+  el límite.
+- [ ] Separar QA en un proyecto Supabase y un Preview de Vercel propios.
+- [x] Ejecutar ePayco sandbox con una organización normal para cada uno de los
+  tres planes y alcanzar los límites observados desde la aplicación. Las
+  referencias de pago, suscripción y deployment deben conservarse en el registro
+  QA asociado.
+- [ ] Probar en una cuenta no productiva cambio de plan, cancelación,
+  vencimiento, gracia, suspensión y reactivación.
+- [ ] Completar y demostrar el procesamiento de outbox y las notificaciones de
+  billing, incluyendo reintentos e idempotencia.
+
+#### P1 — gates de aprobación antes de cobros reales
+
+- [ ] Aprobar contract tests de ePayco/Wompi/PayU e integración PostgreSQL/RLS.
+- [ ] Completar E2E multicanal de Facebook, Instagram y WhatsApp.
+- [ ] Aprobar sandbox financiero, backup/restauración y rollback.
+- [ ] Revisar `observe` sin falsos bloqueos y validar una organización piloto en
+  `hard`.
+- [ ] Definir alertas, responsable operativo y autorización explícita para
+  activar cobros reales.
+
+#### P2 — validaciones posteriores y endurecimiento
+
+- [ ] Completar renovaciones, upgrades/downgrades y conciliación de webhooks.
+- [ ] Probar duplicados y concurrencia de pagos, jobs y webhooks.
+- [ ] Completar rate limiting, seguridad, auditoría, carga y resiliencia ante
+  timeouts o caídas de gateway/base de datos.
+- [ ] Completar las regresiones de autenticación, roles, aislamiento de marca,
+  notificaciones y colas descritas en las secciones C–Q.
+
+No se debe marcar un punto como cerrado por tener una prueba sintética: cada
+punto requiere evidencia reproducible (deployment, log, captura, ID de evento
+o consulta SQL) y debe conservarse sin exponer secretos.
+
+### Evidencia manual recibida — Plan Demo Inicial
+
+La captura de `communitymanager.io/settings/billing` confirma que una cuenta
+compró correctamente el plan **Demo Inicial** y llegó a estos valores visibles:
+
+| Recurso | Uso observado | Límite |
+|---|---:|---:|
+| Usuarios de agencia | 2 | 2 |
+| Asesores de marca | 5 | 5 |
+| Marcas | 5 | 5 |
+| Canales activos | 3 | 3 |
+| Contactos | 1.003 | 1.000 |
+| Broadcasts del mes | 10 | 10 |
+| Flujos de chatbot | 2 | 2 |
+
+Esta captura demuestra compra, activación visual del plan y consumo hasta los
+límites. El contador de contactos muestra un excedente de 3, que debe
+conciliarse con `smarttalk.contact_overage_events` y la cola de reproceso; no se
+deben borrar contactos solo para que el contador vuelva a 1.000.
+
+### Evidencia de siembra — Plan Demo Crecimiento (2026-08-07)
+
+Se sembró localmente la organización demo `98bd0b2c-cf1f-4c0c-9581-45f0442cf678`
+(`Agencia test 2`) usando únicamente registros sintéticos con prefijo
+`[QA-CRECIMIENTO]`. La suscripción estaba `active`, el plan era
+`demo-crecimiento-2026` y la organización conservó su valor por organización
+`billing_enforcement_mode=observe`; la variable global de Production permanece
+en `BILLING_ENFORCEMENT_MODE=hard`.
+
+| Recurso | Uso exacto | Límite | Evidencia |
+|---|---:|---:|---|
+| Marcas | 15 | 15 | 15 marcas `[QA-CRECIMIENTO]` |
+| Canales activos | 10 | 10 | Canales sintéticos sin credenciales |
+| Contactos | 10.000 | 10.000 | Contactos sintéticos `qa_seed` |
+| Usuarios de agencia | 5 | 5 | 1 usuario existente + 4 invitaciones `.invalid` |
+| Asesores de marca | 20 | 20 | 20 invitaciones `.invalid` |
+| Broadcasts del mes | 50 | 50 | Registros `completed` sintéticos, sin envío |
+| Flujos | 10 | 10 | Flujos sintéticos inactivos |
+
+El seed no llamó proveedores, no conectó cuentas sociales y no envió mensajes.
+La tabla `billing_decision_events` no se llena al sembrar directamente; para
+cerrar la validación de `hard` aún debe intentarse una alta número 16 por la
+API de la aplicación y conservar la respuesta HTTP `402` con
+`code=BILLING_LIMIT_REACHED`.
+
+#### Evidencia runtime de enforcement `hard` — 2026-08-07
+
+La cuenta normal de agencia intentó superar dos límites desde la aplicación.
+Las rutas reales rechazaron la operación y registraron la decisión:
+
+| Ruta | Feature | Uso | Límite | Modo | Resultado |
+|---|---|---:|---:|---|---|
+| `api/cm/clients` | `brands.total` | 15 | 15 | `hard` | `allowed=false`, `would_block=true`, `402` |
+| `api/invitations` | `brand.advisors_total` | 20 | 20 | `hard` | `allowed=false`, `would_block=true`, `402` |
+| `api/invitations` | `agency.users` | 5 | 5 | `hard` | `allowed=false`, `would_block=true`, `402` |
+| `api/chatbot/flows` | `automations.flows` | 10 | 10 | `hard` | `allowed=false`, `would_block=true`, `402` |
+| `api/contacts/import` | `contacts.total` | 10.000 | 10.000 | `hard` | 0 nuevos, 1 omitido; `allowed=false`, `would_block=true` |
+
+La evidencia está en `smarttalk.billing_decision_events` con
+`reason=limit_reached`. Esto confirma que la variable global de Production
+`BILLING_ENFORCEMENT_MODE=hard` se aplica aunque la organización conserve
+`billing_enforcement_mode=observe`.
+
+#### Hallazgo y corrección local — alta manual de contactos
+
+El botón visual **Añadir contacto** en `/contacts` no tenía manejador ni ruta
+de alta, por lo que no servía para validar ni crear contactos. Se corrigió
+localmente con un diálogo y `POST /api/contacts`; la ruta autentica, valida la
+marca y su alcance, comprueba duplicados y aplica `contacts.total` mediante
+`checkBillingFeature`. Falta publicar el cambio y ejecutar su prueba manual en
+Production; hasta entonces la validación de contactos se realiza por la ruta
+de importación.
+
+#### Hallazgo runtime — contacto entrante sobre el límite (2026-08-07)
+
+Después de llenar la cuenta, un ingreso desde Instagram registró una decisión
+`contacts.total` con `source=sync/instagram/inbound-contact`, modo `hard`,
+`allowed=false`, `would_block=true` y uso `10.000/10.000`. El sistema creó un
+contacto `restricted` con `quota_restricted=true`, por lo que el conteo pasó a
+`10.001`. Esto confirma la política de no perder el lead entrante. Sin embargo,
+la consulta a `smarttalk.contact_overage_events` no devolvió una fila para ese
+contacto. Debe investigarse antes de cerrar la continuidad y el reproceso de
+excedentes: el payload/identificador privado debería conservarse en esa cola.
+
+#### Qué falta hacer con esta cuenta
+
+- [ ] Intentar una marca, canal, asesor, usuario, broadcast y flujo adicionales
+  y guardar la respuesta HTTP esperada (`402`) para cada límite.
+- [ ] Confirmar que los tres contactos excedentes tienen la política de
+  continuidad correcta y que cada evento de excedente está deduplicado.
+- [ ] Confirmar que el excedente no permite nuevas altas administrativas, pero
+  que los webhooks entrantes conservan el evento y no pierden el mensaje.
+- [ ] Guardar fecha, organización, usuario, referencia de pago y deployment de
+  la prueba; la captura por sí sola no identifica la transacción.
+- [x] Repetir la compra y la matriz de límites con Demo Crecimiento y Demo
+  Escala; los tres planes fueron llevados hasta sus límites.
 
 Manual principal:
 `GUIA_OPERATIVA_FASE_2_DESPLIEGUE.md`
@@ -84,13 +239,15 @@ Manual principal:
 - [x] Desplegar portada publica y onboarding en Vercel Production.
 - [x] Migracion `013` aplicada y aislamiento por marca validado en PostgreSQL.
 - [x] Cuenta `dev@comunitymanager.io` limpiada para repetir onboarding.
-- [ ] Configurar credenciales ePayco sandbox en Vercel.
-- [ ] Completar un pago sandbox desde el onboarding publico.
+- [x] Configurar credenciales ePayco sandbox en Vercel.
+- [x] Completar pagos sandbox desde el onboarding público para los tres planes.
 - [ ] Funcion PostgreSQL transaccional validada en staging.
-- [ ] Disenos autenticados revisados en navegador.
+- [x] Diseños autenticados revisados en navegador: `/admin/plans`,
+  `/admin/payment-gateways` y `/settings/billing`.
 - [ ] Worker de outbox implementado y probado.
 - [ ] Notificaciones de billing implementadas y probadas.
-- [ ] Rate limiting de checkout/webhooks implementado y probado.
+- [x] Rate limiting de checkout/webhooks implementado y probado localmente; la
+  validación de carga en entorno desplegado sigue pendiente.
 
 ## Estado multi-pasarela agregado 2026-07-29
 
@@ -119,9 +276,9 @@ Manual principal:
   2026-07-30: enforcement `off`, gracia de 3 dias, sandbox y renovacion manual.
 - [x] Confirmar las variables operativas en Vercel Production despues del
   primer despliegue.
-- [ ] Confirmar con prueba funcional que las credenciales sandbox de ePayco
+- [x] Confirmar con prueba funcional que las credenciales sandbox de ePayco
   son correctas.
-- [ ] Pasarela confirmada en sandbox.
+- [x] Pasarela confirmada en sandbox mediante compras de los tres planes.
 - [ ] URL publica HTTPS de webhook confirmada.
 - [ ] Logs y correlation IDs visibles.
 - [ ] Procedimiento de rollback probado.

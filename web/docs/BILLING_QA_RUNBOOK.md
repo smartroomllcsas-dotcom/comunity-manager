@@ -23,6 +23,28 @@ Las credenciales privadas de ePayco, Wompi y PayU deben permanecer sin el
 prefijo `NEXT_PUBLIC_`. Después de cambiar variables se debe crear un nuevo
 deployment para que Vercel las cargue.
 
+### Deployment obligatorio
+
+El proyecto Vercel es `cg-moda/comunityagent` y su **Root Directory es
+`web`**. No ejecutes `vercel deploy` desde la raíz del repositorio. Para
+desplegar el `master` actual:
+
+```bash
+git fetch origin
+git worktree add --detach /tmp/comunity-manager-master origin/master
+cd /tmp/comunity-manager-master/web
+npx vercel link --yes --project comunityagent --scope cg-moda
+npx vercel deploy --prod --yes --force --logs
+npx vercel inspect <DEPLOYMENT_ID> --scope cg-moda
+curl -sS -o /dev/null -w 'status=%{http_code} url=%{url_effective}\n' https://www.comunitymanager.io/
+cd <REPOSITORIO>
+git worktree remove --force /tmp/comunity-manager-master
+```
+
+Solo se considera correcto con `readyState: READY` y HTTP `200`. Si se usa el
+Dashboard, filtra `master` y confirma el commit; no redeployes por accidente un
+deployment de `codex/*`.
+
 `BILLING_ENFORCEMENT_MODE=off` desactiva todos los límites comerciales para
 clientes. Solo debe usarse durante una contingencia controlada, nunca para la
 prueba final de los planes.
