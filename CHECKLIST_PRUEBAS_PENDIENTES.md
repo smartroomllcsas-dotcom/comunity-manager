@@ -119,7 +119,9 @@ en memoria y no sustituye la aceptación real con cuentas de QA.
 
 - [x] Proteger los límites contra concurrencia con reservas atómicas en
   contactos, canales, marcas y flujos.
-- [ ] Probar dos altas simultáneas en el límite con una cuenta QA real.
+- [x] Probar dos altas simultáneas en el límite con una cuenta QA real mediante
+  `POST /api/contacts`: una respuesta `201` y otra `402`, con cleanup verificado.
+- [ ] Repetir la concurrencia desde dos formularios UI simultáneos.
 - [ ] Separar QA en un proyecto Supabase y un Preview de Vercel propios.
 - [x] Ejecutar ePayco sandbox con una organización normal para cada uno de los
   tres planes y alcanzar los límites observados desde la aplicación. Las
@@ -129,8 +131,8 @@ en memoria y no sustituye la aceptación real con cuentas de QA.
   vencimiento, gracia, suspensión y reactivación.
 - [x] Completar la implementación del procesamiento de outbox, reintentos e
   idempotencia.
-- [ ] Demostrar en QA/Production un job real, un reintento y una notificación
-  idempotente.
+- [x] Demostrar en QA/Production un job real, un reintento y una notificación
+  idempotente; el job sandbox Resend terminó `completed` y el log `sent`.
 
 #### P1 — gates de aprobación antes de cobros reales
 
