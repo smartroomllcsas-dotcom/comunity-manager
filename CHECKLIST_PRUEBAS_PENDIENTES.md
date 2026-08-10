@@ -98,8 +98,9 @@ en memoria y no sustituye la aceptación real con cuentas de QA.
 
 #### P0 — bloqueadores para declarar salida comercial
 
-- [ ] Proteger los límites contra concurrencia y probar dos altas simultáneas en
-  el límite.
+- [x] Proteger los límites contra concurrencia con reservas atómicas en
+  contactos, canales, marcas y flujos.
+- [ ] Probar dos altas simultáneas en el límite con una cuenta QA real.
 - [ ] Separar QA en un proyecto Supabase y un Preview de Vercel propios.
 - [x] Ejecutar ePayco sandbox con una organización normal para cada uno de los
   tres planes y alcanzar los límites observados desde la aplicación. Las
@@ -107,8 +108,10 @@ en memoria y no sustituye la aceptación real con cuentas de QA.
   QA asociado.
 - [ ] Probar en una cuenta no productiva cambio de plan, cancelación,
   vencimiento, gracia, suspensión y reactivación.
-- [ ] Completar y demostrar el procesamiento de outbox y las notificaciones de
-  billing, incluyendo reintentos e idempotencia.
+- [x] Completar la implementación del procesamiento de outbox, reintentos e
+  idempotencia.
+- [ ] Demostrar en QA/Production un job real, un reintento y una notificación
+  idempotente.
 
 #### P1 — gates de aprobación antes de cobros reales
 
@@ -265,7 +268,8 @@ Manual principal:
 - [ ] Funcion PostgreSQL transaccional validada en staging.
 - [x] Diseños autenticados revisados en navegador: `/admin/plans`,
   `/admin/payment-gateways` y `/settings/billing`.
-- [ ] Worker de outbox implementado y probado.
+- [x] Worker de outbox implementado y desplegado.
+- [ ] Worker de outbox probado con jobs reales y notificaciones observables.
 - [ ] Notificaciones de billing implementadas y probadas.
 - [x] Rate limiting de checkout/webhooks implementado y probado localmente; la
   validación de carga en entorno desplegado sigue pendiente.
