@@ -63,8 +63,12 @@ consideran sustituto de las pruebas de concurrencia, ciclo de vida u outbox.
 - [x] Ejecutar en QA la prueba directa del RPC de reserva atómica con dos
   solicitudes simultáneas y exactamente un cupo disponible; una fue aprobada y
   otra rechazada con `limit_reached`, con restauración y cleanup verificados.
-- [ ] Ejecutar dos altas simultáneas completas por API/UI contra una cuenta QA y
-  conservar ambas respuestas, la reserva, el alta real y el resultado final.
+- [x] Ejecutar dos solicitudes simultáneas reales contra `POST /api/contacts` en
+  QA con exactamente un cupo disponible: una respondió `201` y la otra `402`;
+  se creó un solo contacto sintético, se conservó la captura y luego se limpió
+  el contacto, su reserva y el plan temporal.
+- [ ] Ejecutar dos altas simultáneas desde dos formularios UI contra una cuenta
+  QA y conservar ambas respuestas visuales y el resultado final.
 - [ ] Separar QA en otro proyecto Supabase y Preview de Vercel. El seed actual apunta a una organización QA dentro del proyecto conectado.
 - [x] Ejecutar aceptación E2E por cada plan con ePayco sandbox y registrar referencia, estado de pago, suscripción y límites observados.
 - [ ] Probar cambio, cancelación, vencimiento, gracia, suspensión y reactivación en una cuenta no productiva.

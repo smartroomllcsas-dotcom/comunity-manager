@@ -17,9 +17,12 @@ Proyecto: CommunityManager
 - [x] Evidencia QA — La prueba directa de reservas atómicas y el outbox quedó
   ejecutada con resultado PASS; evidencia en
   `web/QA_BILLING_EVIDENCE_CLAUDE.md`.
-- [ ] Pendiente — Ejecutar dos altas completas simultáneas por API/UI y una
-  notificación real sandbox; la prueba directa del RPC y la idempotencia
-  sintética ya están cerradas.
+- [x] API — Dos solicitudes simultáneas reales a `POST /api/contacts` en QA
+  devolvieron `201` y `402`; el contacto, reserva y plan temporal fueron
+  limpiados/restaurados.
+- [ ] Pendiente — Ejecutar dos altas simultáneas desde la UI y una notificación
+  real sandbox; la prueba directa del RPC y la idempotencia sintética ya están
+  cerradas.
 
 ## Regla de integración
 
