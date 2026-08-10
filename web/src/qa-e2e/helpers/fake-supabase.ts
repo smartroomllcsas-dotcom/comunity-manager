@@ -85,7 +85,7 @@ interface FakeQuery {
   lte: (c: string, v: unknown) => FakeQuery;
   contains: (c: string, v: unknown[]) => FakeQuery;
   overlaps: (c: string, v: unknown[]) => FakeQuery;
-  order: () => FakeQuery;
+  order: (column?: string, options?: { ascending?: boolean }) => FakeQuery;
   limit: (n: number) => FakeQuery;
   maybeSingle: () => Promise<{ data: unknown; error: unknown }>;
   single: () => Promise<{ data: unknown; error: unknown }>;
@@ -107,6 +107,7 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
     let opts: { count?: string; head?: boolean } = {};
     let payload: unknown = null;
     let limitN: number | null = null;
+    let orderBy: { column: string; ascending: boolean } | null = null;
     const filters: Filter[] = [];
 
     const match = () => store[table].filter((row) => filters.every((f) => f(row)));
@@ -165,6 +166,18 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
       }
       // select
       let rows = match();
+      if (orderBy) {
+        const { column, ascending } = orderBy;
+        rows = [...rows].sort((a, b) => {
+          const left = a[column];
+          const right = b[column];
+          if (left === right) return 0;
+          if (left === null || left === undefined) return 1;
+          if (right === null || right === undefined) return -1;
+          const comparison = String(left) < String(right) ? -1 : 1;
+          return ascending ? comparison : -comparison;
+        });
+      }
       if (limitN != null) rows = rows.slice(0, limitN);
       if (opts.head) return { data: null, error: null, count: rows.length };
       if (mode === "maybeSingle") return { data: rows[0] ?? null, error: null };
@@ -238,7 +251,13 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
         filters.push((r) => Array.isArray(r[c]) && v.some((x) => (r[c] as unknown[]).includes(x)));
         return builder;
       },
-      order() { return builder; },
+      // Ordena de verdad. Antes era un no-op, y eso dejó pasar a producción un
+      // `.order("created_at")` sobre una tabla cuya columna es `received_at`:
+      // la consulta real fallaba entera y ninguna prueba lo veía.
+      order(column, options) {
+        if (column) orderBy = { column, ascending: options?.ascending !== false };
+        return builder;
+      },
       limit(n) { limitN = n; return builder; },
       maybeSingle: () => terminate("maybeSingle"),
       single: () => terminate("single"),

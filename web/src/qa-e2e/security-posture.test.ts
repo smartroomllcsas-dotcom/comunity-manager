@@ -291,6 +291,50 @@ describe("Webhooks fallidos · motivos que puede registrar la ruta", () => {
     expect(recovery).toMatch(/auditFailures: number/);
   });
 
+  it("todas las columnas que el worker usa existen en el esquema real", () => {
+    // El Supabase en memoria no valida nombres de columna, así que un
+    // `.order("created_at")` sobre una tabla que sólo tiene `received_at`
+    // pasaba las pruebas y fallaba en producción. Esta prueba compara contra
+    // las migraciones, que son la única fuente de verdad disponible sin base.
+    const migrationsDir = path.resolve(SRC, "..", "supabase", "migrations");
+    const sql = readdirSync(migrationsDir)
+      .filter((name) => name.endsWith(".sql"))
+      .sort()
+      .map((name) => readFileSync(path.join(migrationsDir, name), "utf8"))
+      .join("\n");
+
+    const createBlock = sql.slice(
+      sql.indexOf("CREATE TABLE smarttalk.billing_webhook_events"),
+    );
+    const createBody = createBlock.slice(0, createBlock.indexOf("\n);"));
+    const columns = new Set(
+      [...createBody.matchAll(/^\s{2}([a-z_]+)\s+[A-Z]/gm)].map((match) => match[1]),
+    );
+    for (const added of sql.matchAll(/ADD COLUMN IF NOT EXISTS ([a-z_]+)/g)) {
+      columns.add(added[1]);
+    }
+
+    expect(columns.has("received_at")).toBe(true);
+    expect(columns.has("created_at")).toBe(false);
+
+    const worker = read("lib/billing/webhook-recovery.ts");
+    const referenced = new Set<string>();
+    for (const match of worker.matchAll(/\.(?:eq|neq|lt|lte|gt|gte|is|order)\("([a-z_]+)"/g)) {
+      referenced.add(match[1]);
+    }
+    // `select("a, b, c")` de la tabla de webhooks.
+    const selectMatch = worker.match(/\.select\(\s*\n?\s*"([^"]*event_key[^"]*)"/);
+    if (selectMatch) {
+      for (const column of selectMatch[1].split(",")) referenced.add(column.trim());
+    }
+
+    // `id` y las columnas de checkout_sessions se filtran aparte.
+    const unknown = [...referenced].filter(
+      (column) => column && column !== "organization_id" && !columns.has(column),
+    );
+    expect(unknown, `columnas inexistentes en billing_webhook_events: ${unknown.join(", ")}`).toEqual([]);
+  });
+
   it("el worker exige la migración 034 antes de procesar sin lease", () => {
     expect(read("lib/billing/webhook-recovery.ts")).toMatch(/WebhookRecoverySchemaError/);
     expect(read("app/api/cron/billing-webhook-recovery/route.ts")).toMatch(/SCHEMA_NOT_READY/);
@@ -300,9 +344,13 @@ describe("Webhooks fallidos · motivos que puede registrar la ruta", () => {
       "utf8",
     );
     expect(migration).toMatch(/ADD COLUMN IF NOT EXISTS locked_by TEXT/);
-    expect(migration).toMatch(/NO APLICADA/);
-    // Aditiva y reversible: sin DROP de datos ni cambios de constraint.
+    // La cabecera debe declarar su estado de forma explícita: quien la lea tiene
+    // que saber si está aplicada sin consultar a nadie.
+    expect(migration).toMatch(/ESTADO: (APLICADA|NO APLICADA)/);
+    // Aditiva y reversible: sin DROP de datos ni cambios de constraint, y con
+    // el rollback escrito en la propia cabecera.
     expect(migration).not.toMatch(/DROP TABLE|DROP CONSTRAINT/);
+    expect(migration).toMatch(/DROP COLUMN IF EXISTS locked_by/);
   });
 
   it("el cron de recuperación está registrado en vercel.json", () => {

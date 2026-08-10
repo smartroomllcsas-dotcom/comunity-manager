@@ -1758,3 +1758,207 @@ escritura reales en vez de simularlos.
 2. Desplegar y vigilar en la primera ejecución que `writeFailures` y
    `auditFailures` sean 0.
 3. Sigue pendiente la compra sandbox real (§32.3) y la suite PostgreSQL (§11.2).
+
+---
+---
+
+# Iteración 6 — 2026-08-10 · Verificación con evidencia
+
+## 36. Hecho nuevo: esta rama despliega a **producción**
+
+Al buscar los logs del cron se descubrió algo que cambia el marco de todo lo
+anterior: **`codex/add-manual-contact` no genera Previews, genera deployments
+`target: "production"`**.
+
+| Dato | Valor |
+|---|---|
+| Proyecto Vercel | `comunityagent` (`prj_QdUq7MfIz0XsbTGncUkrDJNOLafW`) |
+| Deployment activo | `dpl_CuWeV8fUNhUasQHf4NubgvpHHD8E` |
+| Commit | `c310ee7` — *feat(billing): add webhook recovery leases and lifecycle alerts* |
+| Rama | `codex/add-manual-contact` |
+| Target | **production** |
+| Estado | READY |
+| Creado | 2026-08-10T20:50:00Z |
+
+Consecuencia: **todo el trabajo de las iteraciones 1-5 ya está en producción**,
+incluido el cron nuevo. Las advertencias previas del tipo «al desplegar, el cron
+arrancará» describen algo que **ya ocurrió**. La migración 034 también está
+aplicada, así que el requisito de esquema está cubierto.
+
+## 37. Logs del cron `billing-webhook-recovery`
+
+### 37.1 Lo que muestran los logs
+
+Consulta de solo lectura sobre el deployment activo, ventana de 30 minutos:
+
+| Hora (UTC) | Ruta | Código |
+|---|---|---|
+| 20:51:13 | `/api/cron/billing-webhook-recovery` | **401** |
+| 20:52:49 | `/api/cron/billing-outbox` | 200 |
+| 20:54:49 | `/api/cron/billing-outbox` | 200 |
+| 20:55:13 | `/api/cron/reap-scheduled` | 200 |
+| 20:55:20 | `/api/cron/release-contact-overage` | 200 |
+| 20:56:49 | `/api/cron/billing-outbox` | 200 |
+
+Agrupado por código en ese deployment: **9 respuestas 200 y 1 respuesta 401**.
+La única 401 es la del cron nuevo.
+
+### 37.2 Diagnóstico
+
+`CRON_SECRET` **está bien configurado**: `/api/cron/billing-outbox` usa
+exactamente la misma función `isAuthorized` y devuelve 200 tres veces en la
+misma ventana. Descartado un problema de secreto.
+
+Lo que ocurrió es distinto:
+
+- El deployment terminó a las **20:50:00**; el 401 es de las **20:51:13**, un
+  minuto después, con `cache=MISS` (los crons reales aparecen con
+  `cache=BYPASS`).
+- La expresión del cron es `*/10 * * * *`, que dispara a `:00, :10, :20…`. Las
+  20:51 **no es un tick programado**.
+
+Es decir: fue una petición sin cabecera `Authorization` inmediatamente posterior
+al despliegue, y el guard la rechazó. **El 401 es la prueba de que la protección
+funciona, no un fallo de configuración.**
+
+### 37.2.1 Primera ejecución programada — **falló con 500**
+
+Se esperó al tick de las 21:00. Disparó a las **21:01:03** y el resultado fue un
+error, no un éxito:
+
+```
+### 21:01:03 GET /api/cron/billing-webhook-recovery 500 [error/serverless]
+[billing] webhook recovery failed
+Error: billing webhook recovery scan failed:
+       column billing_webhook_events.created_at does not exist
+```
+
+**Bug real en producción, encontrado por esta verificación.** La consulta del
+worker ordenaba por `created_at`, pero `smarttalk.billing_webhook_events` **no
+tiene esa columna**: su columna de llegada es `received_at` (migración 009). La
+consulta fallaba entera, así que el worker no procesaba absolutamente nada y el
+cron devolvía 500 cada 10 minutos.
+
+**Por qué las 501 pruebas no lo detectaron.** El Supabase en memoria
+implementaba `order()` como **no-op**: ignoraba el nombre de la columna. Una
+consulta con una columna inexistente pasaba las pruebas y fallaba contra
+PostgreSQL. Es exactamente la clase de fallo que §8 advertía que el fake no
+puede ver.
+
+**Corrección aplicada (tres partes):**
+
+1. `webhook-recovery.ts` ordena por `received_at`.
+2. El fake **ordena de verdad**: `order(column, {ascending})` implementado.
+3. Prueba nueva en `security-posture.test.ts` que compara **cada columna** que
+   el worker referencia (`select`, `eq`, `lt`, `is`, `order`) contra el esquema
+   derivado de las migraciones. Verificado que atrapa el bug: al restaurar
+   `created_at`, la prueba falla con
+   `columnas inexistentes en billing_webhook_events: created_at`.
+
+**Gravedad:** el fallo es de disponibilidad de la función, no de datos. La
+consulta revienta antes de cualquier escritura, así que no se corrompió nada, no
+se activó ningún cobro y no se tocó ninguna organización. Pero la recuperación
+de webhooks **no ha funcionado ni una sola vez** desde el despliegue.
+
+> **La corrección está en el árbol de trabajo, sin desplegar.** Hasta que Codex
+> publique, el cron sigue devolviendo 500 cada 10 minutos en producción.
+
+### 37.3 Lo solicitado, con la respuesta honesta
+
+| Solicitado | Estado real |
+|---|---|
+| `writeFailures = 0` | **NO CONFIRMADO — sin dato.** El worker abortó en la consulta inicial; nunca llegó a la fase de escritura, así que el contador no se emitió |
+| `auditFailures = 0` | **NO CONFIRMADO — sin dato.** Ídem |
+| No se bloquearon organizaciones | **Confirmado, por dos vías.** (a) El worker no llegó a ejecutar ninguna rama, así que no pudo tocar nada. (b) El código **no contiene ninguna instrucción que desactive una organización**: verificado por la prueba que afirma la ausencia de `is_active: false` en `webhook-recovery.ts`. D-2 se implementó como alerta, nunca como bloqueo |
+
+No se marca ninguno de los dos primeros como aprobado. Sólo podrán confirmarse
+tras desplegar la corrección de §37.2.1 y esperar a un tick limpio.
+
+## 38. Suite PostgreSQL/RLS — sigue sin ejecutar
+
+Se intentó ejecutar. Salida literal de los tres intentos:
+
+```
+### 1) Sin QA_DATABASE_URL
+✖ Falta QA_DATABASE_URL.
+
+### 2) Apuntando a la base real del proyecto
+✖ El host 'smartmedia-api.smartgenapp.com' no es local. Para evitar accidentes,
+  esta suite sólo acepta: localhost, 127.0.0.1, ::1, 0.0.0.0, host.docker.internal, postgres, db
+
+### 3) Base local desechable
+✖ No se pudo conectar a QA_DATABASE_URL: connect ECONNREFUSED 127.0.0.1:54322
+```
+
+Entorno verificado de nuevo: `QA_DATABASE_URL` no definida; sin binario servidor
+`postgres`; sin `docker`, `podman` ni `supabase`; ningún proceso escuchando en
+5432 ni 54322. La única base alcanzable es la **productiva** del proyecto
+(`smartmedia-api.smartgenapp.com`), y la guarda del runner la rechaza por no ser
+local — que es exactamente su propósito.
+
+> **13 pruebas preparadas, 0 ejecutadas por falta de base QA desechable.**
+> PostgreSQL/RLS **NO está aprobado**.
+
+## 39. Resultados reales de esta iteración
+
+| Comando | Resultado |
+|---|---|
+| `npx vitest run` | **501 passed / 30 files**, 0 fallos |
+| `npm test` | vitest 501 + node: **6 passed, 13 skipped** |
+| `npm run lint` | **0 errores**, 168 warnings (preexistentes) |
+| `npx tsc --noEmit \| grep '^src/'` | sin salida |
+| `npm run build` | **Compiled successfully** |
+| `git diff --check` | sin salida |
+| `node scripts/qa-postgres-suite.mjs` | 3 rechazos correctos (§38) |
+
+La prueba 501 es la nueva de validación de columnas contra el esquema (§37.2.1).
+
+### 39.1 Un test falló y detectó un cambio real
+
+`npm test` falló al primer intento:
+
+```
+src/qa-e2e/security-posture.test.ts
+  › el worker exige la migración 034 antes de procesar sin lease
+  expect(migration).toMatch(/NO APLICADA/)
+```
+
+Motivo: la cabecera de la migración 034 pasó a decir *«ESTADO: APLICADA en
+Supabase por el propietario»*. La prueba afirmaba el estado antiguo.
+
+Se corrigió la aserción para que compruebe el invariante duradero en vez del
+estado puntual: que la cabecera **declare explícitamente** su estado
+(`APLICADA` o `NO APLICADA`), que siga siendo aditiva y que conserve el rollback
+escrito. Tras el cambio, 500/500 en verde.
+
+Es el trinquete funcionando: el cambio de estado de una migración no pasó
+inadvertido.
+
+## 40. Estado consolidado
+
+| Elemento | Estado | Evidencia |
+|---|---|---|
+| Migración 033 (reactivación) | Aplicada y validada | ePayco 380694488, acceso hasta 10/09/2026 |
+| Migración 034 (`locked_by`) | **Aplicada** | Cabecera del archivo, confirmada por el propietario |
+| Código iteraciones 1-5 | **En producción** | `dpl_CuWeV8fUNhUasQHf4NubgvpHHD8E` / `c310ee7` |
+| Cron webhook-recovery | **Desplegado y fallando (500)** — corrección lista sin desplegar | §37.2.1 |
+| `writeFailures` / `auditFailures` | **Sin dato — no confirmados** | §37.3 |
+| Suite PostgreSQL/RLS | **13 preparadas, 0 ejecutadas** | §38 |
+| Downgrade (D-5) | No implementado | H-12, §29.2 |
+| Compra sandbox tras el refactor | Pendiente | §32.3 |
+
+## 41. Qué hacer a continuación
+
+0. **URGENTE — desplegar la corrección de `received_at`** (§37.2.1). Mientras
+   tanto el cron devuelve 500 cada 10 minutos en producción. No destruye nada,
+   pero la recuperación de webhooks no funciona.
+1. **Tras desplegar, consultar la respuesta del cron en el siguiente tick** y
+   registrar `writeFailures` y `auditFailures`. Ambos deberían ser 0; si no lo
+   son, hay algo que conciliar a mano.
+2. **Levantar la base QA desechable** y ejecutar §11.2. Es lo único que valida
+   RLS, el índice único y el cuerpo del RPC.
+3. **Compra sandbox real** con una cuenta QA distinta de la 380694488, para
+   validar contra ePayco el refactor de §26.1 y los cambios de §18.
+4. Revisar que el despliegue desde una rama de trabajo a `target: production`
+   sea intencional. Es la causa de que cada commit de esta rama llegue a
+   clientes reales sin pasar por Preview.

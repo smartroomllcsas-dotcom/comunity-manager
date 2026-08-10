@@ -265,7 +265,9 @@ export async function recoverFailedWebhookEvents(limit = 25): Promise<RecoveryOu
     .lt("attempt_count", MAX_RECOVERY_ATTEMPTS)
     // Un evento recién fallido no trae `next_attempt_at`: es elegible ya.
     .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`)
-    .order("created_at", { ascending: true })
+    // La tabla NO tiene `created_at`: su columna de llegada es `received_at`
+    // (migración 009). Usar la equivocada hacía fallar la consulta entera.
+    .order("received_at", { ascending: true })
     .limit(limit);
 
   if (error) {
