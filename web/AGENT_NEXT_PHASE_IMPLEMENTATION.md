@@ -1773,12 +1773,12 @@ anterior: **`codex/add-manual-contact` no genera Previews, genera deployments
 | Dato | Valor |
 |---|---|
 | Proyecto Vercel | `comunityagent` (`prj_QdUq7MfIz0XsbTGncUkrDJNOLafW`) |
-| Deployment activo | `dpl_CuWeV8fUNhUasQHf4NubgvpHHD8E` |
-| Commit | `c310ee7` — *feat(billing): add webhook recovery leases and lifecycle alerts* |
+| Deployment activo | `dpl_2QWqq1A4umTEgrzFFvT9gwFuugBJ` |
+| Commit | `c2c69f8` — *fix(billing): order webhook recovery by received time* |
 | Rama | `codex/add-manual-contact` |
 | Target | **production** |
 | Estado | READY |
-| Creado | 2026-08-10T20:50:00Z |
+| Creado | 2026-08-10T21:08:17Z |
 
 Consecuencia: **todo el trabajo de las iteraciones 1-5 ya está en producción**,
 incluido el cron nuevo. Las advertencias previas del tipo «al desplegar, el cron
@@ -1860,15 +1860,18 @@ consulta revienta antes de cualquier escritura, así que no se corrompió nada, 
 se activó ningún cobro y no se tocó ninguna organización. Pero la recuperación
 de webhooks **no ha funcionado ni una sola vez** desde el despliegue.
 
-> **La corrección está en el árbol de trabajo, sin desplegar.** Hasta que Codex
-> publique, el cron sigue devolviendo 500 cada 10 minutos en producción.
+> **La corrección ya fue publicada por Codex.** El deployment
+> `dpl_2QWqq1A4umTEgrzFFvT9gwFuugBJ` quedó `READY` y está asociado a
+> `https://www.comunitymanager.io`. La primera ejecución programada posterior
+> al despliegue respondió HTTP 200; no volvió a aparecer el error de
+> `created_at`.
 
 ### 37.3 Lo solicitado, con la respuesta honesta
 
 | Solicitado | Estado real |
 |---|---|
-| `writeFailures = 0` | **NO CONFIRMADO — sin dato.** El worker abortó en la consulta inicial; nunca llegó a la fase de escritura, así que el contador no se emitió |
-| `auditFailures = 0` | **NO CONFIRMADO — sin dato.** Ídem |
+| `writeFailures = 0` | **NO CONFIRMADO — sin dato en runtime.** La ejecución posterior al despliegue respondió HTTP 200, pero el log exportado no incluyó esos contadores |
+| `auditFailures = 0` | **NO CONFIRMADO — sin dato en runtime.** La ejecución posterior al despliegue respondió HTTP 200, pero el log exportado no incluyó esos contadores |
 | No se bloquearon organizaciones | **Confirmado, por dos vías.** (a) El worker no llegó a ejecutar ninguna rama, así que no pudo tocar nada. (b) El código **no contiene ninguna instrucción que desactive una organización**: verificado por la prueba que afirma la ausencia de `is_active: false` en `webhook-recovery.ts`. D-2 se implementó como alerta, nunca como bloqueo |
 
 No se marca ninguno de los dos primeros como aprobado. Sólo podrán confirmarse
@@ -1941,7 +1944,7 @@ inadvertido.
 | Migración 033 (reactivación) | Aplicada y validada | ePayco 380694488, acceso hasta 10/09/2026 |
 | Migración 034 (`locked_by`) | **Aplicada** | Cabecera del archivo, confirmada por el propietario |
 | Código iteraciones 1-5 | **En producción** | `dpl_CuWeV8fUNhUasQHf4NubgvpHHD8E` / `c310ee7` |
-| Cron webhook-recovery | **Desplegado y fallando (500)** — corrección lista sin desplegar | §37.2.1 |
+| Cron webhook-recovery | **Corregido y operativo (HTTP 200 observado)** | `dpl_2QWqq1A4umTEgrzFFvT9gwFuugBJ` / `c2c69f8` |
 | `writeFailures` / `auditFailures` | **Sin dato — no confirmados** | §37.3 |
 | Suite PostgreSQL/RLS | **13 preparadas, 0 ejecutadas** | §38 |
 | Downgrade (D-5) | No implementado | H-12, §29.2 |
@@ -1949,13 +1952,14 @@ inadvertido.
 
 ## 41. Qué hacer a continuación
 
-0. **URGENTE — desplegar la corrección de `received_at`** (§37.2.1). Mientras
-   tanto el cron devuelve 500 cada 10 minutos en producción. No destruye nada,
-   pero la recuperación de webhooks no funciona.
-1. **Tras desplegar, consultar la respuesta del cron en el siguiente tick** y
-   registrar `writeFailures` y `auditFailures`. Ambos deberían ser 0; si no lo
-   son, hay algo que conciliar a mano.
-2. **Levantar la base QA desechable** y ejecutar §11.2. Es lo único que valida
+0. **Desplegar la corrección de `received_at`** (§37.2.1): **COMPLETADO**.
+   Deployment `dpl_2QWqq1A4umTEgrzFFvT9gwFuugBJ` en estado `READY` y aliasado a
+   producción.
+1. **Consultar la respuesta del cron en el siguiente tick**: **COMPLETADO**.
+   La ejecución programada posterior al despliegue respondió HTTP 200. Los
+   contadores `writeFailures` y `auditFailures` siguen sin estar confirmados
+   porque Vercel no incluyó sus valores en el log exportado.
+2. **Levantar la base QA desechable** y ejecutar §11.2. Es lo que valida
    RLS, el índice único y el cuerpo del RPC.
 3. **Compra sandbox real** con una cuenta QA distinta de la 380694488, para
    validar contra ePayco el refactor de §26.1 y los cambios de §18.
