@@ -354,19 +354,20 @@ function seedCheckout(overrides: Record<string, unknown> = {}) {
     uniqueIndexes: {
       billing_webhook_events: [["provider", "environment", "event_key"]],
     },
-    // Stand-in del RPC transaccional: sólo replica el efecto observable del
-    // que depende la ruta (el checkout deja de estar `pending`). El cuerpo real
-    // se verifica contra PostgreSQL en tests/postgres-integration.test.mjs.
+    // Stand-in del RPC transaccional. Replica los dos efectos observables de
+    // los que depende la ruta: el `SELECT ... FOR UPDATE` que rechaza un
+    // checkout que ya no está `pending`, y el cierre del checkout al activar.
+    // El cuerpo real se verifica en tests/postgres-integration.test.mjs.
     rpcHandlers: {
       finalize_epayco_approved_payment: (args, store) => {
         const { p_checkout_session_id } = args as { p_checkout_session_id: string };
         const session = (store.checkout_sessions || []).find(
           (row) => row.id === p_checkout_session_id,
         );
-        if (session) {
-          session.status = "approved";
-          session.completed_at = new Date().toISOString();
-        }
+        if (!session) throw new Error("checkout_session_not_found");
+        if (session.status !== "pending") throw new Error("checkout_not_pending");
+        session.status = "approved";
+        session.completed_at = new Date().toISOString();
         return "sub-reactivada";
       },
     },
@@ -388,6 +389,7 @@ function seedCheckout(overrides: Record<string, unknown> = {}) {
 }
 
 const payments = () => H.current!.store.payments as Array<Record<string, unknown>>;
+const checkoutRow = () => (H.current!.store.checkout_sessions as Array<Record<string, unknown>>)[0];
 const webhookEvents = () => H.current!.store.billing_webhook_events as Array<Record<string, unknown>>;
 const finalizeCalls = () =>
   H.current!.rpcCalls.filter((c) => c.name === "finalize_epayco_approved_payment");
@@ -465,6 +467,145 @@ describe("Contract · conciliación de importe, moneda y ambiente", () => {
     expect(await res.json()).toEqual({ status: "ok", ignored: true });
     expect(webhookEvents()[0].status).toBe("ignored");
     expect(finalizeCalls()).toHaveLength(0);
+  });
+});
+
+describe("Contract · estados de pago de ePayco sobre la ruta real", () => {
+  beforeEach(() => seedCheckout());
+
+  it("PENDIENTE (x_cod_response=3): registra el pago, deja el checkout pendiente y no activa", async () => {
+    const res = await confirmation(makeRequest(buildParams({ x_cod_response: "3", x_response: "3" })));
+    expect(await res.json()).toEqual({ status: "ok" });
+    expect(payments()[0].status).toBe("pending");
+    expect(payments()[0].approved_at).toBeNull();
+    // Un pago pendiente NO cierra el checkout: puede convertirse en aprobado.
+    expect(checkoutRow().status).toBe("pending");
+    expect(checkoutRow().completed_at).toBeNull();
+    expect(finalizeCalls()).toHaveLength(0);
+  });
+
+  it("RECHAZADO (x_cod_response=2): cierra el checkout y no activa", async () => {
+    const res = await confirmation(makeRequest(buildParams({ x_cod_response: "2", x_response: "2" })));
+    expect(await res.json()).toEqual({ status: "ok" });
+    expect(payments()[0].status).toBe("rejected");
+    expect(payments()[0].approved_at).toBeNull();
+    expect(checkoutRow().status).toBe("rejected");
+    expect(checkoutRow().completed_at).not.toBeNull();
+    expect(finalizeCalls()).toHaveLength(0);
+  });
+
+  it("FALLIDO (x_cod_response=4): cierra el checkout y no activa", async () => {
+    await confirmation(makeRequest(buildParams({ x_cod_response: "4", x_response: "4" })));
+    expect(payments()[0].status).toBe("failed");
+    expect(checkoutRow().status).toBe("failed");
+    expect(finalizeCalls()).toHaveLength(0);
+  });
+
+  it("un código desconocido cae a pendiente en lugar de activar (fail-safe)", async () => {
+    await confirmation(makeRequest(buildParams({ x_cod_response: "99", x_response: "99" })));
+    expect(payments()[0].status).toBe("pending");
+    expect(finalizeCalls()).toHaveLength(0);
+  });
+
+  it("un pendiente que luego llega aprobado sí activa (misma sesión, otra transacción)", async () => {
+    await confirmation(makeRequest(buildParams({ x_transaction_id: "TXN-PEND", x_cod_response: "3", x_response: "3" })));
+    expect(finalizeCalls()).toHaveLength(0);
+    expect(checkoutRow().status).toBe("pending");
+
+    await confirmation(makeRequest(buildParams({ x_transaction_id: "TXN-OK", x_cod_response: "1" })));
+    expect(finalizeCalls()).toHaveLength(1);
+    expect(payments()).toHaveLength(2);
+  });
+});
+
+describe("Contract · confirmaciones incompletas", () => {
+  beforeEach(() => seedCheckout());
+
+  it.each([
+    ["x_transaction_id", "x_transaction_id"],
+    ["x_ref_payco", "x_ref_payco"],
+    ["x_extra1 (checkout session)", "x_extra1"],
+  ])("rechaza la confirmación sin %s", async (_label, field) => {
+    const params = buildParams();
+    // La firma se recalcula tras vaciar el campo para aislar la validación de
+    // completitud de la de firma.
+    const mutated = { ...params, [field]: "" };
+    mutated.x_signature = sign(mutated as never);
+
+    const res = await confirmation(makeRequest(mutated));
+    expect(res.status).toBe(400);
+    expect(payments()).toHaveLength(0);
+    expect(finalizeCalls()).toHaveLength(0);
+  });
+
+  it("rechaza un monto no numérico", async () => {
+    const mutated = { ...buildParams(), x_amount: "no-es-monto" };
+    mutated.x_signature = sign(mutated as never);
+    const res = await confirmation(makeRequest(mutated));
+    expect(res.status).toBe(400);
+    expect(payments()).toHaveLength(0);
+  });
+});
+
+describe("Contract · webhooks concurrentes", () => {
+  beforeEach(() => seedCheckout());
+
+  it("dos confirmaciones simultáneas de la misma transacción producen un solo pago y una sola activación", async () => {
+    const params = buildParams({ x_transaction_id: "TXN-CONCURRENTE" });
+
+    const [first, second] = await Promise.all([
+      confirmation(makeRequest(params)),
+      confirmation(makeRequest(params)),
+    ]);
+    const bodies = [await first.json(), await second.json()];
+
+    // Exactamente una gana la carrera; la otra ve el índice único (23505).
+    expect(bodies.filter((body) => body.duplicate === true)).toHaveLength(1);
+    expect(bodies.filter((body) => !body.duplicate)).toHaveLength(1);
+
+    expect(webhookEvents()).toHaveLength(1);
+    expect(payments()).toHaveLength(1);
+    expect(finalizeCalls()).toHaveLength(1);
+  });
+
+  it("cinco confirmaciones simultáneas siguen produciendo una sola activación", async () => {
+    const params = buildParams({ x_transaction_id: "TXN-RAFAGA" });
+
+    const responses = await Promise.all(
+      Array.from({ length: 5 }, () => confirmation(makeRequest(params))),
+    );
+    const bodies = await Promise.all(responses.map((response) => response.json()));
+
+    expect(responses.every((response) => response.status === 200)).toBe(true);
+    expect(bodies.filter((body) => body.duplicate === true)).toHaveLength(4);
+    expect(webhookEvents()).toHaveLength(1);
+    expect(payments()).toHaveLength(1);
+    expect(finalizeCalls()).toHaveLength(1);
+  });
+
+  it("transacciones distintas concurrentes: la ruta NO serializa y el guard es la base", async () => {
+    const responses = await Promise.all([
+      confirmation(makeRequest(buildParams({ x_transaction_id: "TXN-C1" }))),
+      confirmation(makeRequest(buildParams({ x_transaction_id: "TXN-C2" }))),
+    ]);
+
+    // Comportamiento REAL documentado: ambas leen el checkout mientras sigue
+    // `pending`, así que ambas llegan a invocar el RPC. La protección contra la
+    // doble activación es el `SELECT ... FOR UPDATE` dentro de la función SQL,
+    // no una guarda de la ruta.
+    expect(webhookEvents()).toHaveLength(2);
+    expect(finalizeCalls()).toHaveLength(2);
+
+    // Sólo una activa; la otra recibe `checkout_not_pending` de la base.
+    const statuses = responses.map((response) => response.status).sort();
+    expect(statuses).toEqual([200, 500]);
+    expect(checkoutRow().status).toBe("approved");
+
+    // Consecuencia operativa: el evento perdedor queda `failed` y depende de un
+    // reintento del proveedor o de una recuperación manual. Ver §5 del informe.
+    const failed = webhookEvents().filter((event) => event.status === "failed");
+    expect(failed).toHaveLength(1);
+    expect(failed[0].last_error).toBe("atomic_activation_failed");
   });
 });
 

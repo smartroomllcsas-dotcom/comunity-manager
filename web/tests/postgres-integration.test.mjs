@@ -1,37 +1,32 @@
 /**
- * Integración contra PostgreSQL real — RLS, índices únicos y RPC de billing.
+ * Integración contra PostgreSQL real — RLS, índices únicos, RPC de billing y
+ * ciclo de vida de suscripciones.
  *
- * SE SALTA POR DEFECTO. Sólo corre si `QA_DATABASE_URL` apunta a una base
- * DESECHABLE (Supabase local o contenedor Postgres) donde ya se aplicaron las
- * migraciones de `supabase/migrations/`. Nunca debe apuntarse a Production ni
- * al proyecto QA compartido: las pruebas escriben y hacen ROLLBACK, pero
- * dependen de poder crear organizaciones y suscripciones de prueba.
+ * SE SALTA POR DEFECTO. Ejecutar siempre a través del runner, que valida el
+ * destino, carga los fixtures y limpia al terminar:
  *
- * Uso:
  *   QA_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:54322/postgres \
- *     node --test --experimental-strip-types tests/postgres-integration.test.mjs
+ *     node scripts/qa-postgres-suite.mjs
  *
- * Cubre lo que el Supabase en memoria no puede probar:
- *   1. RLS habilitado en las tablas de billing.
- *   2. El índice único que sostiene la deduplicación de webhooks.
- *   3. El cuerpo del RPC finalize_epayco_approved_payment: reactivación desde
- *      suspended y desde cancelled, período nunca vencido, idempotencia.
+ * Cada test que escribe lo hace dentro de BEGIN … ROLLBACK, así que la base
+ * queda como estaba. Nunca debe apuntarse a Production ni al proyecto QA
+ * compartido.
  */
 import assert from "node:assert/strict";
 import test from "node:test";
 
 const CONNECTION = process.env.QA_DATABASE_URL;
 
-const GUARD = /supabase\.co|production|prod\./i;
-if (CONNECTION && GUARD.test(CONNECTION)) {
+const FORBIDDEN = /supabase\.co|production|\bprod\b|prod\.|amazonaws\.com|neon\.tech/i;
+if (CONNECTION && FORBIDDEN.test(CONNECTION)) {
   throw new Error(
-    "QA_DATABASE_URL apunta a un host gestionado o de producción. Esta suite sólo corre contra una base desechable.",
+    "QA_DATABASE_URL apunta a un host gestionado o de producción. Esta suite siembra datos y sólo corre contra una base desechable.",
   );
 }
 
 const skip = CONNECTION
   ? false
-  : "define QA_DATABASE_URL con una base desechable para ejecutar esta suite";
+  : "usa scripts/qa-postgres-suite.mjs con QA_DATABASE_URL apuntando a una base desechable";
 
 /** Tablas que deben tener RLS habilitado en el esquema smarttalk. */
 const RLS_REQUIRED = [
@@ -72,7 +67,42 @@ async function inRollback(client, fn) {
   }
 }
 
-test("RLS habilitado en todas las tablas de billing", { skip }, async () => {
+/** Siembra un caso de ciclo de vida. Falla con instrucciones si faltan fixtures. */
+async function seed(client, testCase) {
+  try {
+    const { rows } = await client.query(`SELECT smarttalk.qa_seed_lifecycle_case($1) AS ctx`, [testCase]);
+    return rows[0].ctx;
+  } catch (error) {
+    if (/does not exist/i.test(error.message)) {
+      throw new Error(
+        "Faltan los fixtures de QA. Ejecuta la suite con scripts/qa-postgres-suite.mjs, " +
+          "que carga supabase/qa/001_qa_lifecycle_fixtures.sql antes de correr los tests.",
+      );
+    }
+    throw error;
+  }
+}
+
+const finalize = (client, ctx, eventKey) =>
+  client.query(`SELECT smarttalk.finalize_epayco_approved_payment($1, $2, $3, NULL, NULL) AS id`, [
+    ctx.checkout_session_id,
+    ctx.payment_id,
+    eventKey,
+  ]);
+
+const subscriptionsOf = (client, ctx) =>
+  client.query(
+    `SELECT id, status, plan_id, current_period_start, current_period_end,
+            cancel_at_period_end, grace_ends_at, suspended_at, cancelled_at, status_reason
+       FROM smarttalk.subscriptions WHERE organization_id = $1 ORDER BY created_at`,
+    [ctx.organization_id],
+  );
+
+// ===========================================================================
+// 1-4. RLS, policies, privilegios e índices
+// ===========================================================================
+
+test("1. RLS habilitado en todas las tablas de billing", { skip }, async () => {
   await withClient(async (client) => {
     const { rows } = await client.query(
       `SELECT c.relname AS table_name, c.relrowsecurity AS rls
@@ -91,7 +121,7 @@ test("RLS habilitado en todas las tablas de billing", { skip }, async () => {
   });
 });
 
-test("cada tabla de billing con RLS tiene al menos una policy", { skip }, async () => {
+test("2. cada tabla de billing con RLS tiene al menos una policy", { skip }, async () => {
   await withClient(async (client) => {
     const { rows } = await client.query(
       `SELECT tablename, COUNT(*)::int AS policies
@@ -102,13 +132,13 @@ test("cada tabla de billing con RLS tiene al menos una policy", { skip }, async 
     );
     const counts = new Map(rows.map((row) => [row.tablename, row.policies]));
     const unprotected = RLS_REQUIRED.filter((table) => !(counts.get(table) > 0));
-    // RLS sin policy deniega todo a los roles no privilegiados, que es seguro
-    // pero silencioso: se reporta para que sea una decisión explícita.
+    // RLS sin policy deniega todo a los roles no privilegiados: es seguro pero
+    // silencioso, así que se reporta para que sea una decisión explícita.
     assert.deepEqual(unprotected, [], `RLS sin policy declarada: ${unprotected.join(", ")}`);
   });
 });
 
-test("las funciones de billing no son ejecutables por anon ni authenticated", { skip }, async () => {
+test("3. las funciones de billing no son ejecutables por anon ni authenticated", { skip }, async () => {
   await withClient(async (client) => {
     const functions = [
       "finalize_epayco_approved_payment",
@@ -118,6 +148,7 @@ test("las funciones de billing no son ejecutables por anon ni authenticated", { 
       "record_billing_usage",
       "claim_billing_outbox_jobs",
     ];
+    let checked = 0;
     for (const name of functions) {
       const { rows } = await client.query(
         `SELECT p.proname,
@@ -128,16 +159,17 @@ test("las funciones de billing no son ejecutables por anon ni authenticated", { 
           WHERE n.nspname = 'smarttalk' AND p.proname = $1`,
         [name],
       );
-      if (rows.length === 0) continue; // migración no aplicada en esta base
       for (const row of rows) {
+        checked += 1;
         assert.equal(row.anon, false, `${name} es ejecutable por anon`);
         assert.equal(row.authenticated, false, `${name} es ejecutable por authenticated`);
       }
     }
+    assert.ok(checked > 0, "no se encontró ninguna función de billing: ¿migraciones aplicadas?");
   });
 });
 
-test("el índice único de webhooks impide procesar dos veces el mismo evento", { skip }, async () => {
+test("4. el índice único de webhooks impide procesar dos veces el mismo evento", { skip }, async () => {
   await withClient(async (client) => {
     const { rows } = await client.query(
       `SELECT indexdef FROM pg_indexes
@@ -152,83 +184,75 @@ test("el índice único de webhooks impide procesar dos veces el mismo evento", 
         /event_key/.test(row.indexdef),
     );
     assert.ok(dedupe, "falta el índice único (provider, environment, event_key)");
+
+    // Y se comprueba en ejecución, no sólo por catálogo.
+    await inRollback(client, async () => {
+      const insert = () =>
+        client.query(
+          `INSERT INTO smarttalk.billing_webhook_events(provider, environment, event_key, payload_hash, signature_valid, status, payload)
+           VALUES ('epayco', 'sandbox', 'QA-DEDUPE-1', 'hash', TRUE, 'processing', '{}')`,
+        );
+      await insert();
+      await assert.rejects(insert, (error) => error.code === "23505");
+    });
   });
 });
 
-test("reactivar desde suspended reutiliza la suscripción y abre un período futuro", { skip }, async () => {
+// ===========================================================================
+// 5-7. Ciclo de vida y RPC de activación
+// ===========================================================================
+
+test("5. reactivar desde suspended reutiliza la suscripción y abre un período futuro", { skip }, async () => {
   await withClient(async (client) => {
     await inRollback(client, async () => {
-      const setup = await client.query(`SELECT smarttalk.qa_seed_reactivation_case('suspended') AS ctx`);
-      const context = setup.rows[0]?.ctx;
-      if (!context) {
-        // El helper de siembra no existe: la prueba requiere un fixture SQL que
-        // aún no está en el repositorio. Ver AGENT_NEXT_PHASE_IMPLEMENTATION.md.
-        return;
-      }
+      const ctx = await seed(client, "suspended");
+      await finalize(client, ctx, "qa-event-suspended");
 
-      await client.query(
-        `SELECT smarttalk.finalize_epayco_approved_payment($1, $2, $3, NULL, NULL)`,
-        [context.checkout_session_id, context.payment_id, "qa-event-suspended"],
-      );
-
-      const { rows } = await client.query(
-        `SELECT id, status, current_period_end, cancel_at_period_end
-           FROM smarttalk.subscriptions WHERE organization_id = $1`,
-        [context.organization_id],
-      );
-
+      const { rows } = await subscriptionsOf(client, ctx);
       assert.equal(rows.length, 1, "la reactivación no debe crear una suscripción adicional");
-      assert.equal(rows[0].id, context.subscription_id, "debe reutilizar la suscripción existente");
+      assert.equal(rows[0].id, ctx.subscription_id, "debe reutilizar la suscripción existente");
       assert.equal(rows[0].status, "active");
       assert.equal(rows[0].cancel_at_period_end, false);
+      assert.equal(rows[0].suspended_at, null, "suspended_at debe limpiarse al reactivar");
+      assert.equal(rows[0].status_reason, "payment_approved");
       assert.ok(
         new Date(rows[0].current_period_end).getTime() > Date.now(),
         "el período reactivado no puede estar vencido",
       );
+      assert.ok(
+        new Date(rows[0].current_period_start).getTime() <= Date.now() + 1000,
+        "el período debe arrancar en el momento del pago, no heredar el vencido",
+      );
     });
   });
 });
 
-test("reactivar desde cancelled no duplica la suscripción (requiere migración 033)", { skip }, async () => {
+test("6. reactivar desde cancelled no duplica la suscripción (requiere migración 033)", { skip }, async () => {
   await withClient(async (client) => {
     await inRollback(client, async () => {
-      const setup = await client.query(`SELECT smarttalk.qa_seed_reactivation_case('cancelled') AS ctx`);
-      const context = setup.rows[0]?.ctx;
-      if (!context) return;
+      const ctx = await seed(client, "cancelled");
+      await finalize(client, ctx, "qa-event-cancelled");
 
-      await client.query(
-        `SELECT smarttalk.finalize_epayco_approved_payment($1, $2, $3, NULL, NULL)`,
-        [context.checkout_session_id, context.payment_id, "qa-event-cancelled"],
-      );
-
-      const { rows } = await client.query(
-        `SELECT COUNT(*)::int AS total FROM smarttalk.subscriptions WHERE organization_id = $1`,
-        [context.organization_id],
-      );
+      const { rows } = await subscriptionsOf(client, ctx);
       assert.equal(
-        rows[0].total,
+        rows.length,
         1,
-        "con la migración 033 aplicada la fila cancelada se reutiliza; sin ella este assert falla y documenta el gap",
+        "sin la migración 033 el RPC inserta una segunda suscripción; este fallo documenta ese gap",
       );
+      assert.equal(rows[0].id, ctx.subscription_id, "debe reutilizar la fila cancelada");
+      assert.equal(rows[0].status, "active");
+      assert.equal(rows[0].cancelled_at, null, "cancelled_at debe limpiarse al reactivar");
     });
   });
 });
 
-test("llamar dos veces al RPC con el mismo checkout no crea dos suscripciones", { skip }, async () => {
+test("7. llamar dos veces al RPC con el mismo checkout no crea dos suscripciones", { skip }, async () => {
   await withClient(async (client) => {
     await inRollback(client, async () => {
-      const setup = await client.query(`SELECT smarttalk.qa_seed_reactivation_case('suspended') AS ctx`);
-      const context = setup.rows[0]?.ctx;
-      if (!context) return;
+      const ctx = await seed(client, "suspended");
 
-      const first = await client.query(
-        `SELECT smarttalk.finalize_epayco_approved_payment($1, $2, $3, NULL, NULL) AS id`,
-        [context.checkout_session_id, context.payment_id, "qa-event-idem"],
-      );
-      const second = await client.query(
-        `SELECT smarttalk.finalize_epayco_approved_payment($1, $2, $3, NULL, NULL) AS id`,
-        [context.checkout_session_id, context.payment_id, "qa-event-idem"],
-      );
+      const first = await finalize(client, ctx, "qa-event-idem");
+      const second = await finalize(client, ctx, "qa-event-idem");
 
       assert.equal(first.rows[0].id, second.rows[0].id, "la segunda llamada debe devolver la misma suscripción");
 
@@ -238,6 +262,157 @@ test("llamar dos veces al RPC con el mismo checkout no crea dos suscripciones", 
         [first.rows[0].id],
       );
       assert.equal(rows[0].total, 1, "la reentrada no debe duplicar el evento de activación");
+
+      const { rows: subs } = await subscriptionsOf(client, ctx);
+      assert.equal(subs.length, 1);
+    });
+  });
+});
+
+// ===========================================================================
+// 8-12. Fixtures de ciclo de vida — estados y transiciones por pago
+// ===========================================================================
+
+test("8. los fixtures producen cada estado del ciclo de vida", { skip }, async () => {
+  await withClient(async (client) => {
+    const expected = {
+      active: "active",
+      past_due: "past_due",
+      grace_period: "past_due",
+      past_due_expired: "past_due",
+      suspended: "suspended",
+      cancelled: "cancelled",
+      renewal: "active",
+      plan_change: "active",
+    };
+
+    for (const [testCase, status] of Object.entries(expected)) {
+      await inRollback(client, async () => {
+        const ctx = await seed(client, testCase);
+        const { rows } = await subscriptionsOf(client, ctx);
+        assert.equal(rows.length, 1, `${testCase}: debe sembrar una suscripción`);
+        assert.equal(rows[0].status, status, `${testCase}: estado sembrado incorrecto`);
+      });
+    }
+
+    await inRollback(client, async () => {
+      const ctx = await seed(client, "no_subscription");
+      const { rows } = await subscriptionsOf(client, ctx);
+      assert.equal(rows.length, 0, "no_subscription no debe sembrar suscripción");
+      assert.equal(ctx.subscription_id, null);
+    });
+  });
+});
+
+test("9. la ventana de gracia distingue past_due vigente de gracia vencida", { skip }, async () => {
+  await withClient(async (client) => {
+    await inRollback(client, async () => {
+      const ctx = await seed(client, "grace_period");
+      const { rows } = await subscriptionsOf(client, ctx);
+      assert.ok(
+        new Date(rows[0].grace_ends_at).getTime() > Date.now(),
+        "grace_period debe dejar la gracia vigente",
+      );
+    });
+
+    await inRollback(client, async () => {
+      const ctx = await seed(client, "past_due_expired");
+      const { rows } = await subscriptionsOf(client, ctx);
+      assert.ok(
+        new Date(rows[0].grace_ends_at).getTime() < Date.now(),
+        "past_due_expired debe dejar la gracia terminada",
+      );
+    });
+  });
+});
+
+test("10. la renovación extiende el período desde el fin del actual, no desde hoy", { skip }, async () => {
+  await withClient(async (client) => {
+    await inRollback(client, async () => {
+      const ctx = await seed(client, "renewal");
+      const { rows: before } = await subscriptionsOf(client, ctx);
+      const previousEnd = new Date(before[0].current_period_end);
+
+      await finalize(client, ctx, "qa-event-renewal");
+
+      const { rows: after } = await subscriptionsOf(client, ctx);
+      assert.equal(after.length, 1, "renovar no debe crear una suscripción nueva");
+      assert.equal(
+        new Date(after[0].current_period_start).getTime(),
+        previousEnd.getTime(),
+        "el nuevo período debe arrancar donde terminaba el anterior (sin regalar días)",
+      );
+      assert.ok(new Date(after[0].current_period_end).getTime() > previousEnd.getTime());
+    });
+  });
+});
+
+test("11. el cambio de plan mueve plan_id y no duplica la suscripción", { skip }, async () => {
+  await withClient(async (client) => {
+    await inRollback(client, async () => {
+      const ctx = await seed(client, "plan_change");
+      const { rows: before } = await subscriptionsOf(client, ctx);
+      assert.equal(before[0].plan_id, ctx.plan_a_id, "el fixture arranca en el plan A");
+
+      await finalize(client, ctx, "qa-event-plan-change");
+
+      const { rows: after } = await subscriptionsOf(client, ctx);
+      assert.equal(after.length, 1, "cambiar de plan no debe crear una suscripción nueva");
+      assert.equal(after[0].plan_id, ctx.plan_b_id, "debe quedar en el plan del checkout");
+      assert.equal(after[0].status, "active");
+
+      const { rows: org } = await client.query(
+        `SELECT plan_id FROM smarttalk.organizations WHERE id = $1`,
+        [ctx.organization_id],
+      );
+      assert.equal(org[0].plan_id, ctx.plan_b_id, "organizations.plan_id debe seguir al cambio");
+    });
+  });
+});
+
+test("12. cada activación por pago deja exactamente un subscription_event de proveedor", { skip }, async () => {
+  await withClient(async (client) => {
+    for (const testCase of ["suspended", "cancelled", "renewal", "plan_change"]) {
+      await inRollback(client, async () => {
+        const ctx = await seed(client, testCase);
+        await finalize(client, ctx, `qa-event-${testCase}-audit`);
+
+        const { rows } = await client.query(
+          `SELECT actor_type, new_status, reason, correlation_id
+             FROM smarttalk.subscription_events
+            WHERE organization_id = $1`,
+          [ctx.organization_id],
+        );
+        assert.equal(rows.length, 1, `${testCase}: debe registrar un único evento`);
+        assert.equal(rows[0].actor_type, "provider");
+        assert.equal(rows[0].new_status, "active");
+        assert.equal(rows[0].reason, "payment_approved");
+        assert.equal(
+          rows[0].correlation_id,
+          `qa-event-${testCase}-audit`,
+          "el correlation_id debe ser la clave del evento del proveedor",
+        );
+      });
+    }
+  });
+});
+
+test("13. un checkout expirado no puede activar una suscripción", { skip }, async () => {
+  await withClient(async (client) => {
+    await inRollback(client, async () => {
+      const ctx = await seed(client, "suspended");
+      await client.query(
+        `UPDATE smarttalk.checkout_sessions SET expires_at = NOW() - INTERVAL '1 minute' WHERE id = $1`,
+        [ctx.checkout_session_id],
+      );
+
+      await assert.rejects(
+        () => finalize(client, ctx, "qa-event-expirado"),
+        /checkout_not_pending/,
+      );
+
+      const { rows } = await subscriptionsOf(client, ctx);
+      assert.equal(rows[0].status, "suspended", "la suscripción no debe activarse con checkout expirado");
     });
   });
 });

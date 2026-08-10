@@ -2,17 +2,43 @@ import { randomUUID } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notify, type NotifyRequest } from "@/lib/notify/dispatcher";
 
-export type BillingOutboxJobType =
-  | "process_webhook"
-  | "renew_subscription"
-  | "reconcile_payment"
-  | "expire_subscription"
-  | "apply_plan_change"
-  | "send_notification";
+/**
+ * Tipos de job que este worker sabe procesar.
+ *
+ * Antes la unión declaraba los seis valores del CHECK de la migración 010, lo
+ * que hacía parecer funcionales cinco tipos sin handler: cualquier job de esos
+ * tipos consumía sus 5 intentos y terminaba en `dead_letter`.
+ *
+ * Se retiran del tipo (no de la base) para que **ningún código de la aplicación
+ * pueda encolarlos por accidente**. La constante de abajo conserva la lista con
+ * su motivo, y `processJob` sigue rechazando de forma segura cualquier tipo que
+ * llegue desde la base.
+ */
+export type BillingOutboxJobType = "send_notification";
+
+/**
+ * Declarados en el CHECK de `smarttalk.billing_outbox_jobs` pero **sin handler,
+ * sin productor, sin contrato de payload y sin clave de idempotencia**.
+ *
+ * No deben tratarse como funcionales. Estrecharlos también en la base exige una
+ * migración que aún no está decidida (ver informe, §19).
+ */
+export const UNIMPLEMENTED_OUTBOX_JOB_TYPES = [
+  "process_webhook",
+  "renew_subscription",
+  "reconcile_payment",
+  "expire_subscription",
+  "apply_plan_change",
+] as const;
 
 export interface BillingOutboxJob {
   id: string;
-  job_type: BillingOutboxJobType;
+  /**
+   * Llega desde la base, cuyo CHECK sigue admitiendo los seis valores; por eso
+   * es `string` y no la unión: el tipo debe describir lo que puede aparecer,
+   * no lo que nos gustaría.
+   */
+  job_type: string;
   organization_id: string | null;
   payload: Record<string, unknown>;
   attempt_count: number;
@@ -101,6 +127,9 @@ async function processJob(job: BillingOutboxJob) {
     case "send_notification":
       return processNotification(job);
     default:
+      // Incluye los cinco tipos de UNIMPLEMENTED_OUTBOX_JOB_TYPES: fallan de
+      // forma controlada, agotan reintentos y acaban en `dead_letter` sin
+      // bloquear al resto del lote.
       throw new Error(`No handler registered for billing job type '${job.job_type}'`);
   }
 }

@@ -38,6 +38,10 @@ function hasTimeout(source: string) {
 /**
  * Inventario congelado el 2026-08-10. Cada entrada es deuda conocida del
  * pendiente "timeout de proveedores".
+ *
+ * `lib/epayco/client.ts` entró aquí el 2026-08-10 (el trinquete detectó la
+ * migración a ePayco Checkout v2, commit a960455) y SALIÓ el mismo día al
+ * cerrarse H-01: sus dos llamadas ya usan AbortSignal.timeout.
  */
 const KNOWN_WITHOUT_TIMEOUT = new Set([
   "app/api/ai/assist/route.ts",
@@ -96,6 +100,19 @@ describe("Resiliencia · timeout en llamadas salientes", () => {
 
   it("el inventario congelado no crece", () => {
     expect(KNOWN_WITHOUT_TIMEOUT.size).toBeLessThanOrEqual(26);
+  });
+
+  it("H-01 CERRADO: la ruta de cobro de ePayco declara timeout en sus dos llamadas", () => {
+    const epayco = serverModulesWithFetch().find(({ file }) => file === "lib/epayco/client.ts");
+    expect(epayco, "lib/epayco/client.ts ya no hace fetch: revisa H-01").toBeTruthy();
+    expect(hasTimeout(epayco!.source)).toBe(true);
+
+    // Un único `fetch` directo: el del envoltorio, que es quien pone la señal.
+    // Las dos llamadas a la API pasan por él, así que no puede colarse una
+    // llamada sin timeout.
+    expect(epayco!.source.match(/\bawait fetch\(/g) || []).toHaveLength(1);
+    expect(epayco!.source).toMatch(/AbortSignal\.timeout\(timeoutMs\)/);
+    expect(epayco!.source.match(/await epaycoFetch\(/g) || []).toHaveLength(2);
   });
 });
 

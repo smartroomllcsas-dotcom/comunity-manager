@@ -4,7 +4,6 @@ import {
   amountToMinor,
   hashEpaycoPayload,
   isEpaycoTestRequest,
-  mapEpaycoStatus,
   sanitizeEpaycoPayload,
   validateEpaycoSignature,
 } from "@/lib/epayco/client";
@@ -14,6 +13,20 @@ import {
   EPAYCO_CONFIRMATION_RATE_WINDOW_MS,
   epaycoConfirmationRateLimitKey,
 } from "@/lib/billing/rate-limit";
+import {
+  settleEpaycoConfirmation,
+  type EpaycoSettlementFailure,
+} from "@/lib/billing/epayco-activation";
+
+const SETTLEMENT_ERROR_MESSAGES: Record<EpaycoSettlementFailure, string> = {
+  checkout_session_not_found: "Sesion de pago no encontrada",
+  reference_mismatch: "Referencia de pago invalida",
+  amount_or_currency_mismatch: "Monto o moneda no coinciden con el plan",
+  environment_mismatch: "Ambiente de pago no coincide",
+  existing_payment_mismatch: "La transaccion existente no coincide con el checkout",
+  payment_insert_failed: "No se pudo registrar el pago",
+  atomic_activation_failed: "No se pudo activar la suscripcion",
+};
 
 async function readParams(request: NextRequest) {
   const params: Record<string, string> = {};
@@ -161,157 +174,21 @@ async function processConfirmation(request: NextRequest) {
     return Response.json({ error: "Error registrando evento" }, { status: 500 });
   }
 
-  const { data: checkout, error: checkoutError } = await admin
-    .from("checkout_sessions")
-    .select(
-      "id, internal_reference, organization_id, plan_id, plan_price_id, status, amount_minor, currency, test_mode, environment, purpose, expires_at"
-    )
-    .eq("id", checkoutSessionId)
-    .maybeSingle();
+  // La liquidación vive en lib/billing/epayco-activation para que el worker de
+  // recuperación (D-1) recorra exactamente el mismo camino que este webhook.
+  const settlement = await settleEpaycoConfirmation(params);
 
-  if (checkoutError || !checkout) {
-    await markWebhook(eventId, "failed", "checkout_session_not_found");
+  if (settlement.outcome === "failed") {
+    await markWebhook(eventId, "failed", settlement.reason);
     return Response.json(
-      { error: "Sesion de pago no encontrada" },
-      { status: 400 }
+      { error: SETTLEMENT_ERROR_MESSAGES[settlement.reason] },
+      { status: settlement.httpStatus }
     );
   }
 
-  if (
-    checkout.internal_reference !== params.x_extra2 ||
-    checkout.internal_reference !== params.x_id_invoice
-  ) {
-    await markWebhook(eventId, "failed", "reference_mismatch");
-    return Response.json(
-      { error: "Referencia de pago invalida" },
-      { status: 400 }
-    );
-  }
-
-  if (
-    Number(checkout.amount_minor) !== amountMinor ||
-    checkout.currency !== currency
-  ) {
-    await markWebhook(eventId, "failed", "amount_or_currency_mismatch");
-    return Response.json(
-      { error: "Monto o moneda no coinciden con el plan" },
-      { status: 400 }
-    );
-  }
-
-  if (checkout.test_mode !== isEpaycoTestRequest(params.x_test_request)) {
-    await markWebhook(eventId, "failed", "environment_mismatch");
-    return Response.json(
-      { error: "Ambiente de pago no coincide" },
-      { status: 400 }
-    );
-  }
-
-  if (
-    checkout.status !== "pending" ||
-    new Date(checkout.expires_at).getTime() < Date.now()
-  ) {
-    await markWebhook(eventId, "ignored", "checkout_not_pending");
+  if (settlement.outcome === "ignored") {
+    await markWebhook(eventId, "ignored", settlement.reason);
     return Response.json({ status: "ok", ignored: true });
-  }
-
-  const paymentStatus = mapEpaycoStatus(params.x_cod_response || "3");
-  const amount = amountMinor / 100;
-  const { data: existingPayment } = await admin
-    .from("payments")
-    .select("id, organization_id, checkout_session_id, amount, currency")
-    .eq("provider", "epayco")
-    .eq("environment", eventEnvironment)
-    .eq("provider_transaction_id", eventKey)
-    .maybeSingle();
-
-  if (
-    existingPayment &&
-    (existingPayment.organization_id !== checkout.organization_id ||
-      existingPayment.checkout_session_id !== checkout.id ||
-      Number(existingPayment.amount) !== amount ||
-      existingPayment.currency !== currency)
-  ) {
-    await markWebhook(eventId, "failed", "existing_payment_mismatch");
-    return Response.json(
-      { error: "La transaccion existente no coincide con el checkout" },
-      { status: 409 }
-    );
-  }
-
-  let payment = existingPayment;
-  let paymentError = null;
-  if (!payment) {
-    const paymentInsert = await admin
-      .from("payments")
-      .insert({
-        organization_id: checkout.organization_id,
-        checkout_session_id: checkout.id,
-        provider: "epayco",
-        provider_transaction_id: eventKey,
-        epayco_ref: params.x_ref_payco,
-        amount,
-        amount_minor: amountMinor,
-        currency,
-        status: paymentStatus,
-        provider_status: params.x_response || params.x_cod_response || null,
-        payment_method: params.x_franchise || params.x_bank_name || null,
-        description: `Pago plan ${checkout.plan_id}`,
-        epayco_response: sanitizedPayload,
-        test_mode: checkout.test_mode,
-        environment: checkout.environment,
-        merchant_reference: checkout.internal_reference,
-        purpose: checkout.purpose,
-        approved_at:
-          paymentStatus === "approved" ? new Date().toISOString() : null,
-      })
-      .select("id, organization_id, checkout_session_id, amount, currency")
-      .single();
-    payment = paymentInsert.data;
-    paymentError = paymentInsert.error;
-  }
-
-  if (paymentError || !payment) {
-    await markWebhook(eventId, "failed", "payment_insert_failed");
-    return Response.json(
-      { error: "No se pudo registrar el pago" },
-      { status: 500 }
-    );
-  }
-
-  if (paymentStatus !== "approved") {
-    await admin
-      .from("checkout_sessions")
-      .update({
-        status: paymentStatus,
-        completed_at:
-          paymentStatus === "pending" ? null : new Date().toISOString(),
-      })
-      .eq("id", checkout.id);
-    await markWebhook(eventId, "processed");
-    return Response.json({ status: "ok" });
-  }
-
-  const { error: activationError } = await admin.rpc(
-    "finalize_epayco_approved_payment",
-    {
-      p_checkout_session_id: checkout.id,
-      p_payment_id: payment.id,
-      p_event_key: eventKey,
-      p_payment_method: params.x_franchise || params.x_bank_name || null,
-      p_customer_id: params.x_cust_id_cliente || null,
-    }
-  );
-  if (activationError) {
-    console.error("[billing] atomic ePayco activation failed", {
-      code: activationError.code,
-      eventId,
-    });
-    await markWebhook(eventId, "failed", "atomic_activation_failed");
-    return Response.json(
-      { error: "No se pudo activar la suscripcion" },
-      { status: 500 }
-    );
   }
 
   await markWebhook(eventId, "processed");

@@ -117,6 +117,127 @@ describe("Cron de ciclo de vida · lote de suscripciones vencidas", () => {
   });
 });
 
+describe("D-6 · notificación de billing al administrador", () => {
+  function seedWithAdmin(subscriptions: Array<Record<string, unknown>>) {
+    H.current = createFakeSupabase({
+      // El índice único de la migración 010 es lo que garantiza «una sola vez
+      // por transición»; sin él la prueba no probaría nada.
+      uniqueIndexes: { billing_outbox_jobs: [["idempotency_key"]] },
+      tables: {
+        subscriptions,
+        subscription_events: [],
+        billing_outbox_jobs: [],
+        agents: [
+          { id: "u1", organization_id: "o1", role: "admin", email: "admin@example.invalid", created_at: "2026-01-01" },
+        ],
+      },
+    });
+  }
+
+  const jobs = () => H.current!.store.billing_outbox_jobs as Array<Record<string, unknown>>;
+
+  beforeEach(() => {
+    process.env.CRON_SECRET = SECRET;
+    process.env.BILLING_GRACE_DAYS = "3";
+  });
+
+  it("avisa al entrar en período de gracia (active -> past_due)", async () => {
+    seedWithAdmin([
+      { id: "s1", organization_id: "o1", status: "active", current_period_end: past(), cancel_at_period_end: false },
+    ]);
+
+    const body = await (await billingLifecycle(authedCron())).json();
+    expect(body.graceNotifications).toBe(1);
+
+    expect(jobs()).toHaveLength(1);
+    expect(jobs()[0]).toMatchObject({
+      job_type: "send_notification",
+      organization_id: "o1",
+      subscription_id: "s1",
+    });
+    expect(String(jobs()[0].idempotency_key)).toMatch(/^lifecycle-grace:s1:/);
+    const request = (jobs()[0].payload as { request: { recipients: { email: string }; variables: { subject: string } } }).request;
+    expect(request.recipients.email).toBe("admin@example.invalid");
+    expect(request.variables.subject).toMatch(/gracia/i);
+  });
+
+  it("avisa al pasar a suspendida (past_due -> suspended)", async () => {
+    seedWithAdmin([
+      { id: "s2", organization_id: "o1", status: "past_due", grace_ends_at: past() },
+    ]);
+
+    const body = await (await billingLifecycle(authedCron())).json();
+    expect(body.suspensionNotifications).toBe(1);
+    expect(String(jobs()[0].idempotency_key)).toMatch(/^lifecycle-suspended:s2:/);
+    const request = (jobs()[0].payload as { request: { variables: { subject: string } } }).request;
+    expect(request.variables.subject).toMatch(/suspendida/i);
+  });
+
+  it("una sola vez por transición: la segunda corrida no vuelve a avisar", async () => {
+    seedWithAdmin([
+      { id: "s3", organization_id: "o1", status: "past_due", grace_ends_at: past() },
+    ]);
+
+    await billingLifecycle(authedCron());
+    expect(jobs()).toHaveLength(1);
+
+    // Se revive el estado para forzar la misma transición otra vez: la clave de
+    // idempotencia es idéntica, así que el índice único rechaza el duplicado.
+    subs()[0].status = "past_due";
+    const second = await (await billingLifecycle(authedCron())).json();
+
+    expect(second.suspensionNotifications).toBe(0);
+    expect(jobs()).toHaveLength(1);
+  });
+
+  it("no avisa al cancelar por baja programada (D-6 sólo cubre gracia y suspensión)", async () => {
+    seedWithAdmin([
+      { id: "s4", organization_id: "o1", status: "active", current_period_end: past(), cancel_at_period_end: true },
+    ]);
+
+    const body = await (await billingLifecycle(authedCron())).json();
+    expect(body.cancelled).toBe(1);
+    expect(body.graceNotifications).toBe(0);
+    expect(jobs()).toHaveLength(0);
+  });
+
+  it("sin administrador con correo no se encola nada y el cron no falla", async () => {
+    H.current = createFakeSupabase({
+      tables: {
+        subscriptions: [
+          { id: "s5", organization_id: "o1", status: "past_due", grace_ends_at: past() },
+        ],
+        subscription_events: [],
+        billing_outbox_jobs: [],
+        agents: [],
+      },
+    });
+
+    const res = await billingLifecycle(authedCron());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.suspended).toBe(1);
+    expect(body.suspensionNotifications).toBe(0);
+    expect(H.current!.store.billing_outbox_jobs).toHaveLength(0);
+  });
+
+  it("un ciclo posterior con otra gracia sí genera un aviso nuevo", async () => {
+    seedWithAdmin([
+      { id: "s6", organization_id: "o1", status: "past_due", grace_ends_at: past(1) },
+    ]);
+    await billingLifecycle(authedCron());
+    expect(jobs()).toHaveLength(1);
+
+    // Nuevo ciclo: la suscripción volvió a vencer con otra fecha de gracia.
+    subs()[0].status = "past_due";
+    subs()[0].grace_ends_at = past(2);
+    await billingLifecycle(authedCron());
+
+    expect(jobs()).toHaveLength(2);
+    expect(new Set(jobs().map((job) => job.idempotency_key)).size).toBe(2);
+  });
+});
+
 describe("PATCH /api/admin/subscriptions · transiciones manuales", () => {
   function seedAdmin(subscription: Record<string, unknown>, superAdmin = true) {
     H.current = createFakeSupabase({

@@ -14,7 +14,72 @@ function normalizeBillingPhone(value: string) {
   return digits;
 }
 
-async function readEpaycoJson(response: Response) {
+/** Timeout por llamada a la API de ePayco. Se lee en cada invocación para que
+ *  las pruebas puedan bajarlo sin recargar el módulo. */
+export function epaycoHttpTimeoutMs() {
+  const parsed = Number.parseInt(process.env.EPAYCO_HTTP_TIMEOUT_MS || "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15_000;
+}
+
+export type EpaycoGatewayErrorCode =
+  | "EPAYCO_TIMEOUT"
+  | "EPAYCO_UNAVAILABLE"
+  | "EPAYCO_HTTP_ERROR"
+  | "EPAYCO_INVALID_RESPONSE";
+
+/**
+ * Fallo atribuible a la pasarela, no al cliente.
+ *
+ * Existe para que la ruta pueda responder un error controlado (504/502) en vez
+ * de un 500 genérico, y para distinguir "ePayco no contestó" de "ePayco
+ * contestó algo que no entendemos".
+ */
+export class EpaycoGatewayError extends Error {
+  readonly code: EpaycoGatewayErrorCode;
+  readonly step: string;
+  readonly status?: number;
+
+  constructor(code: EpaycoGatewayErrorCode, step: string, message: string, status?: number) {
+    super(message);
+    this.name = "EpaycoGatewayError";
+    this.code = code;
+    this.step = step;
+    this.status = status;
+  }
+}
+
+/**
+ * `fetch` con timeout obligatorio contra la API de ePayco.
+ *
+ * Sin él, una degradación del proveedor cuelga la función serverless hasta
+ * agotar su presupuesto y el usuario no recibe ni checkout ni error (H-01).
+ */
+async function epaycoFetch(url: string, init: RequestInit, step: string) {
+  const timeoutMs = epaycoHttpTimeoutMs();
+  try {
+    return await fetch(url, {
+      ...init,
+      cache: "no-store",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    const name = error instanceof Error ? error.name : "";
+    if (name === "TimeoutError" || name === "AbortError") {
+      throw new EpaycoGatewayError(
+        "EPAYCO_TIMEOUT",
+        step,
+        `ePayco no respondió en ${timeoutMs} ms durante '${step}'`,
+      );
+    }
+    throw new EpaycoGatewayError(
+      "EPAYCO_UNAVAILABLE",
+      step,
+      `No se pudo contactar a ePayco durante '${step}'`,
+    );
+  }
+}
+
+async function readEpaycoJson(response: Response, step: string) {
   const text = await response.text();
   let body: unknown = null;
   try {
@@ -23,7 +88,12 @@ async function readEpaycoJson(response: Response) {
     body = { raw: text.slice(0, 500) };
   }
   if (!response.ok) {
-    throw new Error(`ePayco API ${response.status}`);
+    throw new EpaycoGatewayError(
+      "EPAYCO_HTTP_ERROR",
+      step,
+      `ePayco API ${response.status}`,
+      response.status,
+    );
   }
   return body as Record<string, unknown>;
 }
@@ -41,22 +111,27 @@ export async function createEpaycoV2Session(params: {
   const basic = Buffer.from(`${EPAYCO_PUBLIC_KEY}:${EPAYCO_PRIVATE_KEY}`).toString(
     "base64",
   );
-  const loginResponse = await fetch(`${EPAYCO_API_BASE_URL}/login`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Basic ${basic}`,
+  const loginResponse = await epaycoFetch(
+    `${EPAYCO_API_BASE_URL}/login`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${basic}`,
+      },
     },
-    cache: "no-store",
-  });
-  const login = await readEpaycoJson(loginResponse);
+    "login",
+  );
+  const login = await readEpaycoJson(loginResponse, "login");
   const token = typeof login.token === "string" ? login.token : null;
-  if (!token) throw new Error("ePayco login sin token");
+  if (!token) {
+    throw new EpaycoGatewayError("EPAYCO_INVALID_RESPONSE", "login", "ePayco login sin token");
+  }
 
   const normalizedPhone = params.customerPhone
     ? normalizeBillingPhone(params.customerPhone)
     : "";
-  const sessionResponse = await fetch(
+  const sessionResponse = await epaycoFetch(
     `${EPAYCO_API_BASE_URL}/payment/session/create`,
     {
       method: "POST",
@@ -92,10 +167,10 @@ export async function createEpaycoV2Session(params: {
             : {}),
         },
       }),
-      cache: "no-store",
     },
+    "session_create",
   );
-  const session = await readEpaycoJson(sessionResponse);
+  const session = await readEpaycoJson(sessionResponse, "session_create");
   const sessionData =
     session.data && typeof session.data === "object"
       ? (session.data as Record<string, unknown>)
@@ -104,7 +179,13 @@ export async function createEpaycoV2Session(params: {
     sessionData && typeof sessionData.sessionId === "string"
       ? sessionData.sessionId
       : null;
-  if (!sessionId) throw new Error("ePayco session sin sessionId");
+  if (!sessionId) {
+    throw new EpaycoGatewayError(
+      "EPAYCO_INVALID_RESPONSE",
+      "session_create",
+      "ePayco session sin sessionId",
+    );
+  }
   return sessionId;
 }
 

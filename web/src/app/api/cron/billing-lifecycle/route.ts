@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { enqueueBillingNotification } from "@/lib/billing/notifications";
 
 function isAuthorized(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
 
   const { data: expiredActive, error: activeError } = await admin
     .from("subscriptions")
-    .select("id, organization_id, status, cancel_at_period_end")
+    .select("id, organization_id, status, cancel_at_period_end, current_period_end")
     .eq("status", "active")
     .lte("current_period_end", nowIso);
   if (activeError) {
@@ -34,6 +35,8 @@ export async function GET(request: NextRequest) {
 
   let movedToPastDue = 0;
   let cancelled = 0;
+  let graceNotifications = 0;
+  let suspensionNotifications = 0;
   for (const subscription of expiredActive || []) {
     const nextStatus = subscription.cancel_at_period_end
       ? "cancelled"
@@ -65,13 +68,31 @@ export async function GET(request: NextRequest) {
       actor_type: "system",
       correlation_id: `lifecycle:${subscription.id}:${now.toISOString().slice(0, 13)}`,
     });
-    if (nextStatus === "cancelled") cancelled++;
-    else movedToPastDue++;
+    if (nextStatus === "cancelled") {
+      cancelled++;
+    } else {
+      movedToPastDue++;
+      // D-6: aviso al administrador al entrar en el período de gracia, una sola
+      // vez por transición. La clave incluye el período que acaba de vencer, así
+      // que un ciclo posterior sí vuelve a avisar, pero una reejecución del cron
+      // sobre el mismo período no.
+      const notified = await enqueueBillingNotification({
+        organizationId: subscription.organization_id,
+        subscriptionId: subscription.id,
+        idempotencyKey: `lifecycle-grace:${subscription.id}:${subscription.current_period_end}`,
+        subject: "Tu suscripción entró en período de gracia",
+        text:
+          "No recibimos el pago del período facturado. Conservas el acceso hasta " +
+          `${graceEnd}; después la cuenta queda suspendida. Actualiza tu pago en /settings/billing.`,
+        metadata: { transition: "active_to_past_due", grace_ends_at: graceEnd },
+      });
+      if (notified.enqueued) graceNotifications++;
+    }
   }
 
   const { data: graceExpired, error: graceError } = await admin
     .from("subscriptions")
-    .select("id, organization_id")
+    .select("id, organization_id, grace_ends_at")
     .eq("status", "past_due")
     .lte("grace_ends_at", nowIso);
   if (graceError) {
@@ -101,6 +122,20 @@ export async function GET(request: NextRequest) {
       correlation_id: `lifecycle:${subscription.id}:${now.toISOString().slice(0, 13)}`,
     });
     suspended++;
+
+    // D-6: aviso al pasar a suspendida, una sola vez por transición. La clave
+    // usa la gracia que acaba de vencer, que es única por ciclo.
+    const notified = await enqueueBillingNotification({
+      organizationId: subscription.organization_id,
+      subscriptionId: subscription.id,
+      idempotencyKey: `lifecycle-suspended:${subscription.id}:${subscription.grace_ends_at}`,
+      subject: "Tu suscripción quedó suspendida",
+      text:
+        "El período de gracia terminó sin recibir el pago, así que la cuenta quedó " +
+        "suspendida. Reactívala completando un pago en /settings/billing.",
+      metadata: { transition: "past_due_to_suspended", grace_ends_at: subscription.grace_ends_at },
+    });
+    if (notified.enqueued) suspensionNotifications++;
   }
 
   return Response.json({
@@ -108,6 +143,8 @@ export async function GET(request: NextRequest) {
     movedToPastDue,
     cancelled,
     suspended,
+    graceNotifications,
+    suspensionNotifications,
     processedAt: nowIso,
   });
 }

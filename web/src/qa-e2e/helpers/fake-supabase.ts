@@ -25,6 +25,23 @@ export interface Seed {
    * efecto de una función SQL sobre el store para probar los guardas de la ruta.
    */
   rpcHandlers?: Record<string, (args: unknown, store: Record<string, Rows>) => unknown>;
+  /**
+   * Errores inyectados por tabla y operación, para probar los caminos de fallo
+   * de escritura que en producción provoca la base (permisos, deadlock, etc.).
+   *
+   * `skip` deja pasar las primeras N llamadas antes de empezar a fallar (útil
+   * cuando la operación bajo prueba comparte tabla con un paso previo, como el
+   * claim del lease). `times` limita cuántas veces falla; sin él, falla siempre.
+   */
+  errorOn?: Record<
+    string,
+    Partial<
+      Record<
+        "insert" | "update" | "delete" | "select",
+        { code: string; message: string; times?: number; skip?: number }
+      >
+    >
+  >;
 }
 
 type Filter = (row: Record<string, unknown>) => boolean;
@@ -44,7 +61,10 @@ export interface FakeSupabase {
 
 interface FakeClient {
   from: (table: string) => FakeQuery;
-  rpc: (name: string, args?: unknown) => Promise<{ data: unknown; error: null }>;
+  rpc: (
+    name: string,
+    args?: unknown,
+  ) => Promise<{ data: unknown; error: { code: string; message: string } | null }>;
   storage: { from: () => { remove: () => Promise<{ error: null }> } };
 }
 
@@ -55,6 +75,8 @@ interface FakeQuery {
   update: (payload: Record<string, unknown>) => FakeQuery;
   delete: () => FakeQuery;
   eq: (c: string, v: unknown) => FakeQuery;
+  is: (c: string, v: unknown) => FakeQuery;
+  or: (expression: string) => FakeQuery;
   neq: (c: string, v: unknown) => FakeQuery;
   in: (c: string, v: unknown[]) => FakeQuery;
   gt: (c: string, v: unknown) => FakeQuery;
@@ -90,6 +112,15 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
     const match = () => store[table].filter((row) => filters.every((f) => f(row)));
 
     async function terminate(mode: "await" | "maybeSingle" | "single") {
+      const injected = seed.errorOn?.[table]?.[op];
+      if (injected) {
+        if (injected.skip !== undefined && injected.skip > 0) {
+          injected.skip -= 1;
+        } else if (injected.times === undefined || injected.times > 0) {
+          if (injected.times !== undefined) injected.times -= 1;
+          return { data: null, error: { code: injected.code, message: injected.message } };
+        }
+      }
       if (op === "insert") {
         const list = Array.isArray(payload) ? payload : [payload];
         const indexes = seed.uniqueIndexes?.[table] || [];
@@ -157,6 +188,42 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
       update(p) { op = "update"; payload = p; return builder; },
       delete() { op = "delete"; return builder; },
       eq(c, v) { filters.push((r) => r[c] === v); return builder; },
+      // PostgREST usa `is` para NULL/booleanos; `undefined` y `null` se tratan
+      // igual porque una columna ausente en el fake equivale a NULL.
+      is(c, v) {
+        filters.push((r) => (v === null ? r[c] === null || r[c] === undefined : r[c] === v));
+        return builder;
+      },
+      // Subconjunto de la sintaxis de PostgREST: "col.op.valor,col2.op.valor".
+      // Cubre is.null, eq, lt, lte, gt y gte, que es lo que usa el claim del
+      // worker de recuperación.
+      or(expression) {
+        const clauses = expression.split(",").map((clause) => {
+          const [column, op, ...rest] = clause.split(".");
+          const raw = rest.join(".");
+          return (row: Record<string, unknown>) => {
+            const value = row[column];
+            switch (op) {
+              case "is":
+                return raw === "null" ? value === null || value === undefined : String(value) === raw;
+              case "eq":
+                return String(value) === raw;
+              case "lt":
+                return value != null && String(value) < raw;
+              case "lte":
+                return value != null && String(value) <= raw;
+              case "gt":
+                return value != null && String(value) > raw;
+              case "gte":
+                return value != null && String(value) >= raw;
+              default:
+                return false;
+            }
+          };
+        });
+        filters.push((r) => clauses.some((clause) => clause(r)));
+        return builder;
+      },
       neq(c, v) { filters.push((r) => r[c] !== v); return builder; },
       in(c, v) { filters.push((r) => v.includes(r[c])); return builder; },
       gt(c, v) { filters.push((r) => (r[c] as number) > (v as number)); return builder; },
@@ -186,7 +253,14 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
       rpcCalls.push({ name, args });
       const handler = seed.rpcHandlers?.[name];
       if (!handler) return { data: null, error: null };
-      return { data: handler(args, store) ?? null, error: null };
+      try {
+        return { data: handler(args, store) ?? null, error: null };
+      } catch (error) {
+        // supabase-js no lanza: los errores de una función SQL vuelven en
+        // `error`. Un handler que lanza emula una EXCEPTION de plpgsql.
+        const message = error instanceof Error ? error.message : String(error);
+        return { data: null, error: { code: "P0001", message } };
+      }
     },
     storage: { from: () => ({ remove: async () => ({ error: null }) }) },
   };

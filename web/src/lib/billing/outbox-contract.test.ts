@@ -1,15 +1,13 @@
 // Contrato observable del worker de outbox.
 //
-// `BillingOutboxJobType` declara seis tipos y `processJob()` sólo resuelve
-// `send_notification`. Estas pruebas NO inventan la lógica de negocio ausente:
-// documentan y congelan el comportamiento actual de los cuatro tipos sin
-// handler, de modo que implementarlos obligue a actualizar este archivo de
-// forma consciente.
+// Determinación del 2026-08-10: de los seis tipos del CHECK de la migración
+// 010, **sólo `send_notification` tiene handler**. Los otros cinco se retiraron
+// de `BillingOutboxJobType` para que ningún código pueda encolarlos, y quedan
+// listados en `UNIMPLEMENTED_OUTBOX_JOB_TYPES` con su motivo.
 //
-// Gap abierto (ver AGENT_NEXT_PHASE_IMPLEMENTATION.md §P2): no existe contrato
-// escrito para renew_subscription, reconcile_payment, expire_subscription ni
-// apply_plan_change — ni quién los encola, ni con qué payload, ni qué debe
-// pasar cuando fallan de forma permanente.
+// Estas pruebas NO inventan la lógica ausente: congelan el comportamiento real
+// (fallo controlado -> reintentos -> dead_letter) para que implementarlos
+// obligue a actualizar este archivo de forma consciente.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const state = vi.hoisted(() => ({
@@ -48,14 +46,9 @@ vi.mock("@/lib/notify/dispatcher", () => ({
   },
 }));
 
-import { processBillingOutboxJobs } from "./outbox";
+import { UNIMPLEMENTED_OUTBOX_JOB_TYPES, processBillingOutboxJobs } from "./outbox";
 
-const UNHANDLED_TYPES = [
-  "renew_subscription",
-  "reconcile_payment",
-  "expire_subscription",
-  "apply_plan_change",
-] as const;
+const UNHANDLED_TYPES = UNIMPLEMENTED_OUTBOX_JOB_TYPES;
 
 beforeEach(() => {
   state.claimed = [];
@@ -63,6 +56,26 @@ beforeEach(() => {
   state.retries = [];
   state.retryStatus = "retry";
   state.notifyCalls = 0;
+});
+
+describe("Outbox · determinación sobre los tipos sin handler", () => {
+  it("los cinco tipos sin implementar están enumerados y son los del CHECK de la migración 010", () => {
+    expect([...UNIMPLEMENTED_OUTBOX_JOB_TYPES].sort()).toEqual([
+      "apply_plan_change",
+      "expire_subscription",
+      "process_webhook",
+      "reconcile_payment",
+      "renew_subscription",
+    ]);
+  });
+
+  it("`process_webhook` también carece de handler, aunque no figuraba en el encargo", async () => {
+    state.claimed = [
+      { id: "job-pw", job_type: "process_webhook", organization_id: "org-1", payload: {}, attempt_count: 0 },
+    ];
+    const result = await processBillingOutboxJobs();
+    expect(result).toMatchObject({ claimed: 1, completed: 0, retried: 1 });
+  });
 });
 
 describe("Outbox · tipos declarados sin handler", () => {
