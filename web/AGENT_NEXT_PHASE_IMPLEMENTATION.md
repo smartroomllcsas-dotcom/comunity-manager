@@ -2872,15 +2872,19 @@ conserva el plan vigente hasta `current_period_end`; el plan destino queda en
 `pending_plan_id`/`pending_plan_price_id` y el cron lo materializa después.
 
 La migración fue validada previamente contra PostgreSQL 16.14 desechable con
-18/18 pruebas aprobadas. No se debe considerar cerrado el flujo end-to-end hasta
-publicar el código pendiente de `billing-lifecycle`, la UI y el logger
-estructurado.
+18/18 pruebas aprobadas. El código de `billing-lifecycle`, la UI y el logger
+estructurado ya quedó publicado en producción; falta únicamente ejecutar la
+prueba end-to-end controlada del downgrade diferido.
 
 ## 60.1 Próximos pasos de publicación
 
-1. Revisar el diff local y ejecutar las comprobaciones de Iteración 9.
-2. Commit y push de los cambios del agente por Codex.
-3. Esperar el deployment de Vercel y validar el cron `billing-lifecycle`.
+1. ~~Revisar el diff local y ejecutar las comprobaciones de Iteración 9~~ →
+   **HECHO**: 537 Vitest, 6 Node, lint sin errores y build exitoso.
+2. ~~Commit y push de los cambios del agente por Codex~~ → **HECHO**:
+   commit `1207e97`, rama `codex/add-manual-contact` y PR #12.
+3. ~~Esperar el deployment de Vercel~~ → **HECHO**: deployment
+   `dpl_FkHNWm3kYG586Qju8DpZGjDdverP` en estado `READY`, aliasado a
+   `https://www.comunitymanager.io`.
 4. Ejecutar una prueba controlada de downgrade: confirmar que conserva acceso,
    que crea el plan pendiente y que sólo cambia al llegar la fecha efectiva.
 5. Confirmar en logs `writeFailures: 0`, `auditFailures: 0` y
@@ -2889,6 +2893,15 @@ estructurado.
 Pendientes P2 que no bloquean esta publicación: rate limiter fail-open (H-09),
 repetir restauración con un backup real de producción y decidir el CHECK de
 `job_type`.
+
+## 60.2 Evidencia de producción
+
+| Verificación | Resultado |
+|---|---|
+| Deployment Vercel | `READY` / `Production` — commit `1207e97` |
+| `/api/health` | HTTP 200 |
+| `/settings/billing` sin sesión | HTTP 307 hacia autenticación |
+| `/api/cron/billing-lifecycle` sin autorización | HTTP 401 |
 
 ---
 ---
