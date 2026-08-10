@@ -55,6 +55,8 @@ export class EpaycoGateway implements PaymentGatewayInterface {
         amountMinor: input.amountMinor,
         currency: input.currency,
         email: input.customerEmail,
+        customerName: input.customerName,
+        customerPhone: input.customerPhone,
         checkoutSessionId: input.checkoutSessionId,
         internalReference: input.reference,
       }),

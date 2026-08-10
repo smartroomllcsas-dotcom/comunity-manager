@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
 
     const { data: agent } = await supabase
       .from("agents")
-      .select("organization_id, email, role")
+      .select("organization_id, email, name, role")
       .eq("id", user.id)
       .single();
     if (!agent) {
@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
           .maybeSingle(),
         admin
           .from("organizations")
-          .select("name, plan_id")
+          .select("name, plan_id, billing_phone")
           .eq("id", agent.organization_id)
           .maybeSingle(),
       ]);
@@ -249,6 +249,8 @@ export async function POST(request: NextRequest) {
       amountMinor: Number(price.amount_minor),
       currency: price.currency,
       customerEmail: agent.email,
+      customerName: agent.name,
+      customerPhone: organization.billing_phone,
       expiresAt,
     });
 

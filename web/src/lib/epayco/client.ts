@@ -26,10 +26,12 @@ export function createCheckoutConfig(params: {
   currency: string;
   country?: string;
   email: string;
+  customerName?: string;
+  customerPhone?: string | null;
   checkoutSessionId: string;
   internalReference: string;
 }) {
-  return {
+  const config: Record<string, string> = {
     name: params.name,
     description: params.description,
     invoice: params.internalReference,
@@ -44,10 +46,15 @@ export function createCheckoutConfig(params: {
     extra2: params.internalReference,
     confirmation: `${process.env.NEXT_PUBLIC_APP_URL}/api/epayco/confirmation`,
     response: `${process.env.NEXT_PUBLIC_APP_URL}/settings/billing?payment=success`,
-    name_billing: params.email,
+    name_billing: params.customerName || params.name,
     email_billing: params.email,
-    type_doc_billing: "CC",
   };
+
+  // No enviamos un tipo de documento sin su número: ePayco puede rechazar
+  // el checkout cuando recibe un bloque de facturación incompleto.
+  if (params.customerPhone) config.mobilephone_billing = params.customerPhone;
+
+  return config;
 }
 
 export function validateEpaycoSignature(params: {

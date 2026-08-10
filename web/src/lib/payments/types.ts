@@ -20,6 +20,8 @@ export interface HostedCheckoutInput {
   amountMinor: number;
   currency: string;
   customerEmail: string;
+  customerName?: string;
+  customerPhone?: string | null;
   expiresAt: string;
 }
 
