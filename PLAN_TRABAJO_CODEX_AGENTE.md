@@ -20,9 +20,11 @@ Proyecto: CommunityManager
 - [x] API — Dos solicitudes simultáneas reales a `POST /api/contacts` en QA
   devolvieron `201` y `402`; el contacto, reserva y plan temporal fueron
   limpiados/restaurados.
-- [ ] Pendiente — Ejecutar dos altas simultáneas desde la UI y una notificación
-  real sandbox; la prueba directa del RPC y la idempotencia sintética ya están
-  cerradas.
+- [x] Notificación sandbox — Resend procesó un job real de `send_notification`
+  mediante el cron desplegado; el job terminó `completed` y el registro terminó
+  `sent`, con evidencia en `web/QA_BILLING_EVIDENCE_CLAUDE.md`.
+- [ ] Pendiente — Ejecutar dos altas simultáneas desde la UI; la prueba API,
+  la prueba directa del RPC y la idempotencia sintética ya están cerradas.
 
 ## Regla de integración
 

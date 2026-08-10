@@ -349,3 +349,25 @@ Fallos: ninguno.
 
 No se hizo commit, push, pull request ni deploy. No se modificaron variables ni
 secretos. No se alteró ningún documento existente del proyecto.
+
+---
+
+## 10. Notificación real sandbox · Resend
+
+Prueba ejecutada después de configurar `RESEND_API_KEY` y el remitente sandbox
+`onboarding@resend.dev` en Vercel. El destinatario fue el correo asociado a la
+cuenta Resend; no se usaron datos de clientes.
+
+| Campo | Resultado |
+|---|---|
+| Deployment | `dpl_3CfpSDksaogEYVUm8ePBT6DWNpVa` (`READY`, Production) |
+| Job | `a579c065-eb0c-4ad3-adef-42152c4992d1` |
+| Estado del job | `completed`, `attempt_count=1` |
+| Notification log | `43162738-683f-459b-8695-c3f48f99750c` |
+| Estado de notificación | `sent`, `attempt_count=1` |
+| Provider message ID | `e343800e-9bd2-44ba-a65d-5d059cc9c341` |
+| `public.cm_notifications_log` | `sent`, sin error |
+| Resultado | **PASS** |
+
+El job fue reclamado y completado por el worker desplegado. El registro se dejó
+en estado final para conservar evidencia auditable de la prueba sandbox.

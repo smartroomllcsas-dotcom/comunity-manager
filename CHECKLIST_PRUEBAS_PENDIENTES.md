@@ -78,8 +78,10 @@ consideran sustituto de las pruebas de concurrencia, ciclo de vida u outbox.
   exclusivo, ownership, reintentos con backoff, `dead_letter` e idempotencia de
   `notification_log`; el worker desplegado procesó el caso idempotente y el
   cleanup dejó cero filas sintéticas.
-- [ ] Ejecutar una notificación real con proveedor sandbox y conservar su
-  evidencia; esta prueba no se realizó deliberadamente.
+- [x] Ejecutar una notificación real con proveedor sandbox Resend y conservar su
+  evidencia: job `a579c065-eb0c-4ad3-adef-42152c4992d1` en `completed`,
+  `notification_log` en `sent` y provider ID
+  `e343800e-9bd2-44ba-a65d-5d059cc9c341`.
 - [x] Confirmar en Vercel el valor actual de `BILLING_ENFORCEMENT_MODE`: `hard`, aplicado en Production el 2026-08-06 y cargado en el deployment `dpl_CtXr95p4vkJaTypfy3uW9zY1DdJ2` (`Ready`, smoke test HTTP 200).
 - [x] Confirmar en Vercel el valor `BILLING_ATOMIC_QUOTA_MODE=on` para
   Production y Preview; el deployment manual posterior quedó `Ready`.
