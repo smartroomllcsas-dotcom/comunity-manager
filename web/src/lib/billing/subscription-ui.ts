@@ -29,6 +29,63 @@ export interface SubscriptionUiInput {
   current_period_end?: string | null;
   trial_ends_at?: string | null;
   grace_ends_at?: string | null;
+  /** D-5: plan al que se bajará al terminar el período vigente, si lo hay. */
+  pending_plan_id?: string | null;
+  change_effective_at?: string | null;
+}
+
+/** Cambio de plan programado que el cliente debe ver anunciado. */
+export interface PendingPlanChange {
+  pendingPlanId: string;
+  effectiveAt: string | null;
+  /** Texto listo para mostrar, con la fecha ya formateada. */
+  notice: string;
+}
+
+/**
+ * D-5 · Aviso de downgrade diferido.
+ *
+ * Devuelve el cambio pendiente sólo si de verdad queda por aplicarse. Un cambio
+ * cuya fecha ya pasó está a la espera del cron, así que anunciarlo como futuro
+ * sería mentir.
+ */
+export function derivePendingPlanChange(
+  subscription: SubscriptionUiInput | null | undefined,
+  options: { now?: number; planName?: string | null } = {},
+): PendingPlanChange | null {
+  if (!subscription?.pending_plan_id) return null;
+  const now = options.now ?? Date.now();
+  const effectiveAt = subscription.change_effective_at ?? null;
+  if (!isFuture(effectiveAt, now)) return null;
+
+  const when = formatDate(effectiveAt);
+  const target = options.planName ? `al plan ${options.planName}` : "al plan que contrataste";
+  return {
+    pendingPlanId: subscription.pending_plan_id,
+    effectiveAt,
+    notice: when
+      ? `Tu cambio ${target} se aplicará el ${when}. Hasta esa fecha conservas tu plan actual y todos sus límites.`
+      : `Tu cambio ${target} se aplicará al terminar el período actual. Hasta entonces conservas tu plan actual y todos sus límites.`,
+  };
+}
+
+/**
+ * Clasifica un plan destino frente al actual para poder avisar en el botón.
+ *
+ * `downgrade` es lo único que se difiere; el resto se aplica al aprobarse el
+ * pago. Sin precio comparable devuelve `unknown` en vez de adivinar.
+ */
+export function classifyPlanChange(input: {
+  currentAmountMinor?: number | null;
+  targetAmountMinor?: number | null;
+  isCurrentPlan?: boolean;
+}): "current" | "upgrade" | "downgrade" | "unknown" {
+  if (input.isCurrentPlan) return "current";
+  const current = input.currentAmountMinor;
+  const target = input.targetAmountMinor;
+  if (typeof current !== "number" || typeof target !== "number") return "unknown";
+  if (target < current) return "downgrade";
+  return "upgrade";
 }
 
 export interface SubscriptionUiModel {

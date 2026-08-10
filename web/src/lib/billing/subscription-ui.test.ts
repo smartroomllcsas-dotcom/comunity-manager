@@ -4,6 +4,8 @@
 import { describe, it, expect } from "vitest";
 import {
   SUBSCRIPTION_ACTION_LABELS,
+  classifyPlanChange,
+  derivePendingPlanChange,
   deriveSubscriptionUi,
 } from "@/lib/billing/subscription-ui";
 
@@ -107,6 +109,86 @@ describe("Vencimiento y gracia", () => {
     const ui = deriveSubscriptionUi({ status: "trial", trial_ends_at: past(1) }, admin);
     expect(ui.state).toBe("expired");
     expect(ui.requiresPayment).toBe(true);
+  });
+});
+
+describe("D-5 · aviso de downgrade diferido", () => {
+  const scheduled = {
+    status: "active",
+    cancel_at_period_end: false,
+    current_period_end: future(20),
+    pending_plan_id: "plan-barato",
+    change_effective_at: future(20),
+  };
+
+  it("anuncia el cambio con la fecha y nombrando el plan destino", () => {
+    const pending = derivePendingPlanChange(scheduled, { now: NOW, planName: "Demo Inicial" });
+    expect(pending).toBeTruthy();
+    expect(pending!.pendingPlanId).toBe("plan-barato");
+    expect(pending!.effectiveAt).toBe(future(20));
+    expect(pending!.notice).toContain("Demo Inicial");
+    expect(pending!.notice).toMatch(/se aplicará el/);
+    // Lo esencial de D-5: el cliente conserva su plan hasta esa fecha.
+    expect(pending!.notice).toMatch(/conservas tu plan actual/i);
+  });
+
+  it("sin nombre de plan sigue avisando, sin inventarlo", () => {
+    const pending = derivePendingPlanChange(scheduled, { now: NOW });
+    expect(pending!.notice).toContain("al plan que contrataste");
+  });
+
+  it("no anuncia nada si no hay cambio pendiente", () => {
+    expect(derivePendingPlanChange({ status: "active" }, { now: NOW })).toBeNull();
+    expect(derivePendingPlanChange(null, { now: NOW })).toBeNull();
+  });
+
+  it("no anuncia un cambio cuya fecha ya pasó: está a la espera del cron", () => {
+    const overdue = { ...scheduled, change_effective_at: past(1) };
+    expect(derivePendingPlanChange(overdue, { now: NOW })).toBeNull();
+  });
+
+  it("no anuncia nada si falta la fecha efectiva", () => {
+    const sinFecha = { ...scheduled, change_effective_at: null };
+    expect(derivePendingPlanChange(sinFecha, { now: NOW })).toBeNull();
+  });
+
+  it("un downgrade programado no altera el resto de la pantalla", () => {
+    // Sigue siendo una suscripción activa normal: puede cancelar y no paga nada.
+    const ui = deriveSubscriptionUi(scheduled, { isAdmin: true, now: NOW });
+    expect(ui.state).toBe("active");
+    expect(ui.actions).toEqual(["cancel"]);
+    expect(ui.requiresPayment).toBe(false);
+  });
+});
+
+describe("D-5 · clasificación de un plan destino", () => {
+  it.each([
+    ["más barato => downgrade", 14_900_000, 5_900_000, "downgrade"],
+    ["más caro => upgrade", 5_900_000, 14_900_000, "upgrade"],
+    ["mismo precio => upgrade (no es bajada)", 5_900_000, 5_900_000, "upgrade"],
+  ])("%s", (_label, current, target, expected) => {
+    expect(classifyPlanChange({ currentAmountMinor: current, targetAmountMinor: target })).toBe(
+      expected,
+    );
+  });
+
+  it("el plan actual se marca como tal, no como cambio", () => {
+    expect(
+      classifyPlanChange({ currentAmountMinor: 100, targetAmountMinor: 100, isCurrentPlan: true }),
+    ).toBe("current");
+  });
+
+  it("sin precio comparable no adivina", () => {
+    expect(classifyPlanChange({ currentAmountMinor: null, targetAmountMinor: 100 })).toBe("unknown");
+    expect(classifyPlanChange({ currentAmountMinor: 100, targetAmountMinor: null })).toBe("unknown");
+  });
+
+  it("sólo el downgrade se difiere; el upgrade se aplica al pagar", () => {
+    // Es la regla que la pantalla anuncia: si esto cambia, el aviso miente.
+    expect(classifyPlanChange({ currentAmountMinor: 100, targetAmountMinor: 50 })).toBe("downgrade");
+    expect(classifyPlanChange({ currentAmountMinor: 50, targetAmountMinor: 100 })).not.toBe(
+      "downgrade",
+    );
   });
 });
 

@@ -12,6 +12,7 @@
  * memoria ni comprobaciones previas sujetas a carreras.
  */
 import { createAdminClient } from "@/lib/supabase/admin";
+import { billingError, billingWarn } from "@/lib/billing/log";
 
 export interface BillingNotificationInput {
   organizationId: string;
@@ -54,9 +55,9 @@ export async function enqueueBillingNotification(
 ): Promise<BillingNotificationResult> {
   const recipient = await organizationAdminEmail(input.organizationId);
   if (!recipient) {
-    console.warn("[billing] notificación sin destinatario", {
+    billingWarn("notification_without_recipient", {
+      correlationId: input.idempotencyKey,
       organizationId: input.organizationId,
-      idempotencyKey: input.idempotencyKey,
     });
     return { enqueued: false, reason: "no_recipient" };
   }
@@ -91,9 +92,10 @@ export async function enqueueBillingNotification(
     return { enqueued: false, reason: "duplicate" };
   }
   if (error) {
-    console.error("[billing] no se pudo encolar la notificación", {
+    billingError("notification_enqueue_failed", {
+      correlationId: input.idempotencyKey,
+      organizationId: input.organizationId,
       code: error.code,
-      idempotencyKey: input.idempotencyKey,
     });
     return { enqueued: false, reason: "write_failed" };
   }

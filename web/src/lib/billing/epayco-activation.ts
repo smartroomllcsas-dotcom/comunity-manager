@@ -10,6 +10,7 @@
  * verifica y nunca debe invocarse sobre un payload sin `signature_valid`.
  */
 import { createAdminClient } from "@/lib/supabase/admin";
+import { billingError, providerEventCorrelationId } from "@/lib/billing/log";
 import {
   amountToMinor,
   isEpaycoTestRequest,
@@ -160,8 +161,12 @@ export async function settleEpaycoConfirmation(params: Record<string, string>): 
   });
 
   if (activationError) {
-    console.error("[billing] atomic ePayco activation failed", {
+    billingError("atomic_activation_failed", {
+      correlationId: providerEventCorrelationId("epayco", eventKey),
+      organizationId: checkout.organization_id as string,
       code: activationError.code,
+      checkoutSessionId: checkout.id as string,
+      paymentId: payment.id as string,
     });
     return { outcome: "failed", reason: "atomic_activation_failed", httpStatus: 500 };
   }

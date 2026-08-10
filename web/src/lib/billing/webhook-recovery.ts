@@ -42,6 +42,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { settleEpaycoConfirmation } from "@/lib/billing/epayco-activation";
 import { enqueueBillingNotification } from "@/lib/billing/notifications";
 import { outboxRetryDelaySeconds } from "@/lib/billing/outbox";
+import { billingError } from "@/lib/billing/log";
 
 /** Fallos de infraestructura u orden de llegada: reintentar es seguro. */
 export const RECOVERABLE_ERRORS = [
@@ -97,6 +98,8 @@ interface FailedWebhookRow {
 }
 
 export interface RecoveryOutcome {
+  /** Identificador de esta ejecución; el mismo que queda en `locked_by`. */
+  workerId: string;
   scanned: number;
   claimed: number;
   recovered: number;
@@ -111,8 +114,9 @@ export interface RecoveryOutcome {
   auditFailures: number;
 }
 
-function emptyOutcome(): RecoveryOutcome {
+function emptyOutcome(workerId: string): RecoveryOutcome {
   return {
+    workerId,
     scanned: 0,
     claimed: 0,
     recovered: 0,
@@ -159,10 +163,11 @@ async function audit(input: {
     result: input.result,
   });
   if (error) {
-    console.error("[billing] AUDITORÍA PERDIDA en recuperación de webhook", {
+    billingError("audit_write_lost", {
+      correlationId: `webhook-recovery:${input.eventId}`,
+      organizationId: input.organizationId,
       code: error.code,
       message: error.message,
-      eventId: input.eventId,
       action: input.action,
     });
     return false;
@@ -184,10 +189,10 @@ async function markEvent(eventId: string, patch: Record<string, unknown>) {
     .eq("id", eventId)
     .select("id");
   if (error) {
-    console.error("[billing] no se pudo actualizar el evento de webhook", {
+    billingError("webhook_event_update_failed", {
+      correlationId: `webhook-recovery:${eventId}`,
       code: error.code,
       message: error.message,
-      eventId,
       patch: Object.keys(patch),
     });
     return false;
@@ -223,7 +228,10 @@ async function claimEvent(eventId: string, workerId: string) {
     );
   }
   if (error) {
-    console.error("[billing] no se pudo reclamar el evento", { code: error.code, eventId });
+    billingError("webhook_claim_failed", {
+      correlationId: `webhook-recovery:${eventId}`,
+      code: error.code,
+    });
     return false;
   }
   return Array.isArray(data) && data.length > 0;
@@ -252,7 +260,7 @@ export async function recoverFailedWebhookEvents(limit = 25): Promise<RecoveryOu
   const admin = createAdminClient();
   const nowIso = new Date().toISOString();
   const workerId = `vercel-webhook-recovery-${randomUUID()}`;
-  const outcome = emptyOutcome();
+  const outcome = emptyOutcome(workerId);
 
   const { data, error } = await admin
     .from("billing_webhook_events")
@@ -407,8 +415,9 @@ export async function recoverFailedWebhookEvents(limit = 25): Promise<RecoveryOu
       try {
         settlement = await settleEpaycoConfirmation(event.payload);
       } catch (settleError) {
-        console.error("[billing] la liquidación lanzó durante la recuperación", {
-          eventId: event.id,
+        billingError("settlement_threw_during_recovery", {
+          correlationId: `webhook-recovery:${event.id}`,
+          organizationId,
           message: settleError instanceof Error ? settleError.message : String(settleError),
         });
         settlement = { outcome: "failed" as const, reason: "atomic_activation_failed" as const };
@@ -505,8 +514,8 @@ export async function recoverFailedWebhookEvents(limit = 25): Promise<RecoveryOu
       else outcome.retried += 1;
     } catch (unexpected) {
       // Nunca dejar un lease colgado por un error no previsto.
-      console.error("[billing] error inesperado recuperando un webhook", {
-        eventId: event.id,
+      billingError("webhook_recovery_unexpected_error", {
+        correlationId: `webhook-recovery:${event.id}`,
         message: unexpected instanceof Error ? unexpected.message : String(unexpected),
       });
       await releaseLease(event.id);

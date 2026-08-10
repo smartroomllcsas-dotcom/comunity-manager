@@ -10,6 +10,7 @@ import {
 import { getPaymentGateway } from "@/lib/payments/gateways";
 import { getGatewayEnvironment } from "@/lib/payments/config";
 import { rateLimit } from "@/lib/rate-limit";
+import { billingError, checkoutCorrelationId } from "@/lib/billing/log";
 import {
   BILLING_CHECKOUT_RATE_LIMIT,
   BILLING_CHECKOUT_RATE_WINDOW_MS,
@@ -17,6 +18,11 @@ import {
 } from "@/lib/billing/rate-limit";
 
 export async function POST(request: NextRequest) {
+  // La Idempotency-Key es la única cadena que comparten cliente, fila de
+  // checkout_sessions y log; se adopta como correlación en cuanto se lee.
+  let correlationId = "checkout:sin-clave";
+  let organizationId: string | null = null;
+
   try {
     const supabase = await createClient();
     const admin = createAdminClient();
@@ -69,6 +75,8 @@ export async function POST(request: NextRequest) {
     const currency = String(body.currency || "COP").toUpperCase();
     const gatewayCode = String(body.gateway || "") as PaymentGatewayCode;
     const idempotencyKey = request.headers.get("idempotency-key");
+    if (idempotencyKey) correlationId = checkoutCorrelationId(idempotencyKey);
+    organizationId = (agent.organization_id as string) ?? null;
 
     if (!planId || !PAYMENT_GATEWAYS.includes(gatewayCode)) {
       return Response.json(
@@ -229,7 +237,9 @@ export async function POST(request: NextRequest) {
           expires_at: expiresAt,
         });
       if (checkoutError) {
-        console.error("[billing] generic checkout insert failed", {
+        billingError("generic_checkout_insert_failed", {
+          correlationId,
+          organizationId,
           code: checkoutError.code,
           gateway: gatewayCode,
         });
@@ -268,7 +278,11 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       );
     }
-    console.error("[billing] generic checkout failed", error);
+    billingError("generic_checkout_failed", {
+      correlationId,
+      organizationId,
+      message: error instanceof Error ? error.message : String(error),
+    });
     return Response.json({ error: "Error creando checkout" }, { status: 500 });
   }
 }

@@ -17,6 +17,7 @@ import {
   settleEpaycoConfirmation,
   type EpaycoSettlementFailure,
 } from "@/lib/billing/epayco-activation";
+import { billingError, providerEventCorrelationId } from "@/lib/billing/log";
 
 const SETTLEMENT_ERROR_MESSAGES: Record<EpaycoSettlementFailure, string> = {
   checkout_session_not_found: "Sesion de pago no encontrada",
@@ -168,8 +169,10 @@ async function processConfirmation(request: NextRequest) {
     }
   }
   if ((webhookInsertError && webhookInsertError.code !== "23505") || !eventId) {
-    console.error("[billing] webhook event insert failed", {
+    billingError("webhook_event_insert_failed", {
+      correlationId: providerEventCorrelationId("epayco", eventKey),
       code: webhookInsertError?.code,
+      environment: eventEnvironment,
     });
     return Response.json({ error: "Error registrando evento" }, { status: 500 });
   }
@@ -199,7 +202,10 @@ export async function POST(request: NextRequest) {
   try {
     return await processConfirmation(request);
   } catch (error) {
-    console.error("[billing] ePayco confirmation failed", error);
+    billingError("confirmation_unhandled_error", {
+      correlationId: "epayco:unknown",
+      message: error instanceof Error ? error.message : String(error),
+    });
     return Response.json({ error: "Error interno" }, { status: 500 });
   }
 }

@@ -189,14 +189,20 @@ export async function createEpaycoV2Session(params: {
   return sessionId;
 }
 
-export function getEpaycoConfig() {
-  return {
-    publicKey: EPAYCO_PUBLIC_KEY,
-    privateKey: EPAYCO_PRIVATE_KEY,
-    customerId: EPAYCO_CUSTOMER_ID,
-    pKey: EPAYCO_P_KEY,
-    test: process.env.EPAYCO_TEST === "true",
-  };
+/**
+ * H-04 · La antigua función `getEpaycoConfig` fue eliminada el 2026-08-10.
+ *
+ * Devolvía `privateKey` y `pKey` —el material con el que se firman y validan
+ * las confirmaciones— en un solo objeto. No tenía ningún consumidor, así que
+ * era inerte, pero bastaba con que una ruta devolviese su resultado al
+ * navegador para filtrar ambos secretos.
+ *
+ * Quien necesite la clave pública debe usar `getEpaycoPublicKey()`. Las claves
+ * privadas no salen de este módulo: las consumen `createEpaycoV2Session` y
+ * `validateEpaycoSignature`, ambas dentro del servidor.
+ */
+export function isEpaycoTestMode() {
+  return process.env.EPAYCO_TEST === "true";
 }
 
 export function getEpaycoPublicKey() {

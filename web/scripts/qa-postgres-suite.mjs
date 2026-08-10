@@ -30,6 +30,8 @@ const FIXTURES = path.join(webDir, "supabase", "qa", "001_qa_lifecycle_fixtures.
 const TEST_FILE = path.join(webDir, "tests", "postgres-integration.test.mjs");
 
 const allowNonEmpty = process.argv.includes("--allow-nonempty");
+/** Sólo comprueba prerrequisitos: no carga fixtures ni ejecuta las pruebas. */
+const checkOnly = process.argv.includes("--check");
 const connectionString = process.env.QA_DATABASE_URL;
 
 function fail(message) {
@@ -147,6 +149,20 @@ try {
   );
   const has033 = defRows.some((row) => /'cancelled'/.test(row.body) && /status IN \([^)]*cancelled/.test(row.body));
   info(`migración 033 (reactivación desde cancelled): ${has033 ? "APLICADA" : "NO aplicada"}`);
+
+  // ¿Está la 035 aplicada? Se reporta, no se exige: las pruebas 14-17 la
+  // necesitan, el resto no.
+  const has035 = defRows.some((row) => /plan_downgrade_scheduled/.test(row.body));
+  info(`migración 035 (downgrade programado): ${has035 ? "APLICADA" : "NO aplicada"}`);
+  if (!has035) {
+    info("  ⚠ sin la 035, las pruebas 14-17 fallarán: es el comportamiento esperado");
+  }
+
+  if (checkOnly) {
+    console.log("\n▸ --check: prerrequisitos verificados, no se ejecutó nada.\n");
+    await client.end();
+    process.exit(0);
+  }
 
   // -------------------------------------------------------------------------
   // Paso 4 — cargar fixtures.

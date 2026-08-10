@@ -109,8 +109,32 @@ describe("Matriz de ciclo de vida · coherencia backend ↔ pantalla", () => {
       if ((await decide()).allowed) withAccess.push(testCase);
     }
     expect(withAccess.sort()).toEqual(
-      ["active", "grace_period", "past_due", "plan_change", "renewal", "scheduled_cancellation"].sort(),
+      [
+        "active",
+        "grace_period",
+        "past_due",
+        "plan_change",
+        // D-5: un downgrade programado no recorta nada todavía.
+        "plan_downgrade",
+        "renewal",
+        "scheduled_cancellation",
+      ].sort(),
     );
+  });
+
+  it("un downgrade programado conserva el acceso completo y no pide pago", async () => {
+    seedCase("plan_downgrade");
+    const decision = await decide();
+    const fixture = LIFECYCLE_FIXTURES.plan_downgrade;
+    const ui = deriveSubscriptionUi(fixture.subscription, { isAdmin: true });
+
+    expect(decision.allowed).toBe(true);
+    // La pantalla lo sigue viendo como una suscripción activa normal: puede
+    // cancelar, y no se le exige pagar nada.
+    expect(ui.state).toBe("active");
+    expect(ui.actions).toEqual(["cancel"]);
+    expect(ui.requiresPayment).toBe(false);
+    expect(fixture.subscription.pending_plan_id).toBe("plan-qa-barato");
   });
 
   it("la baja programada conserva el acceso completo hasta el fin del período", async () => {

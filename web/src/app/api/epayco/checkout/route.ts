@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { EpaycoGatewayError, createEpaycoV2Session } from "@/lib/epayco/client";
 import { rateLimit } from "@/lib/rate-limit";
+import { billingError, checkoutCorrelationId } from "@/lib/billing/log";
 import {
   BILLING_CHECKOUT_RATE_LIMIT,
   BILLING_CHECKOUT_RATE_WINDOW_MS,
@@ -30,6 +31,9 @@ import {
  */
 export async function POST(request: NextRequest) {
   let createdSessionId: string | null = null;
+  // Se fija en cuanto se conoce la Idempotency-Key; hasta entonces el fallo no
+  // pertenece a ninguna compra concreta.
+  let gatewayCorrelationId = "checkout:sin-clave";
   const admin = createAdminClient();
 
   try {
@@ -87,6 +91,8 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+
+    gatewayCorrelationId = checkoutCorrelationId(idempotencyKey);
 
     const { data: plan, error: planError } = await admin
       .from("plans")
@@ -234,7 +240,9 @@ export async function POST(request: NextRequest) {
         internalReference = winner.internal_reference as string;
         expiresAt = winner.expires_at as string;
       } else if (sessionError) {
-        console.error("[billing] checkout session creation failed", {
+        billingError("checkout_session_creation_failed", {
+          correlationId: checkoutCorrelationId(idempotencyKey),
+          organizationId: agent.organization_id as string,
           code: sessionError.code,
         });
         return Response.json(
@@ -275,7 +283,8 @@ export async function POST(request: NextRequest) {
           .eq("id", createdSessionId)
           .eq("status", "pending");
       }
-      console.error("[billing] ePayco gateway error", {
+      billingError("epayco_gateway_error", {
+        correlationId: gatewayCorrelationId,
         code: error.code,
         step: error.step,
         status: error.status,
@@ -292,7 +301,10 @@ export async function POST(request: NextRequest) {
         { status: timedOut ? 504 : 502 },
       );
     }
-    console.error("[billing] checkout failed", error);
+    billingError("checkout_unhandled_error", {
+      correlationId: gatewayCorrelationId,
+      message: error instanceof Error ? error.message : String(error),
+    });
     return Response.json({ error: "Error creando checkout" }, { status: 500 });
   }
 }

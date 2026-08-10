@@ -19,6 +19,7 @@
  */
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { billingError } from "@/lib/billing/log";
 
 /** Estados en los que una suscripción todavía puede programar su baja. */
 export const CANCELLABLE_STATUSES = ["trial", "active"] as const;
@@ -167,7 +168,10 @@ async function recordSubscriptionEvent(input: {
     // El evento es la bitácora de la acción. Si no se puede escribir, la acción
     // se reporta como fallida aunque el UPDATE ya haya ocurrido: es preferible
     // un reintento idempotente a una transición sin rastro.
-    console.error("[billing] subscription event insert failed", {
+    billingError("subscription_event_insert_failed", {
+      correlationId: input.correlationId,
+      organizationId: input.organizationId,
+      subscriptionId: input.subscription.id,
       code: error.code,
       reason: input.reason,
     });

@@ -5,6 +5,7 @@ import { AlertTriangle, CalendarX, Loader2, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   SUBSCRIPTION_ACTION_LABELS,
+  derivePendingPlanChange,
   deriveSubscriptionUi,
   type SubscriptionUiInput,
 } from "@/lib/billing/subscription-ui";
@@ -36,11 +37,14 @@ function formatDate(value: string | null) {
 export function SubscriptionLifecycleCard({
   subscription,
   isAdmin,
+  pendingPlanName,
   onChanged,
   onRequestPayment,
 }: {
   subscription: SubscriptionUiInput | null;
   isAdmin: boolean;
+  /** Nombre del plan al que se bajará, para nombrarlo en el aviso (D-5). */
+  pendingPlanName?: string | null;
   onChanged: () => void;
   onRequestPayment: () => void;
 }) {
@@ -50,6 +54,7 @@ export function SubscriptionLifecycleCard({
 
   const model = deriveSubscriptionUi(subscription, { isAdmin });
   const accessEndsLabel = formatDate(model.accessEndsAt);
+  const pendingChange = derivePendingPlanChange(subscription, { planName: pendingPlanName });
 
   async function submit(action: "cancel" | "resume") {
     setPending(action);
@@ -141,6 +146,17 @@ export function SubscriptionLifecycleCard({
           role="status"
         >
           {model.noticeText}
+        </p>
+      )}
+
+      {/* D-5 · Downgrade diferido: el cliente conserva su plan hasta la fecha. */}
+      {pendingChange && (
+        <p
+          className="mt-3 rounded-md border border-blue-500/40 bg-blue-500/10 px-3 py-2 text-xs text-blue-100"
+          role="status"
+          data-testid="pending-plan-change"
+        >
+          {pendingChange.notice}
         </p>
       )}
 

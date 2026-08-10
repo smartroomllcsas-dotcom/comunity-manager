@@ -59,7 +59,10 @@ $$;
 --   'suspended'     suspendida tras agotar la gracia
 --   'cancelled'     cancelada
 --   'renewal'       activa y próxima a vencer (para probar extensión de período)
---   'plan_change'   activa en el plan A con un checkout pendiente del plan B
+--   'plan_change'   activa en el plan A (barato) con checkout del plan B (caro)
+--                   => upgrade: se aplica de inmediato
+--   'plan_downgrade' activa en el plan B (caro) con checkout del plan A (barato)
+--                   => downgrade: debe programarse para el fin del período
 --   'no_subscription'   organización sin suscripción
 --
 -- Devuelve un jsonb con todos los identificadores necesarios para invocar
@@ -79,6 +82,8 @@ DECLARE
   v_plan_b UUID;
   v_price_a UUID;
   v_price_b UUID;
+  v_start_plan UUID;
+  v_start_price UUID;
   v_target_plan UUID;
   v_target_price UUID;
   v_subscription_id UUID;
@@ -95,7 +100,8 @@ DECLARE
 BEGIN
   IF p_case NOT IN (
     'active', 'past_due', 'grace_period', 'past_due_expired',
-    'suspended', 'cancelled', 'renewal', 'plan_change', 'no_subscription'
+    'suspended', 'cancelled', 'renewal', 'plan_change', 'plan_downgrade',
+    'no_subscription'
   ) THEN
     RAISE EXCEPTION 'qa_seed_lifecycle_case: caso desconocido %', p_case;
   END IF;
@@ -105,12 +111,15 @@ BEGIN
   VALUES ('epayco', 'ePayco', TRUE, TRUE)
   ON CONFLICT (gateway) DO NOTHING;
 
-  INSERT INTO smarttalk.plans(name, max_agents, max_contacts, max_broadcasts_per_month, max_chatbot_flows, price_monthly)
-  VALUES ('[QA-FIXTURE] Plan A', 2, 1000, 10, 2, 59000)
+  -- `plans.code` es NOT NULL y tiene índice único, así que cada llamada al
+  -- fixture necesita su propio código: varias siembras conviven dentro de la
+  -- misma transacción de un test.
+  INSERT INTO smarttalk.plans(code, name, max_agents, max_contacts, max_broadcasts_per_month, max_chatbot_flows, price_monthly, status, is_public)
+  VALUES (format('qa-fixture-a-%s', gen_random_uuid()), '[QA-FIXTURE] Plan A', 2, 1000, 10, 2, 59000, 'active', FALSE)
   RETURNING id INTO v_plan_a;
 
-  INSERT INTO smarttalk.plans(name, max_agents, max_contacts, max_broadcasts_per_month, max_chatbot_flows, price_monthly)
-  VALUES ('[QA-FIXTURE] Plan B', 5, 5000, 50, 10, 149000)
+  INSERT INTO smarttalk.plans(code, name, max_agents, max_contacts, max_broadcasts_per_month, max_chatbot_flows, price_monthly, status, is_public)
+  VALUES (format('qa-fixture-b-%s', gen_random_uuid()), '[QA-FIXTURE] Plan B', 5, 5000, 50, 10, 149000, 'active', FALSE)
   RETURNING id INTO v_plan_b;
 
   INSERT INTO smarttalk.plan_prices(plan_id, currency, amount_minor, billing_interval, interval_count, provider, is_active)
@@ -121,8 +130,21 @@ BEGIN
   VALUES (v_plan_b, 'COP', 14900000, 'month', 1, 'epayco', TRUE)
   RETURNING id INTO v_price_b;
 
+  -- El downgrade arranca en el plan caro (B) para que el checkout al plan
+  -- barato (A) sea, efectivamente, una bajada de precio.
+  IF p_case = 'plan_downgrade' THEN
+    v_start_plan := v_plan_b;
+    v_start_price := v_price_b;
+  ELSE
+    v_start_plan := v_plan_a;
+    v_start_price := v_price_a;
+  END IF;
+
+  -- La organización debe arrancar en el MISMO plan que la suscripción; si no,
+  -- las aserciones sobre organizations.plan_id comparan contra un plan que la
+  -- cuenta nunca tuvo.
   INSERT INTO smarttalk.organizations(name, plan_id, is_active)
-  VALUES (format('[QA-FIXTURE] Org %s', p_case), v_plan_a, TRUE)
+  VALUES (format('[QA-FIXTURE] Org %s', p_case), v_start_plan, TRUE)
   RETURNING id INTO v_org_id;
 
   -- Estado de la suscripción según el caso.
@@ -131,6 +153,7 @@ BEGIN
     WHEN 'past_due_expired' THEN 'past_due'
     WHEN 'renewal' THEN 'active'
     WHEN 'plan_change' THEN 'active'
+    WHEN 'plan_downgrade' THEN 'active'
     ELSE p_case
   END;
 
@@ -142,6 +165,7 @@ BEGIN
   v_period_end := CASE p_case
     WHEN 'active' THEN v_now + INTERVAL '15 days'
     WHEN 'plan_change' THEN v_now + INTERVAL '15 days'
+    WHEN 'plan_downgrade' THEN v_now + INTERVAL '15 days'
     WHEN 'renewal' THEN v_now + INTERVAL '1 day'
     ELSE v_now - INTERVAL '1 day'
   END;
@@ -163,14 +187,14 @@ BEGIN
       grace_ends_at, suspended_at, cancelled_at, status_reason
     )
     VALUES (
-      v_org_id, v_plan_a, v_price_a, v_status, 'epayco', 'epayco',
+      v_org_id, v_start_plan, v_start_price, v_status, 'epayco', 'epayco',
       'manual', v_period_start, v_period_end, FALSE,
       v_grace_ends, v_suspended_at, v_cancelled_at, format('qa_fixture_%s', p_case)
     )
     RETURNING id INTO v_subscription_id;
   END IF;
 
-  -- El checkout apunta al plan B sólo en el caso de cambio de plan.
+  -- El checkout apunta al plan B en el upgrade y al plan A en el downgrade.
   v_target_plan := CASE WHEN p_case = 'plan_change' THEN v_plan_b ELSE v_plan_a END;
   v_target_price := CASE WHEN p_case = 'plan_change' THEN v_price_b ELSE v_price_a END;
 
@@ -222,6 +246,7 @@ BEGIN
     'payment_id', v_payment_id,
     'plan_a_id', v_plan_a,
     'plan_b_id', v_plan_b,
+    'start_plan_id', v_start_plan,
     'price_a_id', v_price_a,
     'price_b_id', v_price_b,
     'target_plan_id', v_target_plan,

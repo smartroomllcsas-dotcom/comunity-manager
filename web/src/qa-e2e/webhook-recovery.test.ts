@@ -667,6 +667,116 @@ describe("Migración 034 · columna locked_by", () => {
 // Cron
 // ---------------------------------------------------------------------------
 
+describe("Log estructurado del resumen", () => {
+  function captureLogs() {
+    const lines: Array<{ level: "log" | "error"; text: string }> = [];
+    const originalLog = console.log;
+    const originalError = console.error;
+    console.log = (...args: unknown[]) => lines.push({ level: "log", text: args.join(" ") });
+    console.error = (...args: unknown[]) => lines.push({ level: "error", text: args.join(" ") });
+    return {
+      lines,
+      restore: () => {
+        console.log = originalLog;
+        console.error = originalError;
+      },
+    };
+  }
+
+  function summaryOf(lines: Array<{ level: string; text: string }>) {
+    const line = lines.find((entry) => entry.text.includes("webhook_recovery_summary"));
+    if (!line) return null;
+    const json = line.text.slice(line.text.indexOf("{"));
+    return { level: line.level, payload: JSON.parse(json) as Record<string, number | string> };
+  }
+
+  it("emite el resumen con los cinco contadores solicitados", async () => {
+    seed([failedEvent()]);
+    const capture = captureLogs();
+    try {
+      await recoveryCron(authedRequest());
+    } finally {
+      capture.restore();
+    }
+
+    const summary = summaryOf(capture.lines);
+    expect(summary, "no se emitió la línea de resumen").toBeTruthy();
+    expect(summary!.payload).toMatchObject({
+      event: "webhook_recovery_summary",
+      recovered: 1,
+      retried: 0,
+      deadLettered: 0,
+      writeFailures: 0,
+      auditFailures: 0,
+    });
+    expect(typeof summary!.payload.durationMs).toBe("number");
+    expect(summary!.payload.processedAt).toBeTruthy();
+  });
+
+  it("el resumen se emite también cuando no hubo nada que procesar", async () => {
+    seed([]);
+    const capture = captureLogs();
+    try {
+      await recoveryCron(authedRequest());
+    } finally {
+      capture.restore();
+    }
+
+    const summary = summaryOf(capture.lines);
+    expect(summary!.payload).toMatchObject({ scanned: 0, recovered: 0, writeFailures: 0, auditFailures: 0 });
+    expect(summary!.level).toBe("log");
+  });
+
+  it("se emite como `error` cuando hay auditFailures, para que salte por nivel", async () => {
+    seed([failedEvent()], {
+      errorOn: { billing_audit_events: { insert: { code: "42501", message: "permission denied" } } },
+    });
+    const capture = captureLogs();
+    try {
+      await recoveryCron(authedRequest());
+    } finally {
+      capture.restore();
+    }
+
+    const summary = summaryOf(capture.lines);
+    expect(summary!.level).toBe("error");
+    expect(summary!.payload).toMatchObject({ recovered: 1, auditFailures: 1 });
+  });
+
+  it("se emite como `error` cuando hay writeFailures", async () => {
+    seed([failedEvent()], {
+      errorOn: {
+        billing_webhook_events: { update: { code: "42501", message: "permission denied", skip: 1 } },
+      },
+    });
+    const capture = captureLogs();
+    try {
+      await recoveryCron(authedRequest());
+    } finally {
+      capture.restore();
+    }
+
+    const summary = summaryOf(capture.lines);
+    expect(summary!.level).toBe("error");
+    expect(summary!.payload).toMatchObject({ writeFailures: 1, recovered: 0 });
+  });
+
+  it("el resumen es una sola línea de JSON parseable", async () => {
+    seed([failedEvent({ last_error: "environment_mismatch" })]);
+    const capture = captureLogs();
+    try {
+      await recoveryCron(authedRequest());
+    } finally {
+      capture.restore();
+    }
+
+    const line = capture.lines.find((entry) => entry.text.includes("webhook_recovery_summary"))!;
+    expect(line.text.split("\n")).toHaveLength(1);
+    const payload = JSON.parse(line.text.slice(line.text.indexOf("{")));
+    expect(payload.flaggedForReview).toBe(1);
+  });
+});
+
 describe("GET /api/cron/billing-webhook-recovery", () => {
   it("401 sin CRON_SECRET válido", async () => {
     seed([failedEvent()]);

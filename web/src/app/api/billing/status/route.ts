@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { billingError } from "@/lib/billing/log";
 
 const INACTIVE_ONBOARDING_STATES = new Set([
   "pending_payment",
@@ -72,11 +73,13 @@ export async function GET() {
     ]);
 
   if (organizationError || subscriptionError || latestPaymentError) {
-    console.error("[billing/status] Failed to read billing state", {
+    billingError("status_read_failed", {
+      // La organización del agente es el ámbito real de esta lectura.
+      correlationId: `status:${agent.organization_id}`,
+      organizationId: agent.organization_id as string,
       organizationError: organizationError?.message,
       subscriptionError: subscriptionError?.message,
       latestPaymentError: latestPaymentError?.message,
-      organizationId: agent.organization_id,
     });
     return Response.json(
       {

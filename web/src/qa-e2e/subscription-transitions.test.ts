@@ -238,6 +238,154 @@ describe("D-6 · notificación de billing al administrador", () => {
   });
 });
 
+describe("D-5 / H-12 · downgrade programado aplicado por el cron", () => {
+  const events = () => H.current!.store.subscription_events as Array<Record<string, unknown>>;
+  const orgs = () => H.current!.store.organizations as Array<Record<string, unknown>>;
+
+  function seedPending(overrides: Record<string, unknown> = {}) {
+    H.current = createFakeSupabase({
+      tables: {
+        subscriptions: [
+          {
+            id: "s-down",
+            organization_id: "o1",
+            status: "active",
+            plan_id: "plan-caro",
+            plan_price_id: "price-caro",
+            current_period_end: future(20),
+            cancel_at_period_end: false,
+            pending_plan_id: "plan-barato",
+            pending_plan_price_id: "price-barato",
+            change_effective_at: past(),
+            ...overrides,
+          },
+        ],
+        organizations: [{ id: "o1", plan_id: "plan-caro" }],
+        subscription_events: [],
+        billing_outbox_jobs: [],
+        agents: [],
+      },
+    });
+  }
+
+  const sub = () => subs().find((s) => s.id === "s-down")!;
+
+  beforeEach(() => {
+    process.env.CRON_SECRET = SECRET;
+    process.env.BILLING_GRACE_DAYS = "3";
+  });
+
+  it("aplica el plan pendiente cuando llega change_effective_at", async () => {
+    seedPending();
+    const body = await (await billingLifecycle(authedCron())).json();
+
+    expect(body.planChangesApplied).toBe(1);
+    expect(sub().plan_id).toBe("plan-barato");
+    expect(sub().plan_price_id).toBe("price-barato");
+    expect(sub().status_reason).toBe("plan_change_applied");
+  });
+
+  it("limpia las tres columnas pendientes al aplicarlo", async () => {
+    seedPending();
+    await billingLifecycle(authedCron());
+
+    expect(sub().pending_plan_id).toBeNull();
+    expect(sub().pending_plan_price_id).toBeNull();
+    expect(sub().change_effective_at).toBeNull();
+  });
+
+  it("la organización sigue al plan sólo cuando el cambio se hace efectivo", async () => {
+    seedPending();
+    expect(orgs()[0].plan_id).toBe("plan-caro");
+
+    await billingLifecycle(authedCron());
+    expect(orgs()[0].plan_id).toBe("plan-barato");
+  });
+
+  it("NO aplica el cambio antes de la fecha: el acceso actual se conserva", async () => {
+    seedPending({ change_effective_at: future(5) });
+    const body = await (await billingLifecycle(authedCron())).json();
+
+    expect(body.planChangesApplied).toBe(0);
+    expect(sub().plan_id).toBe("plan-caro");
+    expect(sub().pending_plan_id).toBe("plan-barato");
+    expect(orgs()[0].plan_id).toBe("plan-caro");
+  });
+
+  it("no toca suscripciones sin cambio pendiente", async () => {
+    seedPending({ pending_plan_id: null, pending_plan_price_id: null, change_effective_at: null });
+    const body = await (await billingLifecycle(authedCron())).json();
+
+    expect(body.planChangesApplied).toBe(0);
+    expect(sub().plan_id).toBe("plan-caro");
+  });
+
+  it("registra subscription_events con el plan de origen y el de destino", async () => {
+    seedPending();
+    await billingLifecycle(authedCron());
+
+    const applied = events().find((event) => event.reason === "plan_change_applied");
+    expect(applied).toBeTruthy();
+    expect(applied).toMatchObject({
+      subscription_id: "s-down",
+      organization_id: "o1",
+      actor_type: "system",
+      previous_status: "active",
+      new_status: "active",
+    });
+    expect(applied!.metadata).toMatchObject({
+      from_plan_id: "plan-caro",
+      to_plan_id: "plan-barato",
+    });
+    expect(String(applied!.correlation_id)).toMatch(/^plan-change:s-down:/);
+  });
+
+  it("es idempotente: una segunda corrida no reaplica ni duplica el evento", async () => {
+    seedPending();
+    await billingLifecycle(authedCron());
+    const body = await (await billingLifecycle(authedCron())).json();
+
+    expect(body.planChangesApplied).toBe(0);
+    expect(events().filter((event) => event.reason === "plan_change_applied")).toHaveLength(1);
+    expect(sub().plan_id).toBe("plan-barato");
+  });
+
+  it("un downgrade programado no interfiere con el vencimiento del período", async () => {
+    // La suscripción tiene el cambio pendiente Y el período ya vencido: debe
+    // pasar a past_due y además aplicar el plan pendiente.
+    seedPending({ current_period_end: past(), change_effective_at: past() });
+
+    const body = await (await billingLifecycle(authedCron())).json();
+
+    expect(body.movedToPastDue).toBe(1);
+    expect(body.planChangesApplied).toBe(1);
+    expect(sub().status).toBe("past_due");
+    expect(sub().plan_id).toBe("plan-barato");
+  });
+
+  it("aplica varios cambios pendientes en la misma corrida", async () => {
+    seedPending();
+    subs().push({
+      id: "s-down-2",
+      organization_id: "o2",
+      status: "active",
+      plan_id: "plan-caro",
+      plan_price_id: "price-caro",
+      current_period_end: future(20),
+      cancel_at_period_end: false,
+      pending_plan_id: "plan-mini",
+      pending_plan_price_id: "price-mini",
+      change_effective_at: past(),
+    });
+    orgs().push({ id: "o2", plan_id: "plan-caro" });
+
+    const body = await (await billingLifecycle(authedCron())).json();
+
+    expect(body.planChangesApplied).toBe(2);
+    expect(subs().find((s) => s.id === "s-down-2")!.plan_id).toBe("plan-mini");
+  });
+});
+
 describe("PATCH /api/admin/subscriptions · transiciones manuales", () => {
   function seedAdmin(subscription: Record<string, unknown>, superAdmin = true) {
     H.current = createFakeSupabase({

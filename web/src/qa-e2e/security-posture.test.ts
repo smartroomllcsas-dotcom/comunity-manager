@@ -444,20 +444,34 @@ describe("Seguridad · secretos de pasarela", () => {
     }
   });
 
-  it("H-04 abierto: getEpaycoConfig() expone privateKey y pKey y no tiene consumidores", () => {
+  it("H-04 CERRADO: getEpaycoConfig() ya no existe", () => {
     const source = read("lib/epayco/client.ts");
-    expect(source).toMatch(/export function getEpaycoConfig/);
-    expect(source).toMatch(/privateKey: EPAYCO_PRIVATE_KEY/);
+    expect(source).not.toMatch(/export function getEpaycoConfig/);
 
-    // Mientras no tenga llamadores es inerte; el riesgo es que alguien la use
-    // desde una ruta que devuelva su resultado al navegador.
+    // Y nadie la invoca en ningún sitio.
     const callers = walk(SRC)
       .map((file) => ({ file: relative(file), source: readFileSync(file, "utf8") }))
-      .filter(({ file }) => file !== "lib/epayco/client.ts")
       .filter(({ source: body }) => /getEpaycoConfig\s*\(/.test(body))
       .map(({ file }) => file);
+    expect(callers).toEqual([]);
+  });
 
-    expect(callers, `getEpaycoConfig ya tiene consumidores: ${callers.join(", ")}`).toEqual([]);
+  it("ninguna función exportada devuelve las claves privadas de ePayco", () => {
+    const source = read("lib/epayco/client.ts");
+    // Se recorren los cuerpos de las funciones exportadas buscando que
+    // devuelvan el material sensible. `EPAYCO_PRIVATE_KEY` y `EPAYCO_P_KEY`
+    // pueden usarse dentro del módulo, pero no salir por un `return`.
+    const exported = [...source.matchAll(/export function (\w+)\([^)]*\)\s*\{/g)];
+    const offenders: string[] = [];
+    for (const match of exported) {
+      const start = match.index ?? 0;
+      const next = source.indexOf("\nexport ", start + 1);
+      const body = source.slice(start, next === -1 ? source.length : next);
+      if (/return[\s\S]{0,400}?(EPAYCO_PRIVATE_KEY|EPAYCO_P_KEY)/.test(body)) {
+        offenders.push(match[1]);
+      }
+    }
+    expect(offenders, `funciones que devuelven secretos: ${offenders.join(", ")}`).toEqual([]);
   });
 });
 
@@ -488,21 +502,97 @@ describe("Seguridad · trazabilidad por correlation_id", () => {
     expect(read("app/api/admin/subscriptions/route.ts")).toMatch(/`admin:/);
   });
 
-  it("H-05 abierto: los logs de billing no incluyen el correlation_id", () => {
-    // Cada `console.error` de billing imprime código de error y feature, pero no
-    // la clave que permitiría unir la línea de log con subscription_events.
-    const billingLogs = walk(SRC)
-      .map((file) => ({ file: relative(file), source: readFileSync(file, "utf8") }))
-      .filter(({ file }) => file.startsWith("lib/billing/") || file.startsWith("app/api/billing/"))
-      .flatMap(({ file, source }) =>
-        [...source.matchAll(/console\.(error|warn|log)\([^)]*\)/g)].map((match) => ({
-          file,
-          line: match[0],
-        })),
-      );
+  it("H-05 CERRADO: el logger de billing exige correlationId", () => {
+    const logger = read("lib/billing/log.ts");
+    // El tipo lo hace obligatorio: no es una convención, es el compilador.
+    expect(logger).toMatch(/correlationId: string;/);
+    expect(logger).toMatch(/correlation_id: correlationId/);
+  });
 
-    expect(billingLogs.length).toBeGreaterThan(0);
-    const withCorrelation = billingLogs.filter((entry) => /correlation/i.test(entry.line));
-    expect(withCorrelation).toHaveLength(0);
+  /**
+   * Todo el árbol de billing, descubierto por escaneo.
+   *
+   * Antes esta comprobación usaba una lista fija de 7 módulos y dejaba fuera
+   * `billing/cancel`, `billing/resume`, `billing/checkout`, `billing/status` y
+   * `public-plans`, que seguían con `console` suelto. Escanear en vez de
+   * enumerar hace que un archivo nuevo quede cubierto sin tocar la prueba.
+   */
+  function billingModules() {
+    return walk(SRC)
+      .map((file) => ({ file: relative(file), source: readFileSync(file, "utf8") }))
+      .filter(
+        ({ file }) =>
+          file.startsWith("lib/billing/") ||
+          file.startsWith("app/api/billing/") ||
+          file.startsWith("app/api/epayco/") ||
+          /^app\/api\/cron\/billing-/.test(file) ||
+          // Libera cupo de contactos: dominio de billing pese al nombre.
+          file === "app/api/cron/release-contact-overage/route.ts",
+      )
+      // El propio logger es quien llama a console: es su trabajo.
+      .filter(({ file }) => file !== "lib/billing/log.ts");
+  }
+
+  it("ningún módulo de billing usa console.error/warn suelto", () => {
+    const offenders = billingModules()
+      .map(({ file, source }) => ({
+        file,
+        raw: [...source.matchAll(/console\.(error|warn)\(/g)].length,
+      }))
+      .filter((entry) => entry.raw > 0)
+      .map((entry) => `${entry.file} (${entry.raw})`);
+
+    expect(
+      offenders,
+      `console suelto —migrar a billingError/billingWarn— en: ${offenders.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("el escaneo cubre de verdad las rutas que antes se escapaban", () => {
+    // Guardia contra un filtro mal editado: si el escaneo dejara de ver estos
+    // archivos, la comprobación anterior pasaría en falso.
+    const cubiertos = new Set(billingModules().map(({ file }) => file));
+    for (const file of [
+      "app/api/billing/cancel/route.ts",
+      "app/api/billing/resume/route.ts",
+      "app/api/billing/checkout/route.ts",
+      "app/api/billing/status/route.ts",
+      "lib/billing/public-plans.ts",
+      "app/api/epayco/confirmation/route.ts",
+      "app/api/cron/billing-webhook-recovery/route.ts",
+      "app/api/cron/release-contact-overage/route.ts",
+    ]) {
+      expect(cubiertos.has(file), `el escaneo no alcanza ${file}`).toBe(true);
+    }
+    expect(cubiertos.size).toBeGreaterThanOrEqual(12);
+  });
+
+  it("todo módulo de billing que registre fallos usa el logger", () => {
+    const sinLogger = billingModules()
+      // Sólo interesan los que registran algo.
+      .filter(({ source }) => /console\.|billingError|billingWarn|billingLog/.test(source))
+      .filter(({ source }) => !/billingError|billingWarn|billingLog/.test(source))
+      .map(({ file }) => file);
+
+    expect(sinLogger, `registran sin el logger de billing: ${sinLogger.join(", ")}`).toEqual([]);
+  });
+
+  it("cada llamada al logger de billing pasa un correlationId", () => {
+    const modules = walk(SRC)
+      .map((file) => ({ file: relative(file), source: readFileSync(file, "utf8") }))
+      .filter(({ file }) => file.startsWith("lib/billing/") || file.startsWith("app/api/"))
+      .filter(({ file }) => file !== "lib/billing/log.ts");
+
+    const offenders: string[] = [];
+    for (const { file, source } of modules) {
+      for (const match of source.matchAll(/billing(?:Error|Warn|Log)\(([\s\S]{0,400}?)\n\s*\}\);/g)) {
+        // Acepta tanto `correlationId: valor` como la forma abreviada
+        // `correlationId,` que usan las rutas que lo guardan en una variable.
+        if (!/\bcorrelationId\s*[,:}\n]/.test(match[1])) {
+          offenders.push(`${file}: ${match[0].slice(0, 50)}`);
+        }
+      }
+    }
+    expect(offenders, `llamadas sin correlationId: ${offenders.join(" | ")}`).toEqual([]);
   });
 });

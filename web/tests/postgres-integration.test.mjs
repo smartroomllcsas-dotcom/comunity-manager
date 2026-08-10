@@ -92,8 +92,9 @@ const finalize = (client, ctx, eventKey) =>
 
 const subscriptionsOf = (client, ctx) =>
   client.query(
-    `SELECT id, status, plan_id, current_period_start, current_period_end,
-            cancel_at_period_end, grace_ends_at, suspended_at, cancelled_at, status_reason
+    `SELECT id, status, plan_id, plan_price_id, current_period_start, current_period_end,
+            cancel_at_period_end, grace_ends_at, suspended_at, cancelled_at, status_reason,
+            pending_plan_id, pending_plan_price_id, change_effective_at
        FROM smarttalk.subscriptions WHERE organization_id = $1 ORDER BY created_at`,
     [ctx.organization_id],
   );
@@ -121,7 +122,19 @@ test("1. RLS habilitado en todas las tablas de billing", { skip }, async () => {
   });
 });
 
-test("2. cada tabla de billing con RLS tiene al menos una policy", { skip }, async () => {
+/**
+ * Tablas con RLS habilitado y **sin policy a propósito**: son colas internas
+ * que ningún usuario final debe leer ni escribir. RLS sin policy deniega todo a
+ * los roles no privilegiados; sólo `service_role` (BYPASSRLS) las alcanza.
+ *
+ * Verificado en ejecución el 2026-08-10: `billing_outbox_jobs` estaba en esta
+ * situación desde la migración 010. Se deja explícito aquí en vez de añadirle
+ * una policy permisiva, porque denegar todo es la postura correcta para una
+ * cola de trabajo.
+ */
+const RLS_DENY_ALL_BY_DESIGN = ["billing_outbox_jobs"];
+
+test("2. cada tabla de billing con RLS tiene policy, o deniega todo a propósito", { skip }, async () => {
   await withClient(async (client) => {
     const { rows } = await client.query(
       `SELECT tablename, COUNT(*)::int AS policies
@@ -131,10 +144,21 @@ test("2. cada tabla de billing con RLS tiene al menos una policy", { skip }, asy
       [RLS_REQUIRED],
     );
     const counts = new Map(rows.map((row) => [row.tablename, row.policies]));
-    const unprotected = RLS_REQUIRED.filter((table) => !(counts.get(table) > 0));
-    // RLS sin policy deniega todo a los roles no privilegiados: es seguro pero
-    // silencioso, así que se reporta para que sea una decisión explícita.
+
+    const unprotected = RLS_REQUIRED.filter(
+      (table) => !(counts.get(table) > 0) && !RLS_DENY_ALL_BY_DESIGN.includes(table),
+    );
     assert.deepEqual(unprotected, [], `RLS sin policy declarada: ${unprotected.join(", ")}`);
+
+    // Y las que deniegan todo deben seguir haciéndolo: si alguien les añade una
+    // policy, es una decisión que debe revisarse, no un cambio silencioso.
+    for (const table of RLS_DENY_ALL_BY_DESIGN) {
+      assert.equal(
+        counts.get(table) ?? 0,
+        0,
+        `${table} ganó una policy: revisa si exponerla es intencional`,
+      );
+    }
   });
 });
 
@@ -397,6 +421,156 @@ test("12. cada activación por pago deja exactamente un subscription_event de pr
   });
 });
 
+// ===========================================================================
+// 14-17. Downgrade programado (D-5 / H-12, migración 035)
+// ===========================================================================
+
+test("14. un downgrade NO cambia el plan: lo programa para el fin del período", { skip }, async () => {
+  await withClient(async (client) => {
+    await inRollback(client, async () => {
+      const ctx = await seed(client, "plan_downgrade");
+      const { rows: before } = await subscriptionsOf(client, ctx);
+      const periodEndBefore = new Date(before[0].current_period_end);
+      assert.equal(before[0].plan_id, ctx.plan_b_id, "el fixture arranca en el plan caro");
+
+      await finalize(client, ctx, "qa-event-downgrade");
+
+      const { rows: after } = await subscriptionsOf(client, ctx);
+      assert.equal(after.length, 1, "un downgrade no debe crear otra suscripción");
+      assert.equal(after[0].plan_id, ctx.plan_b_id, "el plan actual se conserva hasta el fin del período");
+      assert.equal(after[0].pending_plan_id, ctx.plan_a_id, "el plan destino queda pendiente");
+      assert.equal(after[0].pending_plan_price_id, ctx.price_a_id);
+      assert.equal(
+        new Date(after[0].change_effective_at).getTime(),
+        periodEndBefore.getTime(),
+        "el cambio debe hacerse efectivo justo al terminar el período vigente",
+      );
+      assert.equal(after[0].status, "active");
+      assert.equal(after[0].status_reason, "plan_downgrade_scheduled");
+    });
+  });
+});
+
+test("15. el downgrade extiende el período sin regalar ni quitar días", { skip }, async () => {
+  await withClient(async (client) => {
+    await inRollback(client, async () => {
+      const ctx = await seed(client, "plan_downgrade");
+      const { rows: before } = await subscriptionsOf(client, ctx);
+      const previousEnd = new Date(before[0].current_period_end);
+
+      await finalize(client, ctx, "qa-event-downgrade-periodo");
+
+      const { rows: after } = await subscriptionsOf(client, ctx);
+      assert.equal(
+        new Date(after[0].current_period_start).getTime(),
+        previousEnd.getTime(),
+        "el nuevo período arranca donde terminaba el anterior",
+      );
+      assert.ok(new Date(after[0].current_period_end).getTime() > previousEnd.getTime());
+    });
+  });
+});
+
+test("16. la organización conserva su plan hasta que el cambio se hace efectivo", { skip }, async () => {
+  await withClient(async (client) => {
+    await inRollback(client, async () => {
+      const ctx = await seed(client, "plan_downgrade");
+      await finalize(client, ctx, "qa-event-downgrade-org");
+
+      const { rows } = await client.query(
+        `SELECT plan_id FROM smarttalk.organizations WHERE id = $1`,
+        [ctx.organization_id],
+      );
+      assert.equal(
+        rows[0].plan_id,
+        ctx.plan_b_id,
+        "organizations.plan_id no debe bajar antes de tiempo",
+      );
+
+      const { rows: events } = await client.query(
+        `SELECT reason, metadata FROM smarttalk.subscription_events WHERE organization_id = $1`,
+        [ctx.organization_id],
+      );
+      assert.equal(events.length, 1);
+      assert.equal(events[0].reason, "plan_downgrade_scheduled");
+      assert.equal(events[0].metadata.downgrade_scheduled, true);
+    });
+  });
+});
+
+test("17. un upgrade posterior cancela el downgrade programado", { skip }, async () => {
+  await withClient(async (client) => {
+    await inRollback(client, async () => {
+      const ctx = await seed(client, "plan_downgrade");
+      await finalize(client, ctx, "qa-event-downgrade-previo");
+
+      const { rows: scheduled } = await subscriptionsOf(client, ctx);
+      assert.equal(scheduled[0].pending_plan_id, ctx.plan_a_id);
+
+      // Segundo pago, esta vez al plan caro: es el camino normal (no downgrade),
+      // así que debe limpiar el cambio pendiente.
+      const second = await seed(client, "plan_change");
+      await client.query(
+        `UPDATE smarttalk.checkout_sessions SET organization_id = $1 WHERE id = $2`,
+        [ctx.organization_id, second.checkout_session_id],
+      );
+      await client.query(
+        `UPDATE smarttalk.payments SET organization_id = $1 WHERE id = $2`,
+        [ctx.organization_id, second.payment_id],
+      );
+      await finalize(client, second, "qa-event-upgrade-posterior");
+
+      const { rows: after } = await subscriptionsOf(client, ctx);
+      assert.equal(after[0].pending_plan_id, null, "el upgrade debe cancelar el downgrade pendiente");
+      assert.equal(after[0].change_effective_at, null);
+    });
+  });
+});
+
+// ===========================================================================
+// 18. Deduplicación de la cola de canales (H-11)
+// ===========================================================================
+
+test("18. la cola de canales admite duplicados, pero el mensaje no se duplica", { skip }, async () => {
+  await withClient(async (client) => {
+    // (a) La cola NO deduplica en la entrada: `webhook_events` no tiene índice
+    //     único sobre el payload ni sobre el id del proveedor.
+    // La clave primaria también es un índice único, así que se excluye: lo que
+    // interesa es si existe alguna unicidad *de negocio* sobre el evento.
+    const { rows: queueIndexes } = await client.query(
+      `SELECT i.indexname, i.indexdef
+         FROM pg_indexes i
+        WHERE i.schemaname = 'smarttalk' AND i.tablename = 'webhook_events'
+          AND i.indexdef ILIKE '%UNIQUE%'
+          AND i.indexname NOT IN (
+            SELECT conname FROM pg_constraint c
+              JOIN pg_class t ON t.oid = c.conrelid
+              JOIN pg_namespace n ON n.oid = t.relnamespace
+             WHERE n.nspname = 'smarttalk' AND t.relname = 'webhook_events' AND c.contype = 'p'
+          )`,
+    );
+    assert.deepEqual(
+      queueIndexes.map((row) => row.indexname),
+      [],
+      "la cola ganó un índice único: revisa si la deduplicación en la entrada es intencional",
+    );
+
+    // (b) La protección real está aguas abajo: un mismo wa_message_id no puede
+    //     repetirse dentro de una conversación.
+    const { rows: messageIndexes } = await client.query(
+      `SELECT indexdef FROM pg_indexes
+        WHERE schemaname = 'smarttalk' AND tablename = 'messages'
+          AND indexname = 'uq_messages_conv_wa_message_id'`,
+    );
+    assert.equal(messageIndexes.length, 1, "falta uq_messages_conv_wa_message_id");
+    assert.match(messageIndexes[0].indexdef, /UNIQUE/);
+    assert.match(messageIndexes[0].indexdef, /conversation_id/);
+    assert.match(messageIndexes[0].indexdef, /wa_message_id/);
+    // Parcial: los mensajes salientes sin id de proveedor no se ven afectados.
+    assert.match(messageIndexes[0].indexdef, /wa_message_id IS NOT NULL/);
+  });
+});
+
 test("13. un checkout expirado no puede activar una suscripción", { skip }, async () => {
   await withClient(async (client) => {
     await inRollback(client, async () => {
@@ -406,10 +580,15 @@ test("13. un checkout expirado no puede activar una suscripción", { skip }, asy
         [ctx.checkout_session_id],
       );
 
+      // El RPC lanza una EXCEPTION, que en PostgreSQL aborta la transacción
+      // entera: sin un SAVEPOINT, cualquier consulta posterior falla con
+      // 25P02 y no se podría comprobar el efecto.
+      await client.query("SAVEPOINT antes_de_expirar");
       await assert.rejects(
         () => finalize(client, ctx, "qa-event-expirado"),
         /checkout_not_pending/,
       );
+      await client.query("ROLLBACK TO SAVEPOINT antes_de_expirar");
 
       const { rows } = await subscriptionsOf(client, ctx);
       assert.equal(rows[0].status, "suspended", "la suscripción no debe activarse con checkout expirado");

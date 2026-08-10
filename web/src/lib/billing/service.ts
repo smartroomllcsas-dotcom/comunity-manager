@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { BILLING_FEATURES } from "@/lib/billing/features";
+import { billingError, billingWarn } from "@/lib/billing/log";
 import type {
   BillingEnforcementMode,
   BillingFeatureCode,
@@ -193,9 +194,12 @@ async function logDecision(
     source: source || null,
   });
   if (error) {
-    console.warn("[billing] could not record decision", {
+    billingWarn("decision_not_recorded", {
+      correlationId: `decision:${organizationId}:${decision.featureCode}`,
+      organizationId,
       code: error.code,
       featureCode: decision.featureCode,
+      source: source || null,
     });
   }
 }
@@ -588,7 +592,9 @@ export async function recordBillingUsage(input: {
   });
 
   if (error) {
-    console.warn("[billing] could not record usage", {
+    billingWarn("usage_not_recorded", {
+      correlationId: `usage:${input.idempotencyKey}`,
+      organizationId: input.organizationId,
       code: error.code,
       featureCode: input.featureCode,
     });
@@ -633,7 +639,9 @@ export async function reserveBillingCapacity(input: {
     p_quantity: Math.max(1, Math.floor(input.requestedUnits ?? 1)),
   });
   if (error || !data) {
-    console.error("[billing] atomic quota reservation failed", {
+    billingError("quota_reservation_failed", {
+      correlationId: `quota:${input.organizationId}:${input.featureCode}`,
+      organizationId: input.organizationId,
       code: error?.code,
       featureCode: input.featureCode,
     });
@@ -671,7 +679,10 @@ export async function consumeBillingCapacity(
     p_resource_id: resourceId || null,
   });
   if (error) {
-    console.error("[billing] atomic quota consumption failed", { code: error.code });
+    billingError("quota_consumption_failed", {
+      correlationId: `reservation:${reservationId}`,
+      code: error.code,
+    });
     return false;
   }
   return Boolean(data);
@@ -684,7 +695,10 @@ export async function releaseBillingCapacity(reservationId: string) {
     p_reservation_id: reservationId,
   });
   if (error) {
-    console.error("[billing] atomic quota release failed", { code: error.code });
+    billingError("quota_release_failed", {
+      correlationId: `reservation:${reservationId}`,
+      code: error.code,
+    });
     return false;
   }
   return Boolean(data);

@@ -138,6 +138,80 @@ export async function GET(request: NextRequest) {
     if (notified.enqueued) suspensionNotifications++;
   }
 
+  // -------------------------------------------------------------------------
+  // D-5 / H-12 · Materializar los downgrades programados.
+  //
+  // El RPC de activación (migración 035) no cambia `plan_id` en un downgrade:
+  // guarda el plan destino en `pending_plan_id` con `change_effective_at` en el
+  // fin del período vigente, para que el cliente conserve su acceso actual
+  // hasta esa fecha. Aquí se aplica cuando llega el momento.
+  // -------------------------------------------------------------------------
+  const { data: pendingChanges, error: pendingError } = await admin
+    .from("subscriptions")
+    .select("id, organization_id, status, plan_id, pending_plan_id, pending_plan_price_id, change_effective_at")
+    .lte("change_effective_at", nowIso);
+  if (pendingError) {
+    return Response.json({ error: pendingError.message }, { status: 500 });
+  }
+
+  let planChangesApplied = 0;
+  for (const subscription of pendingChanges || []) {
+    // `lte` ya descarta los nulos, pero el plan destino es obligatorio para
+    // poder aplicar nada.
+    if (!subscription.pending_plan_id) continue;
+
+    // Snapshot ANTES de escribir: el resto del bucle necesita los valores
+    // previos (plan de origen, fecha efectiva) para la bitácora y para la
+    // organización. Leerlos después de la actualización los devolvería ya
+    // pisados.
+    const fromPlanId = subscription.plan_id;
+    const toPlanId = subscription.pending_plan_id;
+    const toPlanPriceId = subscription.pending_plan_price_id;
+    const effectiveAt = subscription.change_effective_at;
+    const previousStatus = subscription.status;
+    const organizationId = subscription.organization_id;
+
+    const { data: updated, error } = await admin
+      .from("subscriptions")
+      .update({
+        plan_id: toPlanId,
+        plan_price_id: toPlanPriceId,
+        pending_plan_id: null,
+        pending_plan_price_id: null,
+        change_effective_at: null,
+        status_reason: "plan_change_applied",
+      })
+      .eq("id", subscription.id)
+      // Guarda optimista: si otro proceso ya lo aplicó, `change_effective_at`
+      // es null y esta actualización no afecta filas.
+      .lte("change_effective_at", nowIso)
+      .select("id");
+    if (error) continue;
+    if (Array.isArray(updated) && updated.length === 0) continue;
+
+    // La organización sigue al plan sólo cuando el cambio se hace efectivo.
+    await admin
+      .from("organizations")
+      .update({ plan_id: toPlanId })
+      .eq("id", organizationId);
+
+    await admin.from("subscription_events").insert({
+      subscription_id: subscription.id,
+      organization_id: organizationId,
+      previous_status: previousStatus,
+      new_status: previousStatus,
+      reason: "plan_change_applied",
+      actor_type: "system",
+      correlation_id: `plan-change:${subscription.id}:${effectiveAt}`,
+      metadata: {
+        from_plan_id: fromPlanId,
+        to_plan_id: toPlanId,
+        effective_at: effectiveAt,
+      },
+    });
+    planChangesApplied++;
+  }
+
   return Response.json({
     ok: true,
     movedToPastDue,
@@ -145,6 +219,7 @@ export async function GET(request: NextRequest) {
     suspended,
     graceNotifications,
     suspensionNotifications,
+    planChangesApplied,
     processedAt: nowIso,
   });
 }

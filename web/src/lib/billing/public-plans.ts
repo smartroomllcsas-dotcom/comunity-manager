@@ -1,6 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { PaymentGatewayCode } from "@/lib/payments/types";
+import { billingError } from "@/lib/billing/log";
 
 const COMMERCIAL_DESCRIPTIONS: Record<string, string> = {
   "demo-inicial-2026":
@@ -79,7 +80,13 @@ export async function getPublicPlans(): Promise<PublicPlan[]> {
   ]);
 
   if (error) {
-    console.error("[billing] public plans query failed", { code: error.code });
+    // El catálogo público no pertenece a ninguna organización: no hay un id
+    // de entidad que usar, así que la correlación nombra la operación en vez
+    // de fabricar un identificador falso.
+    billingError("public_plans_query_failed", {
+      correlationId: "public-plans:catalog",
+      code: error.code,
+    });
     return [];
   }
 

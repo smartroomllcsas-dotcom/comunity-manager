@@ -574,6 +574,10 @@ export interface Subscription {
   trial_ends_at?: string | null;
   grace_ends_at?: string | null;
   status_reason?: string | null;
+  /** D-5 · Downgrade programado: plan destino y fecha efectiva. */
+  pending_plan_id?: string | null;
+  pending_plan_price_id?: string | null;
+  change_effective_at?: string | null;
   organization?: Organization;
   plan?: Plan;
 }

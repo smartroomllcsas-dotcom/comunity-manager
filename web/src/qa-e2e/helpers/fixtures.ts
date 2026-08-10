@@ -138,6 +138,7 @@ export type LifecycleCase =
   | "cancelled"
   | "renewal"
   | "plan_change"
+  | "plan_downgrade"
   | "scheduled_cancellation";
 
 const DAY_MS = 86_400_000;
@@ -241,6 +242,21 @@ export const LIFECYCLE_FIXTURES: Record<LifecycleCase, LifecycleFixture> = {
       plan_id: "plan-qa",
       current_period_start: behind(15),
       current_period_end: ahead(15),
+    }),
+    hasAccess: true,
+    requiresPayment: false,
+  },
+  plan_downgrade: {
+    subscription: subscriptionRow({
+      status: "active",
+      plan_id: "plan-qa",
+      current_period_start: behind(15),
+      current_period_end: ahead(15),
+      // D-5: el downgrade está programado, pero el acceso actual se conserva
+      // íntegro hasta `change_effective_at`.
+      pending_plan_id: "plan-qa-barato",
+      pending_plan_price_id: "price-qa-barato",
+      change_effective_at: ahead(15),
     }),
     hasAccess: true,
     requiresPayment: false,
