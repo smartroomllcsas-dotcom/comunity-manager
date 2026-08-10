@@ -155,6 +155,10 @@ export default function BillingSettingsPage() {
   const currentPlan = isSuperAdmin || subscription?.status === "cancelled"
     ? null
     : subscription?.plan || (pendingActivation ? null : org?.plan) || null;
+  const reactivationPlanId =
+    subscription?.status === "cancelled"
+      ? subscription.plan?.id || org?.plan?.id || null
+      : null;
   const entitlementLimit = (featureCode: string, fallback: number | null = null) =>
     currentPlan?.entitlements?.find((item) => item.feature_code === featureCode)?.limit_value ?? fallback;
 
@@ -405,10 +409,13 @@ export default function BillingSettingsPage() {
 
         {/* Available Plans */}
         {!isSuperAdmin && <div id="planes-disponibles" className="scroll-mt-6">
-          <h2 className="text-sm font-semibold text-white mb-3">Cambiar plan</h2>
+          <h2 className="text-sm font-semibold text-white mb-3">
+            {reactivationPlanId ? "Reactivar o cambiar plan" : "Cambiar plan"}
+          </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {plans.map((plan) => {
               const isCurrent = currentPlan?.id === plan.id;
+              const isReactivationPlan = reactivationPlanId === plan.id;
               const advisorLimit = plan.entitlements?.find(
                 (item) => item.feature_code === "brand.advisors_total"
               )?.limit_value;
@@ -428,7 +435,7 @@ export default function BillingSettingsPage() {
                 <div
                   key={plan.id}
                   className={`bg-[#1a1f2e] border rounded-lg p-5 flex flex-col ${
-                    isCurrent
+                    isCurrent || isReactivationPlan
                       ? "border-blue-500/50 ring-1 ring-blue-500/20"
                       : "border-[#2d333b] hover:border-[#3d444d]"
                   } transition-all`}
@@ -497,6 +504,7 @@ export default function BillingSettingsPage() {
                           currency={gatewayPrice.currency}
                           gateway={gatewayPrice.provider as PaymentGatewayCode}
                           currentPlanId={currentPlan?.id}
+                          reactivationPlanId={reactivationPlanId}
                         />
                       ))}
                     </div>
