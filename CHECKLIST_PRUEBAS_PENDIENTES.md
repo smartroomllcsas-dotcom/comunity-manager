@@ -17,10 +17,11 @@ declarar salida comercial.
   terminaron sin errores de código.
 - [x] El admin no puede activar una suscripción manualmente: la reactivación
   debe pasar por un pago aprobado.
-- [ ] La migración `033_subscription_reactivation.sql` sigue pendiente de
-  aplicar y verificar en una base QA desechable. Hasta cerrarla, la prueba real
-  de reactivación desde `cancelled` y el despliegue Production permanecen
-  bloqueados.
+- [x] El propietario confirmó `Success. No rows returned` al aplicar la
+  migración `033_subscription_reactivation.sql` en Supabase.
+- [ ] Ejecutar la prueba real de reactivación desde `cancelled` con una compra
+  sandbox y confirmar una sola suscripción activa, período futuro y evento de
+  pago.
 - [ ] Las 7 pruebas PostgreSQL/RLS siguen omitidas porque no hay una base QA
   desechable configurada.
 

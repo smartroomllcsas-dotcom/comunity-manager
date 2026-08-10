@@ -63,11 +63,11 @@ Pruebas nuevas aportadas: **147** (de 187 previas a 334).
 | `src/app/api/admin/subscriptions/route.ts` | `PATCH` endurecido: grafo de transiciones válidas, prohibición de activar sin pago, guarda optimista, idempotencia y registro obligatorio en `subscription_events` con `actor_type='admin'` |
 | `src/app/(dashboard)/settings/billing/page.tsx` | Monta la tarjeta de ciclo de vida; incluye `cancelled` en la consulta de suscripción; ancla `#planes-disponibles` para el salto al checkout; recarga tras cada acción |
 
-### Migración — **NO APLICADA**
+### Migración — **APLICADA EN SUPABASE**
 
 | Archivo | Estado |
 |---|---|
-| `supabase/migrations/20260810000100_033_subscription_reactivation.sql` | Entregada sin ejecutar. Requiere aprobación de Codex (§4) |
+| `supabase/migrations/20260810000100_033_subscription_reactivation.sql` | El propietario confirmó `Success. No rows returned` al ejecutarla en Supabase. Falta la prueba funcional de reactivación (§4) |
 
 ### Pruebas
 
@@ -211,9 +211,11 @@ de `grace_ends_at`/`suspended_at`/`cancelled_at`, evento registrado).
 
 **Advertencias que Codex debe resolver antes de aplicarla:**
 
-1. **No está verificada en ejecución.** No hay base desechable disponible en
-   este entorno, así que el SQL no se ejecutó ni una vez. El arnés que la
-   probaría existe (`tests/postgres-integration.test.mjs`) pero se salta.
+1. **La aplicación SQL fue confirmada por el propietario** con `Success. No
+   rows returned`. El arnés funcional PostgreSQL
+   (`tests/postgres-integration.test.mjs`) todavía se salta sin
+   `QA_DATABASE_URL`, por lo que falta comprobar el comportamiento con una
+   transacción real de pago sandbox.
 2. **Es una decisión de negocio no documentada.** Reutilizar la fila cancelada
    frente a conservarla como histórico y crear una nueva son dos políticas
    válidas. Se implementó la reutilización porque evita el estado ambiguo de dos
@@ -437,7 +439,7 @@ de §6, que hoy se salta.
 
 | # | Riesgo | Severidad | Mitigación / estado |
 |---|---|---|---|
-| 1 | **La migración 033 no fue ejecutada nunca.** Modifica una función `SECURITY DEFINER` que maneja dinero | Alta | Entregada sin aplicar, con rollback documentado. Requiere base desechable + revisión de Codex antes de tocar cualquier entorno |
+| 1 | **La migración 033 modifica una función `SECURITY DEFINER` que maneja dinero** | Alta | Aplicación SQL confirmada; falta probar la reactivación real desde `cancelled` y conservar la evidencia |
 | 2 | **La política de reactivación desde `cancelled` es una decisión de negocio que tomé yo** (reutilizar la fila) | Alta | Documentada en §4 y en la cabecera del SQL. Si el negocio prefiere histórico, descartar la migración |
 | 3 | **El `PATCH` de admin cambió de comportamiento**: ya no permite `→ active` ni `→ trial` | Media | Es lo pedido explícitamente. Si existía un procedimiento operativo que reactivaba así, deja de funcionar y hay que reemplazarlo por el checkout |
 | 4 | La suite QA sigue corriendo contra un Supabase en memoria | Media | El arnés PostgreSQL existe pero se salta; depende del aislamiento QA (P0 de la auditoría, no abordado aquí) |

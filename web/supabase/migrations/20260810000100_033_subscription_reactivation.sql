@@ -1,7 +1,7 @@
 -- Sprint · Reactivación de suscripciones canceladas
 -- ===========================================================================
--- ESTADO: NO APLICADA. Requiere revisión y aprobación de Codex antes de
--- ejecutarse en cualquier base. No fue ejecutada contra QA ni Production.
+-- ESTADO: APLICADA EN LA INSTANCIA SUPABASE CONECTADA.
+-- El propietario confirmó: Success. No rows returned.
 --
 -- Problema que corrige
 -- --------------------

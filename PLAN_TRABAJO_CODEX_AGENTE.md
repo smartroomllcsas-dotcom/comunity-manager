@@ -15,9 +15,11 @@ Proyecto: CommunityManager
   `web/AGENT_NEXT_PHASE_IMPLEMENTATION.md`.
 - [x] La vista de facturación ya no muestra un plan activo cuando la
   suscripción está `cancelled`; la reactivación sigue pasando por checkout.
-- [ ] Aplicar y verificar la migración `033_subscription_reactivation.sql` en
-  una base QA desechable. No se ejecuta automáticamente porque reemplaza una
-  función PostgreSQL que procesa pagos.
+- [x] El propietario confirmó `Success. No rows returned` al aplicar la
+  migración `033_subscription_reactivation.sql` en la instancia Supabase
+  conectada.
+- [ ] Ejecutar y verificar el flujo completo de reactivación en QA; la
+  confirmación SQL por sí sola no sustituye una compra sandbox real.
 - [ ] Ejecutar el flujo real cancelar → periodo vencido → gracia → suspensión
   → checkout de reactivación en QA antes de desplegarlo a Production.
 
