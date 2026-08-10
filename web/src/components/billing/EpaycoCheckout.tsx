@@ -7,8 +7,12 @@ declare global {
   interface Window {
     ePayco?: {
       checkout: {
-        configure(config: { key: string; test: boolean }): {
-          open(params: Record<string, string>): void;
+        configure(config: {
+          sessionId: string;
+          type: "onpage" | "standard";
+          test: boolean;
+        }): {
+          open(): void;
         };
       };
     };
@@ -42,7 +46,7 @@ export function EpaycoCheckout({
       if (!window.ePayco) {
         await new Promise<void>((resolve, reject) => {
           const script = document.createElement("script");
-          script.src = "https://checkout.epayco.co/checkout.js";
+          script.src = "https://checkout.epayco.co/checkout-v2.js";
           script.onload = () => resolve();
           script.onerror = () => reject(new Error("Error cargando ePayco"));
           document.head.appendChild(script);
@@ -58,15 +62,16 @@ export function EpaycoCheckout({
 
       if (!res.ok) throw new Error("Error al crear checkout");
 
-      const { checkoutConfig, publicKey, test } = await res.json();
+      const { sessionId, test } = await res.json();
 
       // Open ePayco checkout
       if (window.ePayco) {
         const handler = window.ePayco.checkout.configure({
-          key: publicKey,
+          sessionId,
+          type: "onpage",
           test: test,
         });
-        handler.open(checkoutConfig);
+        handler.open();
       }
     } catch (error) {
       console.error("Checkout error:", error);

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createCheckoutConfig } from "@/lib/epayco/client";
+import { createEpaycoV2Session } from "@/lib/epayco/client";
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
 
     const { data: agent } = await supabase
       .from("agents")
-      .select("organization_id, email, role")
+      .select("organization_id, email, name, role")
       .eq("id", user.id)
       .single();
 
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
 
     const { data: organization } = await admin
       .from("organizations")
-      .select("name, plan_id")
+      .select("name, plan_id, billing_phone")
       .eq("id", agent.organization_id)
       .single();
     if (!organization) {
@@ -118,19 +118,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const checkoutConfig = createCheckoutConfig({
-      name: `Plan ${plan.name}`,
+    const sessionId = await createEpaycoV2Session({
       description: `Suscripcion al plan ${plan.name} - ${organization.name}`,
       amountMinor: Number(price.amount_minor),
       currency: price.currency,
       email: agent.email,
+      customerName: agent.name,
+      customerPhone: organization.billing_phone,
       checkoutSessionId,
       internalReference,
     });
 
     return Response.json({
-      checkoutConfig,
-      publicKey: process.env.NEXT_PUBLIC_EPAYCO_PUBLIC_KEY,
+      sessionId,
       test: testMode,
       expiresAt: expiresAt.toISOString(),
     });

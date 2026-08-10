@@ -4,6 +4,7 @@ const EPAYCO_PUBLIC_KEY = process.env.NEXT_PUBLIC_EPAYCO_PUBLIC_KEY!;
 const EPAYCO_PRIVATE_KEY = process.env.EPAYCO_PRIVATE_KEY!;
 const EPAYCO_CUSTOMER_ID = process.env.EPAYCO_CUSTOMER_ID!;
 const EPAYCO_P_KEY = process.env.EPAYCO_P_KEY!;
+const EPAYCO_API_BASE_URL = "https://apify.epayco.co";
 
 function normalizeBillingPhone(value: string) {
   const digits = value.replace(/\D/g, "");
@@ -11,6 +12,100 @@ function normalizeBillingPhone(value: string) {
   // without country prefix, plus sign, spaces, or punctuation.
   if (digits.startsWith("57") && digits.length === 12) return digits.slice(2);
   return digits;
+}
+
+async function readEpaycoJson(response: Response) {
+  const text = await response.text();
+  let body: unknown = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = { raw: text.slice(0, 500) };
+  }
+  if (!response.ok) {
+    throw new Error(`ePayco API ${response.status}`);
+  }
+  return body as Record<string, unknown>;
+}
+
+export async function createEpaycoV2Session(params: {
+  description: string;
+  amountMinor: number;
+  currency: string;
+  email: string;
+  customerName?: string;
+  customerPhone?: string | null;
+  checkoutSessionId: string;
+  internalReference: string;
+}) {
+  const basic = Buffer.from(`${EPAYCO_PUBLIC_KEY}:${EPAYCO_PRIVATE_KEY}`).toString(
+    "base64",
+  );
+  const loginResponse = await fetch(`${EPAYCO_API_BASE_URL}/login`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Basic ${basic}`,
+    },
+    cache: "no-store",
+  });
+  const login = await readEpaycoJson(loginResponse);
+  const token = typeof login.token === "string" ? login.token : null;
+  if (!token) throw new Error("ePayco login sin token");
+
+  const normalizedPhone = params.customerPhone
+    ? normalizeBillingPhone(params.customerPhone)
+    : "";
+  const sessionResponse = await fetch(
+    `${EPAYCO_API_BASE_URL}/payment/session/create`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        checkout_version: "2",
+        name: "SMART GROUPS",
+        description: params.description,
+        currency: params.currency.toUpperCase(),
+        amount: Number((params.amountMinor / 100).toFixed(2)),
+        lang: "ES",
+        country: "CO",
+        taxBase: 0,
+        tax: 0,
+        invoice: params.internalReference,
+        response: `${process.env.NEXT_PUBLIC_APP_URL}/settings/billing?payment=success`,
+        confirmation: `${process.env.NEXT_PUBLIC_APP_URL}/api/epayco/confirmation`,
+        method: "POST",
+        dues: 1,
+        uniqueTransactionPerBill: true,
+        extras: {
+          extra1: params.checkoutSessionId,
+          extra2: params.internalReference,
+        },
+        billing: {
+          email: params.email,
+          name: params.customerName || "",
+          ...(normalizedPhone
+            ? { callingCode: "+57", mobilePhone: normalizedPhone }
+            : {}),
+        },
+      }),
+      cache: "no-store",
+    },
+  );
+  const session = await readEpaycoJson(sessionResponse);
+  const sessionData =
+    session.data && typeof session.data === "object"
+      ? (session.data as Record<string, unknown>)
+      : null;
+  const sessionId =
+    sessionData && typeof sessionData.sessionId === "string"
+      ? sessionData.sessionId
+      : null;
+  if (!sessionId) throw new Error("ePayco session sin sessionId");
+  return sessionId;
 }
 
 export function getEpaycoConfig() {

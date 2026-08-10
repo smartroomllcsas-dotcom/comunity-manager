@@ -9,8 +9,12 @@ declare global {
   interface Window {
     ePayco?: {
       checkout: {
-        configure(config: { key: string; test: boolean }): {
-          open(params: Record<string, string>): void;
+        configure(config: {
+          sessionId: string;
+          type: "onpage" | "standard";
+          test: boolean;
+        }): {
+          open(): void;
         };
       };
     };
@@ -27,7 +31,7 @@ async function ensureEpaycoScript() {
   if (window.ePayco) return;
   await new Promise<void>((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>(
-      'script[src="https://checkout.epayco.co/checkout.js"]'
+      'script[src="https://checkout.epayco.co/checkout-v2.js"]'
     );
     if (existing) {
       existing.addEventListener("load", () => resolve(), { once: true });
@@ -39,7 +43,7 @@ async function ensureEpaycoScript() {
       return;
     }
     const script = document.createElement("script");
-    script.src = "https://checkout.epayco.co/checkout.js";
+    script.src = "https://checkout.epayco.co/checkout-v2.js";
     script.onload = () => resolve();
     script.onerror = () => reject(new Error("Error cargando ePayco"));
     document.head.appendChild(script);
@@ -108,10 +112,11 @@ export function PaymentCheckout({
       if (checkout.kind === "epayco") {
         await ensureEpaycoScript();
         const handler = window.ePayco?.checkout.configure({
-          key: checkout.publicKey,
+          sessionId: checkout.sessionId,
+          type: "onpage",
           test: checkout.test,
         });
-        handler?.open(checkout.checkoutConfig);
+        handler?.open();
       }
     } catch (error) {
       alert(error instanceof Error ? error.message : "Error iniciando el pago");
