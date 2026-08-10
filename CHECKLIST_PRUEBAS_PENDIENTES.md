@@ -36,6 +36,12 @@ consideran sustituto de las pruebas de concurrencia, ciclo de vida u outbox.
 
 ### Evidencia disponible
 
+- [x] Evidencia QA de las migraciones `031` y `032` revisada en
+  `web/QA_BILLING_EVIDENCE_CLAUDE.md`: concurrencia de reservas, claim/lease,
+  ownership, backoff, `dead_letter`, idempotencia y cleanup, todos con PASS.
+- [x] Los scripts QA fueron revisados y la limpieza de reservas quedó limitada a
+  los IDs creados por la ejecución; no se permite un borrado amplio por
+  organización y feature.
 - [x] Commits integrados: `31c6cd9` (enforcement) y `f73fd39` (reprocesamiento de excedentes), sobre `ee77782`.
 - [x] `npm run test`: 12 archivos Vitest, 140 pruebas aprobadas, más 6 pruebas Node aprobadas.
 - [x] `npm run lint -- --quiet`: aprobado, sin errores.
@@ -54,15 +60,22 @@ consideran sustituto de las pruebas de concurrencia, ciclo de vida u outbox.
 - [x] Implementar reservas atómicas para contactos, canales, marcas y flujos;
   las migraciones `031` y `032` fueron aplicadas en Supabase y el código quedó
   desplegado manualmente en Production.
-- [ ] Ejecutar dos altas simultáneas en el límite contra una cuenta QA y
-  conservar ambas respuestas, la reserva y el resultado final.
+- [x] Ejecutar en QA la prueba directa del RPC de reserva atómica con dos
+  solicitudes simultáneas y exactamente un cupo disponible; una fue aprobada y
+  otra rechazada con `limit_reached`, con restauración y cleanup verificados.
+- [ ] Ejecutar dos altas simultáneas completas por API/UI contra una cuenta QA y
+  conservar ambas respuestas, la reserva, el alta real y el resultado final.
 - [ ] Separar QA en otro proyecto Supabase y Preview de Vercel. El seed actual apunta a una organización QA dentro del proyecto conectado.
 - [x] Ejecutar aceptación E2E por cada plan con ePayco sandbox y registrar referencia, estado de pago, suscripción y límites observados.
 - [ ] Probar cambio, cancelación, vencimiento, gracia, suspensión y reactivación en una cuenta no productiva.
 - [x] Implementar migración, worker, cron protegido, reintentos y backoff del
   outbox de billing; el deployment manual incluye `/api/cron/billing-outbox`.
-- [ ] Demostrar procesamiento real de un job `pending`, un reintento y una
-  notificación idempotente en Production/QA.
+- [x] Demostrar en QA el procesamiento de jobs sintéticos `pending`, claim
+  exclusivo, ownership, reintentos con backoff, `dead_letter` e idempotencia de
+  `notification_log`; el worker desplegado procesó el caso idempotente y el
+  cleanup dejó cero filas sintéticas.
+- [ ] Ejecutar una notificación real con proveedor sandbox y conservar su
+  evidencia; esta prueba no se realizó deliberadamente.
 - [x] Confirmar en Vercel el valor actual de `BILLING_ENFORCEMENT_MODE`: `hard`, aplicado en Production el 2026-08-06 y cargado en el deployment `dpl_CtXr95p4vkJaTypfy3uW9zY1DdJ2` (`Ready`, smoke test HTTP 200).
 - [x] Confirmar en Vercel el valor `BILLING_ATOMIC_QUOTA_MODE=on` para
   Production y Preview; el deployment manual posterior quedó `Ready`.

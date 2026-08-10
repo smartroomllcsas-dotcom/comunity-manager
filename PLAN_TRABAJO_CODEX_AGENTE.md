@@ -14,8 +14,12 @@ Proyecto: CommunityManager
   completados.
 - [x] Evidencia operativa — `/contacts` abre el modal de alta y una cuenta en
   el límite recibe el rechazo esperado del plan al intentar guardar.
-- [ ] Pendiente — Ejecutar concurrencia real con dos altas simultáneas y
-  demostrar procesamiento idempotente del outbox en QA/Production.
+- [x] Evidencia QA — La prueba directa de reservas atómicas y el outbox quedó
+  ejecutada con resultado PASS; evidencia en
+  `web/QA_BILLING_EVIDENCE_CLAUDE.md`.
+- [ ] Pendiente — Ejecutar dos altas completas simultáneas por API/UI y una
+  notificación real sandbox; la prueba directa del RPC y la idempotencia
+  sintética ya están cerradas.
 
 ## Regla de integración
 
