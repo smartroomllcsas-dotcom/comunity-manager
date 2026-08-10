@@ -24,9 +24,9 @@ declarar salida comercial.
 - [x] El checkout de billing se migró a Smart Checkout v2, con creación de
   sesión en backend y apertura mediante `checkout-v2.js` en Production
   (`dpl_3fc8tcYvbrcL34F6fSM6SbUGbWCd`).
-- [ ] Ejecutar la prueba real de reactivación desde `cancelled` con una compra
-  sandbox y confirmar una sola suscripción activa, período futuro y evento de
-  pago.
+- [x] Ejecutar la prueba real de reactivación desde `cancelled` con una compra
+  sandbox: Demo Inicial fue aprobada por ePayco (ref. `380694488`), la cuenta
+  quedó `active` hasta el 2026-09-10 y la suscripción conservó el plan correcto.
 - [ ] Las 7 pruebas PostgreSQL/RLS siguen omitidas porque no hay una base QA
   desechable configurada.
 
@@ -38,6 +38,16 @@ declarar salida comercial.
   Escala; cada cuenta alcanzó los límites del plan desde la aplicación.
 - [x] Revisadas visualmente las vistas autenticadas `/admin/plans`,
   `/admin/payment-gateways` y `/settings/billing`.
+
+### Evidencia de reactivación — 2026-08-10
+
+- [x] La interfaz mostró `Transacción aprobada` para Demo Inicial por $59.000
+  COP, con tarjeta Visa terminada en `0326` y referencia ePayco `380694488`.
+- [x] Después del retorno a `/settings/billing`, la suscripción mostró estado
+  `Activa`, plan `Demo Inicial` y acceso hasta el 10 de septiembre de 2026.
+- [x] Se corrigió la interfaz para distinguir `Reactivar con ePayco` en el
+  plan cancelado; los intentos anteriores de $149.000 eran cambios de plan,
+  no reactivaciones.
 
 Esta confirmación cierra la validación funcional de planes y la revisión visual
 indicadas en esta actualización. Deben conservarse en el registro QA las

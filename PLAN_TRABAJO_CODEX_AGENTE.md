@@ -25,14 +25,16 @@ Proyecto: CommunityManager
   creada en backend, `checkout-v2.js` en frontend y extras vinculados al
   webhook. Deployment Production `dpl_3fc8tcYvbrcL34F6fSM6SbUGbWCd` en estado
   `READY`.
-- [ ] Ejecutar y verificar el flujo completo de reactivación en QA; la
-  confirmación SQL por sí sola no sustituye una compra sandbox real.
+- [x] Ejecutar y verificar el flujo completo de reactivación en QA mediante una
+  compra sandbox real. Demo Inicial fue aprobado por ePayco (ref. `380694488`)
+  y la misma suscripción quedó `active` hasta el 2026-09-10.
 - [ ] Ejecutar el flujo real cancelar → periodo vencido → gracia → suspensión
   → checkout de reactivación en QA antes de desplegarlo a Production.
 
-Este bloque está implementado y revisado en código, pero no se considera
-cerrado para Production hasta aplicar la migración 033 y ejecutar la prueba
-PostgreSQL real.
+Este bloque está implementado, revisado y validado con una compra sandbox real
+en Production. La prueba correcta usa el mismo plan cancelado (Demo Inicial,
+$59.000); seleccionar Demo Crecimiento inicia un cambio de plan y no prueba la
+reactivación.
 
 ## Estado de ejecución
 
