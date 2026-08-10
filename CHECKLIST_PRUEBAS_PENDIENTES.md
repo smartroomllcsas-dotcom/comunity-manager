@@ -19,6 +19,8 @@ declarar salida comercial.
   debe pasar por un pago aprobado.
 - [x] El propietario confirmó `Success. No rows returned` al aplicar la
   migración `033_subscription_reactivation.sql` en Supabase.
+- [x] Se normalizó el teléfono de facturación antes de enviarlo al checkout
+  legacy de ePayco y se publicó en Production (`dpl_CKYjsRQJw22krASqqJyE8bLMW5v3`).
 - [ ] Ejecutar la prueba real de reactivación desde `cancelled` con una compra
   sandbox y confirmar una sola suscripción activa, período futuro y evento de
   pago.

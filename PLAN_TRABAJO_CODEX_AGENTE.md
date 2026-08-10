@@ -18,6 +18,9 @@ Proyecto: CommunityManager
 - [x] El propietario confirmó `Success. No rows returned` al aplicar la
   migración `033_subscription_reactivation.sql` en la instancia Supabase
   conectada.
+- [x] Se corrigió el formato del teléfono de facturación QA enviado a ePayco
+  (`+57 300 000 0000` → `3000000000`) y se publicó en Production en el
+  deployment `dpl_CKYjsRQJw22krASqqJyE8bLMW5v3`.
 - [ ] Ejecutar y verificar el flujo completo de reactivación en QA; la
   confirmación SQL por sí sola no sustituye una compra sandbox real.
 - [ ] Ejecutar el flujo real cancelar → periodo vencido → gracia → suspensión
