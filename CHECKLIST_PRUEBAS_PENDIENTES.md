@@ -67,8 +67,9 @@ consideran sustituto de las pruebas de concurrencia, ciclo de vida u outbox.
   QA con exactamente un cupo disponible: una respondió `201` y la otra `402`;
   se creó un solo contacto sintético, se conservó la captura y luego se limpió
   el contacto, su reserva y el plan temporal.
-- [ ] Ejecutar dos altas simultáneas desde dos formularios UI contra una cuenta
-  QA y conservar ambas respuestas visuales y el resultado final.
+- [x] Ejecutar dos altas simultáneas desde dos formularios UI contra una cuenta
+  QA: una creó `QA-UI-A` y la otra mostró el rechazo visual del límite; el
+  contacto, la reserva y el plan temporal fueron limpiados/restaurados.
 - [ ] Separar QA en otro proyecto Supabase y Preview de Vercel. El seed actual apunta a una organización QA dentro del proyecto conectado.
 - [x] Ejecutar aceptación E2E por cada plan con ePayco sandbox y registrar referencia, estado de pago, suscripción y límites observados.
 - [ ] Probar cambio, cancelación, vencimiento, gracia, suspensión y reactivación en una cuenta no productiva.
@@ -121,7 +122,8 @@ en memoria y no sustituye la aceptación real con cuentas de QA.
   contactos, canales, marcas y flujos.
 - [x] Probar dos altas simultáneas en el límite con una cuenta QA real mediante
   `POST /api/contacts`: una respuesta `201` y otra `402`, con cleanup verificado.
-- [ ] Repetir la concurrencia desde dos formularios UI simultáneos.
+- [x] Repetir la concurrencia desde dos formularios UI simultáneos; una ventana
+  respondió con alta exitosa y la otra con el mensaje de límite contratado.
 - [ ] Separar QA en un proyecto Supabase y un Preview de Vercel propios.
 - [x] Ejecutar ePayco sandbox con una organización normal para cada uno de los
   tres planes y alcanzar los límites observados desde la aplicación. Las

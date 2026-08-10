@@ -371,3 +371,23 @@ cuenta Resend; no se usaron datos de clientes.
 
 El job fue reclamado y completado por el worker desplegado. El registro se dejó
 en estado final para conservar evidencia auditable de la prueba sandbox.
+
+---
+
+## 11. Concurrencia UI · alta de contactos
+
+Se abrieron dos formularios simultáneos en `/contacts` sobre `QA Agencia
+Inicial` y la marca `[QA] Marca Demo Inicial`, con un único cupo disponible.
+
+| Formulario | Resultado |
+|---|---|
+| `QA-UI-A`, `+5730012345671` | Alta creada y posteriormente limpiada |
+| `QA-UI-B`, `+5730012345672` | Rechazo visual: límite contratado |
+
+La captura entregada por el usuario conserva ambas respuestas visuales. La
+consulta posterior confirmó un solo contacto creado
+(`d6ee28a5-76c9-4525-8385-459488aff860`) y una sola reserva consumida
+(`9737748e-02d7-4fab-99e2-1d57fd121ffc`). Ambos registros fueron eliminados de
+forma exacta; el plan original y el conteo QA `1003` fueron restaurados.
+
+**Resultado: PASS**
