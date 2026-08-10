@@ -5,6 +5,14 @@ const EPAYCO_PRIVATE_KEY = process.env.EPAYCO_PRIVATE_KEY!;
 const EPAYCO_CUSTOMER_ID = process.env.EPAYCO_CUSTOMER_ID!;
 const EPAYCO_P_KEY = process.env.EPAYCO_P_KEY!;
 
+function normalizeBillingPhone(value: string) {
+  const digits = value.replace(/\D/g, "");
+  // ePayco's legacy checkout expects the local Colombian mobile number,
+  // without country prefix, plus sign, spaces, or punctuation.
+  if (digits.startsWith("57") && digits.length === 12) return digits.slice(2);
+  return digits;
+}
+
 export function getEpaycoConfig() {
   return {
     publicKey: EPAYCO_PUBLIC_KEY,
@@ -52,7 +60,10 @@ export function createCheckoutConfig(params: {
 
   // No enviamos un tipo de documento sin su número: ePayco puede rechazar
   // el checkout cuando recibe un bloque de facturación incompleto.
-  if (params.customerPhone) config.mobilephone_billing = params.customerPhone;
+  if (params.customerPhone) {
+    const normalizedPhone = normalizeBillingPhone(params.customerPhone);
+    if (normalizedPhone) config.mobilephone_billing = normalizedPhone;
+  }
 
   return config;
 }
