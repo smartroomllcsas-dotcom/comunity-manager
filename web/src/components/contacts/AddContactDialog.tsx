@@ -83,6 +83,15 @@ export function AddContactDialog({ open, onOpenChange, brandId }: AddContactDial
           <DialogTitle className="text-white">Añadir contacto</DialogTitle>
         </DialogHeader>
 
+        {!brandId && (
+          <p
+            role="alert"
+            className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"
+          >
+            No hay una marca disponible. Recarga la página o verifica la asignación de marcas de tu usuario.
+          </p>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
           <div className="space-y-2">
             <Label htmlFor="contact-name" className="text-[#8b949e]">Nombre</Label>
