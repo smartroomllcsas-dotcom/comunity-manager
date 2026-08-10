@@ -21,6 +21,9 @@ declarar salida comercial.
   migración `033_subscription_reactivation.sql` en Supabase.
 - [x] Se normalizó el teléfono de facturación antes de enviarlo al checkout
   legacy de ePayco y se publicó en Production (`dpl_CKYjsRQJw22krASqqJyE8bLMW5v3`).
+- [x] El checkout de billing se migró a Smart Checkout v2, con creación de
+  sesión en backend y apertura mediante `checkout-v2.js` en Production
+  (`dpl_3fc8tcYvbrcL34F6fSM6SbUGbWCd`).
 - [ ] Ejecutar la prueba real de reactivación desde `cancelled` con una compra
   sandbox y confirmar una sola suscripción activa, período futuro y evento de
   pago.
