@@ -1,12 +1,38 @@
 # Checklist de pruebas pendientes
 
-## Estado actualizado de auditoría - 2026-08-09
+## Estado actualizado de auditoría - 2026-08-10
 
 **Dictamen:** CommunityManager todavía no debe declararse aprobado para salida
 comercial. La base de planes, suscripciones, pagos, límites y aislamiento por
 marca está implementada y `BILLING_ENFORCEMENT_MODE=hard` ya está activo en
 Production, pero faltan pruebas E2E operativas y controles de seguridad antes de
 declarar salida comercial.
+
+### Anotaciones aplicadas en esta sesión
+
+- [x] Reactivación real validada en Production con ePayco sandbox: Demo Inicial,
+  $59.000 COP, referencia `380694488`, respuesta aprobada.
+- [x] La cuenta QA quedó activa hasta el 10 de septiembre de 2026 y conservó
+  el plan Demo Inicial.
+- [x] La causa de los rechazos anteriores quedó identificada: los intentos de
+  $149.000 correspondían a cambio a Demo Crecimiento, no a reactivación.
+- [x] La interfaz publicada muestra `Reactivar con ePayco` para el plan
+  cancelado y mantiene `Pagar con ePayco` para los cambios de plan.
+- [x] La evidencia fue incorporada al plan y subida en el commit `b3afd40`.
+
+### Trabajo delegable al agente
+
+- [ ] Preparar pruebas reproducibles PostgreSQL/RLS sobre una base QA
+  desechable, sin ejecutarlas en Production.
+- [ ] Completar contract tests de ePayco para pagos pendientes, rechazados,
+  firmas y montos alterados, duplicados y concurrencia.
+- [ ] Preparar fixtures de ciclo de vida y comprobar cancelación, vencimiento,
+  gracia, suspensión, renovación y cambio de plan sin duplicar suscripciones.
+- [ ] Preparar matriz E2E con mocks para Facebook, Instagram y WhatsApp.
+- [ ] Revisar backup/restauración, rollback, logs, correlation IDs, PCI y rate
+  limiting; entregar hallazgos y runbook.
+- [ ] Entregar cambios sin deploy, sin `db push`, sin modificar secretos y sin
+  marcar tareas como completadas sin evidencia.
 
 ### Implementación de ciclo de vida revisada — 2026-08-10
 

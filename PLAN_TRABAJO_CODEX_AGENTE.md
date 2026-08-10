@@ -38,6 +38,17 @@ reactivación.
 
 ## Estado de ejecución
 
+### Aplicado y validado — 2026-08-10
+
+- [x] Reactivación real en sandbox: Demo Inicial ($59.000 COP), referencia
+  ePayco `380694488`, resultado aprobado.
+- [x] La cuenta QA volvió a `active` y la interfaz mostró acceso hasta el
+  2026-09-10.
+- [x] La interfaz distingue `Reactivar con ePayco` del cambio de plan; Demo
+  Crecimiento ($149.000) no se usa para validar reactivación.
+- [x] Evidencia y checklist actualizados, commit `b3afd40` subido a la rama
+  `codex/add-manual-contact`.
+
 - [x] B1 — Reservas atómicas implementadas para contactos, canales, marcas y
   flujos; migraciones `031` y `032` aplicadas y deployment manual Production
   listo.
@@ -94,6 +105,29 @@ migración o despliegue correspondiente.
 - No cambiar secretos ni variables de Production.
 - No ejecutar `db push`, deploy ni publicar ramas.
 - No marcar un pendiente como cerrado sin evidencia reproducible.
+
+### A4. Próximas tareas delegables — agente
+
+Estas tareas pueden ejecutarse sin publicar ni modificar Production:
+
+- [ ] Crear un script reproducible de verificación PostgreSQL/RLS para las 7
+  pruebas omitidas, usando variables de entorno y una base QA desechable; no
+  ejecutar el script contra Production.
+- [ ] Completar contract tests locales para ePayco: pendiente, rechazado,
+  firma inválida, monto/moneda/referencia alterados, webhook duplicado y dos
+  webhooks concurrentes.
+- [ ] Preparar fixtures y pruebas de ciclo de vida para `active`, `past_due`,
+  `grace_period`, `suspended` y `cancelled`, verificando que no se creen
+  suscripciones duplicadas.
+- [ ] Revisar las rutas de Facebook, Instagram y WhatsApp y entregar una
+  matriz E2E con mocks, casos cubiertos y casos faltantes; no usar tokens de
+  Production.
+- [ ] Revisar backup, restauración y rollback; entregar un runbook y scripts
+  de comprobación sin ejecutar acciones destructivas.
+- [ ] Auditar logs, correlation IDs, firma del webhook, datos PCI y rate
+  limiting; reportar hallazgos con archivo, línea, riesgo y prueba sugerida.
+- [ ] Actualizar `CHECKLIST_PRUEBAS_PENDIENTES.md` únicamente con evidencias
+  reproducibles y entregar un resumen final sin hacer commit ni push.
 
 ## Frente B — Codex
 
