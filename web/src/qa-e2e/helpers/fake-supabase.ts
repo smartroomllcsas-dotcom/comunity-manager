@@ -13,6 +13,18 @@ export type Rows = Record<string, unknown>[];
 export interface Seed {
   tables?: Record<string, Rows>;
   currentUserId?: string;
+  /**
+   * Índices únicos a emular, por tabla: cada entrada es la tupla de columnas.
+   * Un INSERT que los viole devuelve `{ code: "23505" }` igual que PostgREST,
+   * que es la señal en la que se apoya la deduplicación de webhooks.
+   */
+  uniqueIndexes?: Record<string, string[][]>;
+  /**
+   * Implementaciones de RPC. Sin handler, `rpc()` sólo registra la llamada y
+   * devuelve null (comportamiento histórico). Con handler se puede emular el
+   * efecto de una función SQL sobre el store para probar los guardas de la ruta.
+   */
+  rpcHandlers?: Record<string, (args: unknown, store: Record<string, Rows>) => unknown>;
 }
 
 type Filter = (row: Record<string, unknown>) => boolean;
@@ -20,7 +32,12 @@ type Filter = (row: Record<string, unknown>) => boolean;
 export interface FakeSupabase {
   store: Record<string, Rows>;
   admin: (schema?: string) => FakeClient;
-  server: { auth: { getUser: () => Promise<{ data: { user: { id: string } | null } }> } };
+  // El cliente de servidor expone `from` además de `auth` porque algunas rutas
+  // (p. ej. /api/admin/subscriptions) leen tablas con la sesión del usuario.
+  server: {
+    auth: { getUser: () => Promise<{ data: { user: { id: string } | null } }> };
+    from: (table: string) => FakeQuery;
+  };
   // Registro de llamadas a rpc() para poder aseverar el RPC de activación.
   rpcCalls: Array<{ name: string; args: unknown }>;
 }
@@ -75,6 +92,23 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
     async function terminate(mode: "await" | "maybeSingle" | "single") {
       if (op === "insert") {
         const list = Array.isArray(payload) ? payload : [payload];
+        const indexes = seed.uniqueIndexes?.[table] || [];
+        for (const candidate of list as Record<string, unknown>[]) {
+          for (const columns of indexes) {
+            const clash = store[table].some((row) =>
+              columns.every((column) => row[column] === candidate[column]),
+            );
+            if (clash) {
+              return {
+                data: null,
+                error: {
+                  code: "23505",
+                  message: `duplicate key value violates unique constraint on (${columns.join(", ")})`,
+                },
+              };
+            }
+          }
+        }
         const inserted = list.map((r) => {
           const copy = { ...(r as Record<string, unknown>) };
           // Genera un id sintético cuando la fila no lo trae (INSERT ... RETURNING id).
@@ -113,7 +147,9 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
 
     const builder: FakeQuery = {
       select(_cols, o) {
-        if (op !== "insert") op = "select";
+        // `select()` encadenado sobre insert/update/delete es la forma de
+        // supabase-js de pedir RETURNING; no convierte la operación en lectura.
+        // Sólo registra las opciones (count/head) para el terminador.
         opts = o || {};
         return builder;
       },
@@ -148,7 +184,9 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
     from,
     rpc: async (name: string, args?: unknown) => {
       rpcCalls.push({ name, args });
-      return { data: null, error: null };
+      const handler = seed.rpcHandlers?.[name];
+      if (!handler) return { data: null, error: null };
+      return { data: handler(args, store) ?? null, error: null };
     },
     storage: { from: () => ({ remove: async () => ({ error: null }) }) },
   };
@@ -156,7 +194,10 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
   return {
     store,
     admin: () => client,
-    server: { auth: { getUser: async () => ({ data: { user: { id: currentUserId } } }) } },
+    server: {
+      auth: { getUser: async () => ({ data: { user: { id: currentUserId } } }) },
+      from,
+    },
     rpcCalls,
   };
 }

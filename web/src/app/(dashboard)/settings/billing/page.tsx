@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import type { Organization, Plan, Subscription, Payment } from "@/types/database";
 import { PaymentCheckout } from "@/components/billing/PaymentCheckout";
+import { SubscriptionLifecycleCard } from "@/components/billing/SubscriptionLifecycleCard";
 import { useRestrictedLeads } from "@/hooks/useRestrictedLeads";
 import type { PaymentGatewayCode } from "@/lib/payments/types";
 
@@ -45,6 +46,9 @@ export default function BillingSettingsPage() {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [enabledGateways, setEnabledGateways] = useState<PaymentGatewayCode[]>([]);
+  // Se incrementa tras cancelar o mantener la suscripción para releer el estado
+  // desde la base en lugar de adivinarlo en el cliente.
+  const [reloadToken, setReloadToken] = useState(0);
   const [usage, setUsage] = useState({
     agents: 0,
     advisors: 0,
@@ -98,7 +102,9 @@ export default function BillingSettingsPage() {
             .from("subscriptions")
             .select("*, plan:plans!subscriptions_plan_id_fkey(*, entitlements:plan_entitlements(*))")
             .eq("organization_id", orgId)
-            .in("status", ["trial", "active", "past_due", "suspended"])
+            // `cancelled` se incluye para poder ofrecer la reactivación por
+            // pago; sin ella la pantalla mostraba "Sin plan" sin explicación.
+            .in("status", ["trial", "active", "past_due", "suspended", "cancelled"])
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle(),
@@ -134,7 +140,7 @@ export default function BillingSettingsPage() {
       setLoading(false);
     }
     load();
-  }, [currentAgent?.organization_id]);
+  }, [currentAgent?.organization_id, reloadToken]);
 
   // An approved payment creates the subscription first. Prefer that plan and
   // keep organizations.plan_id as a compatibility fallback for legacy data.
@@ -146,7 +152,7 @@ export default function BillingSettingsPage() {
     ["pending_payment", "checkout_started", "payment_rejected", "payment_failed", "payment_expired", "cancelled"].includes(
       org?.onboarding_status || ""
     );
-  const currentPlan = isSuperAdmin
+  const currentPlan = isSuperAdmin || subscription?.status === "cancelled"
     ? null
     : subscription?.plan || (pendingActivation ? null : org?.plan) || null;
   const entitlementLimit = (featureCode: string, fallback: number | null = null) =>
@@ -187,6 +193,21 @@ export default function BillingSettingsPage() {
             </div>
           </div>
         )}
+        {!isSuperAdmin && (
+          <SubscriptionLifecycleCard
+            subscription={subscription}
+            // Misma regla que el checkout: quien puede contratar un plan es
+            // quien puede darlo de baja. La API valida lo mismo.
+            isAdmin={currentAgent?.role === "admin"}
+            onChanged={() => setReloadToken((token) => token + 1)}
+            onRequestPayment={() => {
+              document
+                .getElementById("planes-disponibles")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          />
+        )}
+
         {/* Current Plan Card */}
         <div className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg p-5">
           <div className="flex items-start justify-between mb-4">
@@ -383,7 +404,7 @@ export default function BillingSettingsPage() {
         )}
 
         {/* Available Plans */}
-        {!isSuperAdmin && <div>
+        {!isSuperAdmin && <div id="planes-disponibles" className="scroll-mt-6">
           <h2 className="text-sm font-semibold text-white mb-3">Cambiar plan</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {plans.map((plan) => {

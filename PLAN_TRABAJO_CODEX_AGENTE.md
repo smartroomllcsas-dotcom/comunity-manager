@@ -3,6 +3,28 @@
 Fecha: 2026-08-09
 Proyecto: CommunityManager
 
+## Fase siguiente — ciclo de vida y pruebas de contrato (2026-08-10)
+
+- [x] Claude entregó cancelación al final del periodo, reversión, estados
+  vencido/gracia/suspendido/cancelado y rutas autenticadas para
+  `/settings/billing`.
+- [x] Codex revisó el diff, ejecutó 334 pruebas Vitest, 6 pruebas Node, lint y
+  build; no hay errores nuevos en `src`.
+- [x] Se añadieron pruebas locales de ciclo de vida, pasarelas, webhooks,
+  outbox y resiliencia; el informe queda en
+  `web/AGENT_NEXT_PHASE_IMPLEMENTATION.md`.
+- [x] La vista de facturación ya no muestra un plan activo cuando la
+  suscripción está `cancelled`; la reactivación sigue pasando por checkout.
+- [ ] Aplicar y verificar la migración `033_subscription_reactivation.sql` en
+  una base QA desechable. No se ejecuta automáticamente porque reemplaza una
+  función PostgreSQL que procesa pagos.
+- [ ] Ejecutar el flujo real cancelar → periodo vencido → gracia → suspensión
+  → checkout de reactivación en QA antes de desplegarlo a Production.
+
+Este bloque está implementado y revisado en código, pero no se considera
+cerrado para Production hasta aplicar la migración 033 y ejecutar la prueba
+PostgreSQL real.
+
 ## Estado de ejecución
 
 - [x] B1 — Reservas atómicas implementadas para contactos, canales, marcas y

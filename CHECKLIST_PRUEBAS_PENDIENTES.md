@@ -8,6 +8,22 @@ marca está implementada y `BILLING_ENFORCEMENT_MODE=hard` ya está activo en
 Production, pero faltan pruebas E2E operativas y controles de seguridad antes de
 declarar salida comercial.
 
+### Implementación de ciclo de vida revisada — 2026-08-10
+
+- [x] Se incorporaron a código la cancelación al final del periodo, la
+  reversión, los estados de gracia/suspensión/cancelación y las acciones
+  visibles en `/settings/billing`.
+- [x] La suite local quedó en 334 pruebas Vitest aprobadas; lint y build
+  terminaron sin errores de código.
+- [x] El admin no puede activar una suscripción manualmente: la reactivación
+  debe pasar por un pago aprobado.
+- [ ] La migración `033_subscription_reactivation.sql` sigue pendiente de
+  aplicar y verificar en una base QA desechable. Hasta cerrarla, la prueba real
+  de reactivación desde `cancelled` y el despliegue Production permanecen
+  bloqueados.
+- [ ] Las 7 pruebas PostgreSQL/RLS siguen omitidas porque no hay una base QA
+  desechable configurada.
+
 ### Confirmación manual más reciente — 2026-08-09
 
 - [x] Credenciales sandbox de ePayco configuradas y aceptadas por el flujo de
