@@ -37,10 +37,10 @@ Actualizacion Vercel 2026-07-30:
 | PayU | Configuracion, WebCheckout y firmas preparados | No; confirmacion pendiente |
 | Renovacion manual | Implementada para ePayco | Pendiente prueba específica antes/después del vencimiento |
 | Renovacion automatica | Solo infraestructura de datos | No habilitar |
-| Limites backend | Integrados y validados en cuentas QA | Concurrencia atómica pendiente |
+| Limites backend | Integrados, con reservas atómicas desplegadas | Falta ejecutar dos altas simultáneas en QA |
 | Cron de vencimiento y gracia | Desplegado, ejecucion diaria y acceso protegido | Pendiente ejecucion autenticada |
-| Outbox y cola | Tablas e indices preparados | No; worker pendiente |
-| Notificaciones de billing | Tabla preparada | No; servicio de envio pendiente |
+| Outbox y cola | Migración `032`, worker y cron desplegados | Falta evidencia de procesamiento real |
+| Notificaciones de billing | Worker, reintentos y backoff implementados | Falta evidencia de envío idempotente |
 | Cambios programados de plan | Campos preparados | No; orquestacion pendiente |
 | Servicios de dominio Fase 2 | Contratos documentados; implementacion parcial | No aprobar como completos |
 | Migraciones `009` y `010` | Aplicadas y verificadas en Supabase `smartmedia` | Completo |
@@ -625,6 +625,9 @@ los crons del deployment anterior. Verifica ambos componentes.
 - [x] Panel de pasarelas validado visualmente el 2026-08-09.
 - [x] ePayco sandbox aprobado end-to-end para Demo Inicial, Demo Crecimiento
   y Demo Escala, llevados hasta sus límites.
+- [x] Alta manual de contacto abre el modal en Production y rechaza con el
+  límite esperado cuando la cuenta ya alcanzó `contacts.total`.
+- [x] Deployment manual Production `Ready` con `BILLING_ATOMIC_QUOTA_MODE=on`.
 - [ ] Renovacion manual aprobada.
 - [ ] Webhook duplicado aprobado.
 - [ ] Cron aprobado.
@@ -652,14 +655,16 @@ los crons del deployment anterior. Verifica ambos componentes.
 - [ ] Renovacion automatica.
 - [ ] Reintentos automaticos de cobro.
 - [ ] Conciliacion automatica multi-pasarela.
-- [ ] Worker de `billing_outbox_jobs`.
+- [x] Worker de `billing_outbox_jobs` implementado y desplegado; falta prueba
+  operativa de un job real.
 - [ ] Envio real desde `notification_logs`.
 - [x] Rate limiting específico para checkout y webhooks implementado y probado;
   falta validación de carga en entorno desplegado.
 - [ ] Orquestacion completa de upgrade/downgrade.
 - [ ] `BILLING_ENFORCEMENT_MODE=observe`.
-- [x] `BILLING_ENFORCEMENT_MODE=hard` activo en Production; quedan pendientes
-  las pruebas operativas de concurrencia y resiliencia.
+- [x] `BILLING_ENFORCEMENT_MODE=hard` y `BILLING_ATOMIC_QUOTA_MODE=on` activos
+  en Production; quedan pendientes las pruebas operativas de concurrencia,
+  outbox y resiliencia.
 
 ## 15. Referencias
 

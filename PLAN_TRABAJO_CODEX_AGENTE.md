@@ -3,6 +3,20 @@
 Fecha: 2026-08-09
 Proyecto: CommunityManager
 
+## Estado de ejecución
+
+- [x] B1 — Reservas atómicas implementadas para contactos, canales, marcas y
+  flujos; migraciones `031` y `032` aplicadas y deployment manual Production
+  listo.
+- [x] B2 — Outbox, leases, reintentos, backoff, cron y notificaciones
+  preparados y desplegados.
+- [x] B3 — Tests, lint, build, documentación, commit y deployment manual
+  completados.
+- [x] Evidencia operativa — `/contacts` abre el modal de alta y una cuenta en
+  el límite recibe el rechazo esperado del plan al intentar guardar.
+- [ ] Pendiente — Ejecutar concurrencia real con dos altas simultáneas y
+  demostrar procesamiento idempotente del outbox en QA/Production.
+
 ## Regla de integración
 
 Codex es el responsable único de la integración final y de subir los cambios.

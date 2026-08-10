@@ -22,6 +22,18 @@ indicadas en esta actualización. Deben conservarse en el registro QA las
 referencias de pago, organización, suscripción, deployment y capturas; no se
 consideran sustituto de las pruebas de concurrencia, ciclo de vida u outbox.
 
+### Confirmación manual de alta de contactos — 2026-08-09
+
+- [x] El deployment manual de Production quedó `Ready` con el ajuste del
+  diálogo de alta manual (`cd97661`).
+- [x] En `/contacts`, el botón **Añadir contacto** abre nuevamente el modal y
+  permite diligenciar el formulario.
+- [x] Una alta manual sintética sobre una cuenta que ya alcanzó `contacts.total`
+  fue rechazada visualmente con el mensaje de límite del plan; no se creó el
+  contacto.
+- [x] La evidencia confirma el enforcement `hard`; queda pendiente guardar el
+  registro SQL de la decisión y ejecutar una prueba de concurrencia real.
+
 ### Evidencia disponible
 
 - [x] Commits integrados: `31c6cd9` (enforcement) y `f73fd39` (reprocesamiento de excedentes), sobre `ee77782`.
@@ -39,12 +51,21 @@ consideran sustituto de las pruebas de concurrencia, ciclo de vida u outbox.
 - [x] Implementar el worker que reclama, libera y reprocesa automáticamente los eventos `pending` cuando la organización amplíe el plan. La migración `030` usa una cola con lease y `SKIP LOCKED`; el cron es `/api/cron/release-contact-overage`.
 - [x] Enforcement backend implementado en posts, flujos/chatbot, reportes, almacenamiento, IA y broadcasts mediante `checkBillingFeature` y respuestas HTTP 402.
 - [x] La migración `030` fue confirmada por el propietario en Supabase antes de desplegar el cron de reprocesamiento.
-- [ ] Hacer atómicos los límites de recursos sujetos a concurrencia. Hoy varias decisiones son consulta de uso seguida de insert/update separado; falta probar y proteger el caso simultáneo de límite + 1.
+- [x] Implementar reservas atómicas para contactos, canales, marcas y flujos;
+  las migraciones `031` y `032` fueron aplicadas en Supabase y el código quedó
+  desplegado manualmente en Production.
+- [ ] Ejecutar dos altas simultáneas en el límite contra una cuenta QA y
+  conservar ambas respuestas, la reserva y el resultado final.
 - [ ] Separar QA en otro proyecto Supabase y Preview de Vercel. El seed actual apunta a una organización QA dentro del proyecto conectado.
-- [ ] Ejecutar aceptación E2E por cada plan con ePayco sandbox y registrar referencia, estado de pago, suscripción y límites observados.
+- [x] Ejecutar aceptación E2E por cada plan con ePayco sandbox y registrar referencia, estado de pago, suscripción y límites observados.
 - [ ] Probar cambio, cancelación, vencimiento, gracia, suspensión y reactivación en una cuenta no productiva.
-- [ ] Completar worker de outbox y notificaciones de billing; las tablas existen, pero no hay evidencia de procesamiento completo.
+- [x] Implementar migración, worker, cron protegido, reintentos y backoff del
+  outbox de billing; el deployment manual incluye `/api/cron/billing-outbox`.
+- [ ] Demostrar procesamiento real de un job `pending`, un reintento y una
+  notificación idempotente en Production/QA.
 - [x] Confirmar en Vercel el valor actual de `BILLING_ENFORCEMENT_MODE`: `hard`, aplicado en Production el 2026-08-06 y cargado en el deployment `dpl_CtXr95p4vkJaTypfy3uW9zY1DdJ2` (`Ready`, smoke test HTTP 200).
+- [x] Confirmar en Vercel el valor `BILLING_ATOMIC_QUOTA_MODE=on` para
+  Production y Preview; el deployment manual posterior quedó `Ready`.
 
 ### Evidencia de prueba sintética ejecutada
 
@@ -175,15 +196,15 @@ La evidencia está en `smarttalk.billing_decision_events` con
 `BILLING_ENFORCEMENT_MODE=hard` se aplica aunque la organización conserve
 `billing_enforcement_mode=observe`.
 
-#### Hallazgo y corrección local — alta manual de contactos
+#### Hallazgo y corrección — alta manual de contactos
 
 El botón visual **Añadir contacto** en `/contacts` no tenía manejador ni ruta
 de alta, por lo que no servía para validar ni crear contactos. Se corrigió
-localmente con un diálogo y `POST /api/contacts`; la ruta autentica, valida la
-marca y su alcance, comprueba duplicados y aplica `contacts.total` mediante
-`checkBillingFeature`. Falta publicar el cambio y ejecutar su prueba manual en
-Production; hasta entonces la validación de contactos se realiza por la ruta
-de importación.
+con un diálogo y `POST /api/contacts`; la ruta autentica, valida la marca y su
+alcance, comprueba duplicados y aplica `contacts.total` mediante
+`checkBillingFeature` y la reserva atómica. El ajuste visual se publicó en el
+commit `cd97661` mediante deployment manual de Production y la prueba de la
+captura confirmó apertura del modal y rechazo `402` al alcanzar el límite.
 
 #### Hallazgo runtime — contacto entrante sobre el límite (2026-08-07)
 
