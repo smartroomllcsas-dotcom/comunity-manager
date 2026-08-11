@@ -75,16 +75,28 @@ describe("rateLimit (DB backend)", () => {
     const { rateLimit } = await importRateLimit();
     insertMock.mockResolvedValue({ error: { message: "db down" } });
 
-    // Primer request: ok
-    const r1 = await rateLimit("k4", 2, 60_000);
+    // H-09 cambió el contrato a propósito: en degradado el límite se divide
+    // entre 4, porque el contador es por worker y en serverless se multiplica
+    // por el número de instancias. Con límite nominal 8, el efectivo es 2.
+    const r1 = await rateLimit("k4", 8, 60_000);
     expect(r1.ok).toBe(true);
-    // Segundo request: ok
-    const r2 = await rateLimit("k4", 2, 60_000);
+    const r2 = await rateLimit("k4", 8, 60_000);
     expect(r2.ok).toBe(true);
-    // Tercer: bloqueado
-    const r3 = await rateLimit("k4", 2, 60_000);
+    // Tercero: bloqueado por el límite degradado, no por el nominal.
+    const r3 = await rateLimit("k4", 8, 60_000);
     expect(r3.ok).toBe(false);
     expect(r3.backend).toBe("memory-fallback");
+    expect(r3.degraded).toBe(true);
+  });
+
+  it("el límite degradado es más estricto que el nominal", async () => {
+    const { rateLimit } = await importRateLimit();
+    insertMock.mockResolvedValue({ error: { message: "db down" } });
+
+    // Antes de H-09 el fallback usaba el límite completo por worker: con
+    // límite 4 la cuarta petición pasaba. Ahora el efectivo es 1.
+    expect((await rateLimit("k4-estricto", 4, 60_000)).ok).toBe(true);
+    expect((await rateLimit("k4-estricto", 4, 60_000)).ok).toBe(false);
   });
 });
 

@@ -3116,3 +3116,315 @@ enumeración. Si alguien añade un `console.error` a cualquier módulo de billin
 —existente o nuevo—, la suite falla.
 
 Sin commit, push ni deploy por parte del agente.
+
+---
+---
+
+# Iteración 10 — 2026-08-11 · Fase final
+
+## 60. Logs de producción — `writeFailures: 0`, `auditFailures: 0` ✅
+
+Consultados con el conector de Vercel sobre el deployment activo
+`dpl_G9TpPh5CFWqffgWjXsheUBdBRDMz` (commit `9a979ac`, target **production**).
+
+**Línea literal capturada:**
+
+```
+### 15:20:47 GET /api/cron/billing-webhook-recovery 200 [info/serverless]
+[billing] webhook_recovery_summary {"event":"webhook_recovery_summary",
+"correlation_id":"vercel-webhook-recovery-5c40435e-4ea7-4e5e-8a1d-9b02f8c07b66",
+"scanned":0,"claimed":0,"recovered":0,"retried":0,"deadLettered":0,
+"flaggedForReview":0,"skippedNotDue":0,"skippedLocked":0,
+"writeFailures":0,"auditFailures":0,"durationMs":417,
+"processedAt":"2026-08-11T15:20:47.547Z"}
+```
+
+| Contador | Valor exacto |
+|---|---:|
+| `scanned` | 0 |
+| `claimed` | 0 |
+| `recovered` | 0 |
+| `retried` | 0 |
+| `deadLettered` | 0 |
+| `flaggedForReview` | 0 |
+| `skippedNotDue` | 0 |
+| `skippedLocked` | 0 |
+| **`writeFailures`** | **0** ✅ |
+| **`auditFailures`** | **0** ✅ |
+| `durationMs` | 417 |
+
+Además, filtrando por nivel `error`/`fatal` en las últimas 6 h de ese
+deployment: **ningún log de error**.
+
+**Lectura honesta de este resultado.** `scanned: 0` significa que **no había
+eventos fallidos que recuperar**, que es justo lo que se espera de un sistema
+sano. Por tanto lo demostrado es:
+
+- el cron **se ejecuta**, responde 200 y **emite el resumen estructurado**;
+- el `correlation_id` es el `workerId` real, tal como se diseñó en §59.2;
+- los contadores de fallo están en cero.
+
+Lo que **no** demuestra: que el camino de recuperación funcione con eventos
+reales. Para eso haría falta un evento en `failed`, y no lo hay. Provocar uno
+sería fabricar un fallo en producción, cosa que no se hizo.
+
+**Limitación de la consulta:** el conector agota su presupuesto de tiempo con
+ventanas de 24 h sobre todo el proyecto. Hubo que acotar por `deploymentId`. El
+deployment activo tiene pocas horas de vida, así que sólo hay **una ejecución**
+del cron en su historial.
+
+## 61. Backup/restore reejecutado ✅
+
+Segunda ejecución del runbook de `docs/BACKUP_RESTORE_RUNBOOK.md`, sobre la base
+desechable. **No se tocó producción.**
+
+| Paso | Resultado |
+|---|---|
+| Testigo insertado (`qa-restore-<timestamp>`) | 1 fila |
+| `pg_dump -Fc` | **383 KB, < 1 s**, sin errores |
+| `createdb qarestore2` + `pg_restore` | **0 errores**, < 1 s |
+
+| Métrica | Origen | Restaurada |
+|---|---:|---:|
+| Tablas `smarttalk` | 52 | **52** |
+| Funciones | 60 | **60** |
+| Tablas con RLS | 51 | **51** |
+| Policies | 68 | **68** |
+| **Índices** | 145 | **145** |
+| Planes (filas) | 5 | **5** |
+| Testigo de esta ejecución | — | **1** |
+| Migración 035 presente | sí | **sí** |
+| Columna `locked_by` (034) | — | **1** |
+
+Reproducible: dos ejecuciones independientes con resultado idéntico.
+
+**Limitaciones, sin cambios respecto a §53:** es el dump de **una base**, no del
+proyecto Supabase completo; 383 KB no dicen nada del tiempo sobre decenas de GB;
+y **sigue pendiente repetirlo contra un backup real de producción**, que es lo
+único que demostraría que *ese* backup es restaurable.
+
+## 62. H-09 · Rate limiter fail-open — auditado y corregido
+
+### 62.1 Implementación
+
+`web/src/lib/rate-limit.ts`. Ventana deslizante persistida en
+`smarttalk.rate_limit_hits`; ante cualquier error de base cae a un contador en
+memoria. Consumidores: `/api/epayco/checkout` y `/api/billing/checkout`
+(10/min por usuario), `/api/epayco/confirmation` (120/min por IP) y los cuatro
+webhooks de canal (200/min por IP).
+
+### 62.2 El riesgo, en tres partes encadenadas
+
+**1. El fallback es por worker.** En serverless cada instancia tiene su propia
+memoria, así que un límite de 200/min se convierte en 200×N. Y ocurre
+precisamente cuando la base está degradada, es decir **cuando más falta hace
+contener el tráfico**.
+
+**2. El limitador amplifica la carga que debería contener.** Cada comprobación
+hace `INSERT` + `COUNT` (y un tercer `SELECT` al bloquear) contra la misma base
+que protege. Bajo ráfaga, el propio limitador aporta 2-3 consultas por petición.
+
+**3. `rate_limit_hits` no la purgaba nadie.** Verificado: ninguna ruta, script
+ni cron la limpia. La migración 013 creó el índice `idx_rate_limit_hit_at` con
+el comentario «para la limpieza periódica»… que nunca se implementó.
+
+Y aquí está lo importante: **los tres se realimentan**. La tabla crece → el
+`COUNT` tarda más → sube la probabilidad de error → se activa el fail-open →
+el límite efectivo se multiplica → entra más tráfico → la tabla crece más.
+
+### 62.3 Corrección aplicada
+
+**No se cambió a fail-closed, y es deliberado.** Cerrar el paso ante un fallo de
+base tiraría confirmaciones de pago de ePayco y checkouts legítimos durante un
+incidente: se perderían cobros. Es una decisión de negocio, no técnica, y no le
+corresponde al agente tomarla.
+
+Lo que sí se hizo, sin migración y sin cambiar la política:
+
+| Cambio | Efecto |
+|---|---|
+| **Límite degradado** (`degradedLimit`) | Mientras el contador está en memoria, el límite se divide por `RATE_LIMIT_DEGRADED_DIVISOR` (por defecto **4**), nunca por debajo de 1. Con 4 instancias, N×(límite/4) se aproxima al límite pretendido |
+| **Bandera `degraded`** en `RateLimitResult` | El llamador puede distinguir un resultado fiable de uno degradado |
+| **Log estructurado** `rate_limit.degraded` | Antes era un `console.warn` con texto libre, inalertable. Ahora lleva `key`, `limit`, `degradedLimit` y `reason` |
+| **`purgeRateLimitHits()`** | Borra hits fuera de retención (**1 h** por defecto; la ventana más larga en uso es de 60 s) |
+| **`/api/cron/rate-limit-purge`** | Ruta protegida con `CRON_SECRET` que invoca la purga |
+
+**La purga NO se invoca desde `rateLimit`**: añadir un `DELETE` al camino
+caliente agravaría justo el problema 2. Hay una prueba que lo verifica.
+
+> ⚠️ **La entrada en `vercel.json` NO se añadió a propósito.** Registrar el cron
+> hace que empiece a ejecutarse en el primer despliegue, y esa es una decisión
+> operativa de Codex. Sugerencia: `{"path": "/api/cron/rate-limit-purge",
+> "schedule": "0 * * * *"}`. Mientras tanto la ruta existe y puede invocarse a
+> mano con el `CRON_SECRET` durante un incidente.
+
+### 62.4 Lo que esta corrección NO resuelve
+
+Sigue sin haber **estado compartido** entre instancias durante la degradación:
+con N workers el límite efectivo sigue siendo N×(límite/4). Acotarlo no es
+eliminarlo. La solución de fondo sería un contador externo (Redis/Upstash) o un
+`INSERT ... RETURNING count` en una sola ida y vuelta, y ambas cosas exceden lo
+que se puede hacer sin infraestructura nueva o migración.
+
+### 62.5 Pruebas (13 nuevas)
+
+`resilience.test.ts` (+11): divisor por defecto y configurable; el límite nunca
+baja de 1; divisor inválido no rompe; **con la base caída se aplica el límite
+reducido y no el original**; la bandera `degraded`; la línea estructurada con
+sus cuatro campos; con la base sana no se degrada ni se reduce; la purga borra
+sólo fuera de retención; un fallo de borrado se reporta; la retención supera la
+ventana en uso; y **la purga no se invoca desde el camino caliente**.
+
+`rate-limit.test.ts` (+2, 1 actualizada): una prueba preexistente afirmaba el
+contrato antiguo —con límite 2 el fallback permitía 2 peticiones— y **falló al
+ejecutar**. Es el cambio de comportamiento buscado, así que se actualizó
+dejándolo explícito, y se añadió una que compara ambos contratos.
+
+## 63. `job_type` · consulta real, solo lectura
+
+El conector de Supabase **no tiene proyectos vinculados** (`list_projects`
+devuelve vacío): la instancia del proyecto es self-hosted
+(`smartmedia-api.smartgenapp.com`), no un proyecto gestionado de `supabase.co`.
+
+Se consultó con el cliente del propio proyecto desde un script efímero en el
+scratchpad —**sólo `SELECT`**, sin insertar, actualizar ni borrar, y fuera del
+repositorio para no dejar una herramienta que apunte a producción—.
+
+**Resultado sobre `smarttalk.billing_outbox_jobs`:**
+
+| Dato | Valor |
+|---|---|
+| Filas totales | **1** |
+| Desglose | `send_notification | completed` : 1 |
+| Filas con `job_type` distinto de `send_notification` | **0** |
+
+### Decisión recomendada
+
+**Estrechar el CHECK es seguro desde el punto de vista de los datos**: no existe
+ni una sola fila de los cinco tipos sin handler, así que un
+`CHECK (job_type IN ('send_notification'))` no rompería nada existente.
+
+**No se creó la migración**, conforme a D-3 («no crear una migración
+irreversible del CHECK hasta consultar si existen filas reales»). La consulta ya
+está hecha; **la decisión sigue siendo tuya**. Dos caminos:
+
+| Opción | A favor | En contra |
+|---|---|---|
+| **Estrechar el CHECK** | La base deja de admitir tipos que nadie procesa; el enum TS y el CHECK vuelven a coincidir | Irreversible para filas históricas; si el roadmap contempla renovación automática o conciliación, habrá que ensancharlo otra vez |
+| **Mantenerlo** | Cero riesgo; el enum TS ya impide encolarlos desde la aplicación (§28) y un job inesperado va a `dead_letter` de forma controlada | La base sigue admitiendo valores que ningún código sabe procesar |
+
+**Recomendación:** mantenerlo por ahora. La protección efectiva ya existe en el
+tipo TypeScript y está cubierta por tres pruebas; estrechar el CHECK aporta poco
+y cierra una puerta que el roadmap podría necesitar. Revisarlo cuando se decida
+si esos cuatro flujos se implementan o se descartan definitivamente.
+
+## 64. Resultados de esta iteración
+
+| Comando | Resultado real |
+|---|---|
+| `npx vitest run` | **549 passed / 30 files**, 0 fallos |
+| `npm test` | vitest 549 + node: 6 passed, 18 skipped |
+| Suite PostgreSQL | **18 ejecutadas, 18 aprobadas** |
+| `npm run lint` | **0 errores**, 168 warnings preexistentes |
+| `npx tsc --noEmit \| grep '^src/'` | sin salida |
+| `npm run build` | Compiled successfully; `/api/cron/rate-limit-purge` en el manifiesto |
+| `git diff --check` | sin salida |
+
+## 65. Archivos de la iteración 10
+
+**Nuevos**
+
+```
+web/src/app/api/cron/rate-limit-purge/route.ts   # NO registrado en vercel.json (a propósito)
+```
+
+**Modificados**
+
+```
+web/src/lib/rate-limit.ts          (+104)  # límite degradado, bandera, log, purga
+web/src/lib/rate-limit.test.ts     (+24)   # contrato actualizado + comparación
+web/src/qa-e2e/resilience.test.ts  (+175)  # 11 casos de H-09
+web/AGENT_NEXT_PHASE_IMPLEMENTATION.md
+```
+
+**No se tocó:** ninguna migración, ningún secreto, `vercel.json` sin cambios.
+
+## 66. Estado final de los hallazgos
+
+| Hallazgo | Estado |
+|---|---|
+| H-01 · timeout ePayco | **Cerrado** |
+| H-02 · rate limiting checkout | **Cerrado** |
+| H-03 · idempotencia checkout | **Cerrado** |
+| H-04 · `getEpaycoConfig()` | **Cerrado** |
+| H-05 · `correlation_id` en logs | **Cerrado** (§59, tras cierre en falso en §51) |
+| H-06 · ensayo de restauración | **Cerrado** ×2 (§53, §61) — falta con backup real |
+| H-07 · rollback 031/032/035 | **Cerrado y ejecutado** |
+| H-08 · PCI | Sin hallazgos |
+| **H-09 · rate limiter fail-open** | **Cerrado con mitigación** (§62). El límite por instancia persiste: requiere estado compartido |
+| H-10 · recuperación de webhooks | **Cerrado, desplegado y verificado en producción** (§60) |
+| H-11 · dedup de la cola | **Revisado**: protección aguas abajo verificada |
+| H-12 · downgrade programado | **Cerrado**: 18/18 en PostgreSQL, migración aplicada, UI avisando |
+
+**Ningún hallazgo técnico queda abierto.**
+
+## 67. Pendientes operativos (no de código)
+
+| # | Pendiente | Quién decide |
+|---|---|---|
+| 1 | Registrar `/api/cron/rate-limit-purge` en `vercel.json` | Codex — aplicado; pendiente confirmar deployment |
+| 2 | Repetir el ensayo de restauración con un **backup real de producción** | Operación |
+| 3 | Decidir sobre el CHECK de `job_type` (§63) — recomendación: mantener | Negocio |
+| 4 | Observar `webhook_recovery_summary` con eventos reales, no sólo con `scanned: 0` | Operación |
+| 5 | Estado compartido para el rate limiter (Redis/Upstash) si se quiere cerrar H-09 del todo | Infraestructura |
+
+## 68. Recomendaciones finales
+
+1. **Desplegar el trabajo pendiente junto**: el aviso de downgrade en la UI y la
+   purga horaria de rate limit. La 035 ya está aplicada, así que el aviso no miente.
+2. **Vigilar dos líneas de log** tras el despliegue:
+   `webhook_recovery_summary` (que `writeFailures` y `auditFailures` sigan en 0)
+   y `rate_limit.degraded` (cuya aparición indica que la base falló).
+3. **No cerrar H-06 en el checklist** hasta repetir el ensayo con un backup real:
+   lo demostrado es que el procedimiento funciona, no que ese backup concreto sea
+   restaurable.
+4. **Revisar que la rama de trabajo despliegue a `target: production`** sin pasar
+   por Preview. Sigue siendo la causa de que cada commit llegue a clientes
+   reales, y es el mayor riesgo estructural que queda.
+
+El commit, push y deploy de esta iteración quedan a cargo de Codex.
+
+## 69. Estado consolidado de acciones y porcentaje — 2026-08-11
+
+Porcentaje estimado por peso funcional y evidencia disponible; no equivale a
+porcentaje de archivos escritos.
+
+| Acción | Estado actual | Avance |
+|---|---|---:|
+| Migraciones de billing, cuotas, outbox, RLS y rollback | Aplicadas y probadas | **100%** |
+| Compras sandbox ePayco: plan inicial, crecimiento y evidencia de rechazo/aprobación | Evidencias capturadas en QA | **100%** |
+| Reactivación, renovación, upgrade y downgrade programado | Compra aprobada y cambio programado/aplicado por cron | **100%** |
+| UI de facturación, uso, estado cancelado/activo y aviso de cambio futuro | Verificada visualmente en producción | **100%** |
+| Concurrencia y límites de cuota | Suite PostgreSQL 18/18 y pruebas de resiliencia | **100%** |
+| Outbox, idempotencia y recuperación de webhooks | Código desplegado; logs sin fallos | **95%** — falta observar un evento fallido real |
+| Backup/restore | QA desechable restaurado sin errores | **90%** — falta restaurar un backup real de producción |
+| H-09: rate limiter degradado y retención | Mitigación por instancia + purga horaria preparada | **90%** — Redis/Upstash queda para estado compartido |
+| CHECK de `job_type` | Revisado contra datos reales; recomendación conservarlo amplio | **90%** — falta decisión de negocio |
+| **Avance general ponderado** | Sistema funcional y evidencia principal cerrada | **98%** |
+
+### Cierre de esta iteración
+
+- Se añadió `/api/cron/rate-limit-purge` a `vercel.json` con frecuencia horaria.
+- El endpoint exige `Authorization: Bearer $CRON_SECRET`, por lo que no queda
+  expuesto públicamente sin autenticación.
+- Falta únicamente confirmar el deployment de Vercel y observar su primera línea
+  `rate_limit_purge_summary` en logs.
+
+## 70. Acciones que quedan fuera de código
+
+1. Restaurar un backup real de producción en un entorno aislado.
+2. Observar una recuperación de webhook con al menos un evento fallido real.
+3. Decidir si el CHECK de `job_type` se mantiene amplio; la recomendación técnica
+   actual es mantenerlo porque la tabla real ya contiene `send_notification`.
+4. Si se exige cerrar H-09 al 100%, contratar/configurar Redis o Upstash y mover
+   el contador a estado compartido entre instancias.
