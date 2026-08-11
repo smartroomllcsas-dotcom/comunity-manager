@@ -154,6 +154,12 @@ export async function POST(
       if (!conv) {
         return NextResponse.json({ error: "not_found" }, { status: 404 });
       }
+      if (!conv.channel_type) {
+        return NextResponse.json(
+          { error: "channel_type_unavailable" },
+          { status: 422 },
+        );
+      }
       platform = conv.channel_type;
       recipientHandle = conv.contact_id;
       channelId = conv.channel_id;

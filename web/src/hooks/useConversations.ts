@@ -105,6 +105,10 @@ export function useConversations(initialData: Conversation[] = []) {
       }
       return filtered;
     },
-    enabled: !!agent,
+    // La autorización vive en la ruta API y usa la sesión del servidor. El
+    // login local no siempre hidrata una sesión Supabase en el navegador; si
+    // dependemos de `useCurrentAgent` aquí, el filtro por marca nunca dispara
+    // la consulta y se queda mostrando sólo el `initialData` del servidor.
+    enabled: true,
   });
 }

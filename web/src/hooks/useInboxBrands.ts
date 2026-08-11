@@ -1,6 +1,5 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
-import { useCurrentAgent } from "./useCurrentAgent";
 import type { InboxBrand } from "@/lib/inbox/brand-display";
 
 /**
@@ -11,10 +10,8 @@ import type { InboxBrand } from "@/lib/inbox/brand-display";
  * seleccionarla ni verá su nombre.
  */
 export function useInboxBrands(initialData: InboxBrand[] = []) {
-  const { data: agent } = useCurrentAgent();
-
   return useQuery<InboxBrand[]>({
-    queryKey: ["inbox-brands", agent?.organization_id],
+    queryKey: ["inbox-brands"],
     initialData,
     queryFn: async () => {
       const response = await fetch("/api/inbox/brands", { cache: "no-store" });
@@ -25,6 +22,5 @@ export function useInboxBrands(initialData: InboxBrand[] = []) {
       const { brands } = (await response.json()) as { brands: InboxBrand[] };
       return brands || [];
     },
-    enabled: !!agent,
   });
 }

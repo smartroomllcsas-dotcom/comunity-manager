@@ -79,7 +79,10 @@ export async function getAccessibleConversation(
 
   let query = admin
     .from("conversations")
-    .select("id, organization_id, brand_id, channel_id, contact_id, channel_type, assigned_agent_id, status, contact:contacts(visibility_status)")
+    // `conversations` no tiene una columna channel_type. El tipo vive en la
+    // tabla relacionada channels; lo normalizamos abajo para los consumidores
+    // antiguos que todavía leen conv.channel_type.
+    .select("id, organization_id, brand_id, channel_id, contact_id, assigned_agent_id, status, channel:channels(type), contact:contacts(visibility_status)")
     .eq("id", conversationId)
     .eq("organization_id", agent.organization_id);
 
@@ -87,5 +90,10 @@ export async function getAccessibleConversation(
 
   const { data, error } = await query.maybeSingle();
   if (error) throw error;
-  return data;
+  if (!data) return data;
+
+  return {
+    ...data,
+    channel_type: (data.channel as { type?: string } | null)?.type ?? null,
+  };
 }
