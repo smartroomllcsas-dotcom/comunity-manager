@@ -2903,6 +2903,35 @@ repetir restauración con un backup real de producción y decidir el CHECK de
 | `/settings/billing` sin sesión | HTTP 307 hacia autenticación |
 | `/api/cron/billing-lifecycle` sin autorización | HTTP 401 |
 
+## 60.3 Prueba funcional de downgrade programado — **APROBADA**
+
+El propietario ejecutó el flujo sandbox desde **Demo Crecimiento** hacia
+**Demo Inicial**. ePayco mostró **Transacción aprobada**, referencia
+`380844738`, el 2026-08-11.
+
+La consulta posterior en Supabase confirmó:
+
+| Campo | Resultado |
+|---|---|
+| `status` | `active` |
+| `plan_id` actual | `8debac97-2a60-4569-ab8a-7f3d39409d84` |
+| `pending_plan_id` | `9c06e41c-839a-4d47-86b2-88fd3c3ba42e` |
+| `status_reason` | `plan_downgrade_scheduled` |
+| `change_effective_at` | `2026-10-10 18:53:38 UTC` |
+| `current_period_end` | `2026-11-10 18:53:38 UTC` |
+
+Esto demuestra que el pago no cambia el plan ni recorta el acceso de inmediato:
+el plan actual queda vigente hasta la fecha efectiva y el plan destino queda
+pendiente. No se debe repetir el pago.
+
+### Validación final pendiente
+
+Cuando llegue `change_effective_at`, el cron debe dejar `pending_plan_id` y
+`pending_plan_price_id` en `NULL`, mover `plan_id`/`plan_price_id` al plan
+destino, actualizar `organizations.plan_id` y registrar
+`reason = 'plan_change_applied'`. La próxima ejecución diaria posterior a la
+fecha efectiva es la que cierra esta última parte del ciclo.
+
 ---
 ---
 
