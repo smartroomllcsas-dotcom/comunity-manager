@@ -3372,7 +3372,7 @@ web/AGENT_NEXT_PHASE_IMPLEMENTATION.md
 
 | # | Pendiente | Quién decide |
 |---|---|---|
-| 1 | Registrar `/api/cron/rate-limit-purge` en `vercel.json` | Codex — aplicado; pendiente confirmar deployment |
+| 1 | Registrar `/api/cron/rate-limit-purge` en `vercel.json` | Codex — aplicado y desplegado en producción |
 | 2 | Repetir el ensayo de restauración con un **backup real de producción** | Operación |
 | 3 | Decidir sobre el CHECK de `job_type` (§63) — recomendación: mantener | Negocio |
 | 4 | Observar `webhook_recovery_summary` con eventos reales, no sólo con `scanned: 0` | Operación |
@@ -3417,8 +3417,27 @@ porcentaje de archivos escritos.
 - Se añadió `/api/cron/rate-limit-purge` a `vercel.json` con frecuencia horaria.
 - El endpoint exige `Authorization: Bearer $CRON_SECRET`, por lo que no queda
   expuesto públicamente sin autenticación.
-- Falta únicamente confirmar el deployment de Vercel y observar su primera línea
-  `rate_limit_purge_summary` en logs.
+- Deployment confirmado: `dpl_GECsNT6GWsJLoZ1JexzVCTP7AHD4`, estado `READY`,
+  target `production`, alias `https://www.comunitymanager.io`.
+- Validaciones HTTP realizadas: `/api/health` devuelve `200` y el nuevo cron sin
+  `Authorization` devuelve `401` (`{"error":"Unauthorized"}`).
+- Queda como observación operativa ver la primera línea
+  `rate_limit_purge_summary` en logs tras su primera ejecución horaria.
+
+## 71. Evidencia de publicación — 2026-08-11
+
+| Evidencia | Resultado |
+|---|---|
+| Commit publicado | `3f66be3 feat(rate-limit): schedule automatic hit purge` |
+| Rama publicada | `codex/add-manual-contact` |
+| Deployment | `dpl_GECsNT6GWsJLoZ1JexzVCTP7AHD4` |
+| Target | `production` |
+| Health | `200` |
+| Cron sin credenciales | `401 Unauthorized` |
+| Cron programado | `/api/cron/rate-limit-purge` cada hora |
+
+Con esta publicación, la acción de código y despliegue queda en **100%**; las
+acciones restantes son observaciones/decisiones operativas descritas en §70.
 
 ## 70. Acciones que quedan fuera de código
 
