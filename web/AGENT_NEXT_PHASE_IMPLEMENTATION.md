@@ -3854,3 +3854,216 @@ Los cinco dependen de accesos, infraestructura, decisiones de producto o del
 paso del tiempo. **Ninguno es trabajo de código pendiente.**
 
 Sin commit, push ni deploy por parte del agente.
+
+---
+
+# Iteración 13 · Aislamiento visual por marca en el Inbox
+
+## 85. Qué se pedía y qué principio lo gobierna
+
+El Inbox mostraba el canal de cada conversación, pero no la **marca**. Con
+varias marcas conectadas al mismo tipo de canal, dos tarjetas «WhatsApp Ventas»
+son indistinguibles: el asesor no sabe en nombre de quién está respondiendo.
+
+El requisito tiene dos mitades que conviene no confundir, porque se validan de
+forma distinta:
+
+| | Qué es | Dónde vive | Cómo se prueba |
+|---|---|---|---|
+| **Presentación** | Ver el nombre de la marca y poder acotar la vista | Componentes React | Lógica pura + estructura |
+| **Autorización** | Qué marcas *puede* ver ese usuario | Rutas de API | Ejecutando las rutas reales |
+
+**El filtro nuevo no autoriza nada.** Es una comodidad visual. Quien decide el
+alcance sigue siendo `getAgentBrandIds()` en el backend, y ante un `brandId`
+ajeno la ruta responde 403 aunque la interfaz nunca haya ofrecido esa opción.
+Esa separación está escrita en la cabecera de `brand-display.ts` para que no se
+pierda en la próxima refactorización.
+
+Segundo principio, también fijado por prueba: **la marca se identifica por
+`brand_id`, jamás por el nombre del canal.** Deducirla del nombre daría una
+etiqueta plausible y equivocada, que es la peor clase de error en una interfaz
+multimarca.
+
+## 86. Alcance por rol, tal como quedó verificado
+
+| Rol / situación | `getAgentBrandIds()` | Marcas visibles | Conversaciones |
+|---|---|---|---|
+| `agency_user` | `null` (sin restricción) | Todas las de **su** organización | Todas las de su organización |
+| Super admin | `null` | Todas las de su organización | Todas |
+| `brand_admin` | `[su marca]` | Sólo la suya | Sólo la suya |
+| `brand_advisor` | `[…asignaciones]` | Sólo `brand_advisor_assignments` | Sólo esas |
+| Con alcance por marca y **sin asignaciones** | `[]` | Ninguna | **Cero** (`{conversations: [], nextCursor: null}`) |
+| Cualquiera, pidiendo `brandId` ajeno | — | — | **403 «No autorizado para esta marca»** |
+
+Un matiz que la prueba fija explícitamente: las asignaciones se leen filtrando
+también por `organization_id`, así que una asignación de **otra** organización
+no amplía el alcance. El asesor huérfano del fixture tiene una asignación en
+`org-ajena` y aun así ve cero marcas y cero conversaciones.
+
+## 87. Un defecto real que apareció al ejecutar
+
+Escribiendo las pruebas contra la ruta real —no contra una copia de su lógica—
+la primera ejecución devolvió **una sola conversación** donde debía devolver
+tres. La causa no era el alcance por marca:
+
+```ts
+// antes
+const rawLimit = Number(searchParams.get("limit"));
+const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 30;
+```
+
+`searchParams.get("limit")` devuelve `null` cuando el parámetro no viene, y
+`Number(null)` es **`0`**, no `NaN`. `Number.isFinite(0)` es `true`, así que la
+rama del `30` por defecto era **inalcanzable** y el clamp dejaba `limit = 1`:
+la ruta paginaba de una en una y devolvía un `nextCursor` en cada respuesta.
+
+No se veía en producción por casualidad: el único consumidor
+(`useConversations`) manda siempre `limit=50`. Cualquier otro llamador —una
+integración, una prueba manual con `curl`— habría recibido una sola fila.
+
+Corregido en `src/app/api/inbox/conversations/route.ts` distinguiendo «no vino»
+de «vino un cero», con dos pruebas de regresión: sin `limit` la página es la del
+contrato, y `limit` inválido (`0`, `-5`, `abc`) cae al valor por defecto en vez
+de a 1.
+
+## 88. Archivos
+
+**Nuevos**
+
+```
+web/src/lib/inbox/brand-display.ts             # etiqueta, fallback y opciones del filtro (lógica pura)
+web/src/app/api/inbox/brands/route.ts          # GET marcas permitidas — sólo id y name
+web/src/hooks/useInboxBrands.ts                # React Query sobre /api/inbox/brands
+web/src/components/inbox/BrandTag.tsx          # etiqueta reutilizable, con data-brand-id
+web/src/qa-e2e/inbox-brand-visibility.test.ts  # 31 pruebas del requisito
+```
+
+**Modificados**
+
+```
+web/src/app/api/inbox/conversations/route.ts   # corrección del limit por defecto (§87)
+web/src/stores/inbox.ts                        # estado brandFilter + setBrandFilter
+web/src/hooks/useConversations.ts              # brandFilter → ?brandId= y queryKey
+web/src/components/inbox/ConversationFilters.tsx # selector «Marca» (siempre visible)
+web/src/components/inbox/InboxChannelsBar.tsx  # marca en cada tarjeta de canal
+web/src/components/inbox/ConversationItem.tsx  # marca junto al canal en la lista
+web/src/components/inbox/ChatWindow.tsx        # marca en el encabezado del chat abierto
+web/AGENT_NEXT_PHASE_IMPLEMENTATION.md         # esta sección
+```
+
+Sin migraciones nuevas, sin tocar RLS, sin tocar secretos.
+
+### Por qué el filtro acabó en `ConversationFilters` y no en `InboxChannelsBar`
+
+Primero se colocó en la barra de canales, junto a los chips de canal. Al
+revisar `InboxClient` resultó que esa barra se renderiza tras
+`{showTopPanel && …}`: un filtro obligatorio habría quedado oculto por defecto.
+Se movió a `ConversationFilters`, que se renderiza siempre encima de la lista.
+**El filtro de canal se conserva** tal como estaba, en la barra superior.
+
+## 89. Pruebas ejecutadas
+
+`src/qa-e2e/inbox-brand-visibility.test.ts` — **31 pruebas, 31 en verde.**
+
+Las de alcance corren contra las **rutas reales** (`/api/inbox/brands`,
+`/api/inbox/conversations`, `/api/inbox/channels`) con el Supabase en memoria de
+QA; no reimplementan la lógica de la ruta.
+
+| Prueba obligatoria | Cómo se validó | Resultado |
+|---|---|---|
+| `agency_user` ve todas sus marcas | GET `/api/inbox/brands` → las 3 de su org, ninguna ajena | ✅ |
+| `brand_admin` sólo ve la suya | GET `/api/inbox/brands` → `[Marca A]` | ✅ |
+| `brand_advisor` sólo ve sus asignaciones | GET `/api/inbox/brands` → sus 2 marcas | ✅ |
+| Sin asignación, cero conversaciones | GET `/api/inbox/conversations` → `{conversations: [], nextCursor: null}` | ✅ |
+| `brandId` no autorizado → 403 | Asesor pide `brandId` de Marca A | ✅ 403 «No autorizado para esta marca» |
+| Nombre en canal, conversación y chat | `brand-display` + estructura de los 3 componentes | ✅ |
+
+Cobertura añadida más allá del mínimo pedido:
+
+- Filtrar por una marca **propia** acota de verdad el resultado a esa marca.
+- Un `brandId` de **otra organización** no devuelve filas ni siquiera a un
+  `agency_user` sin restricción: la consulta sigue anclada a `organization_id`.
+- La **búsqueda** no amplía el alcance (requisito 12).
+- Los canales llegan con su `brand_id` y el asesor sólo recibe los suyos.
+- La whitelist `CHANNEL_PUBLIC_COLUMNS` incluye `brand_id` y **no** contiene
+  `access_token`, `page_access_token`, `webhook_verify_token` ni `app_secret`.
+- Fallback: nombre nulo, nombre en blanco y marca no devuelta por la API dan
+  `Marca no disponible · <8 primeros caracteres del id>`; sin `brand_id`, `Sin marca`.
+- El selector sólo ofrece lo que devolvió la API, ordenado con `localeCompare("es")`.
+- Cambiar de marca suelta la conversación abierta (podría ser de la marca
+  anterior y quedaría visible fuera de su filtro).
+- Ningún componente deduce la marca de `channel.name` ni de `channel.type`.
+
+### Suite completa
+
+```
+npm test    → Test Files 31 passed | 1 skipped (32)
+              Tests 580 passed | 4 skipped (584)
+              node --test: 25 tests, 0 fail (19 skipped: requieren PG)
+npm run lint → ✖ 168 problems (0 errors, 168 warnings)   ← warnings preexistentes; 0 en los archivos nuevos
+npm run build → compilado sin errores, todas las rutas generadas
+```
+
+## 90. Evidencia de que el filtro es sólo visual
+
+Tres hechos comprobables, no una afirmación:
+
+1. **La ruta rechaza lo que la interfaz nunca ofreció.** La prueba del 403 pide
+   `brandId` de Marca A con la sesión de un asesor que sólo tiene B y C. El
+   selector jamás mostró Marca A; el 403 lo emite igualmente
+   `/api/inbox/conversations`, no el cliente.
+2. **Sin filtro, el alcance ya está acotado.** Las pruebas de `brand_admin` y
+   `brand_advisor` llaman a la ruta **sin** `brandId`. Aun así reciben sólo sus
+   marcas, porque el `.in("brand_id", assignedBrandIds)` lo aplica el servidor.
+3. **El catálogo del selector lo decide el servidor.** `/api/inbox/brands`
+   aplica `getAgentBrandIds()` antes de consultar `cm_clients` y corta en seco
+   con `{brands: []}` cuando el usuario tiene alcance por marca sin
+   asignaciones. `brandFilterOptions()` no inventa opciones: mapea lo recibido.
+
+Dicho al revés: si alguien manipulara el `<select>` en el navegador para enviar
+un `brandId` ajeno, recibiría 403. Y si desactivara el filtro por completo,
+seguiría viendo sólo sus marcas.
+
+## 91. Qué **no** se validó, y por qué
+
+- **No hay pruebas de DOM.** El proyecto no tiene `jsdom` ni
+  `@testing-library/react`, y no se instalaron dependencias nuevas. La
+  presencia de la marca en los tres puntos se verifica sobre la lógica pura
+  (`brandLabel`) y sobre el código de los componentes: que rendericen
+  `<BrandTag brandId={…brand_id}>` y consuman `useInboxBrands`. Es verificación
+  **estructural**, no un render real. La misma limitación ya declarada en §5.
+- **No se ejecutó contra PostgreSQL real.** El Supabase en memoria no proyecta
+  columnas, así que «la ruta no devuelve `access_token`» se comprueba sobre la
+  whitelist del código fuente, no sobre una respuesta real.
+- **No se probó en el navegador.** Sin commit ni deploy, no hay build
+  desplegado que abrir.
+- `/api/inbox/conversations/bulk-close` y `/api/inbox/contacts/search` **no**
+  aplican alcance por marca. No es un hallazgo: son endpoints operativos
+  protegidos por `CRON_SECRET`, sin sesión de usuario, fuera del recorrido del
+  Inbox. Se deja anotado por si algún día se exponen a la interfaz.
+
+## 92. Matriz de avance actualizada
+
+Reemplaza a la de §69 en la fila nueva; el resto se mantiene.
+
+| Frente | Estado | Avance |
+|---|---|---|
+| Migraciones de billing, cuotas, outbox, RLS y rollback | Aplicadas y probadas | **100%** |
+| Compras sandbox ePayco | Evidencias capturadas en QA | **100%** |
+| Reactivación, renovación, upgrade y downgrade programado | Cerrado por cron | **100%** |
+| UI de facturación y estados | Verificada en producción | **100%** |
+| Concurrencia y límites de cuota | Suite PostgreSQL 18/18 | **100%** |
+| **Aislamiento visual por marca en el Inbox** | **31/31 pruebas; alcance validado contra las rutas reales** | **95%** — falta verlo en el navegador tras el deploy de Codex |
+| Outbox, idempotencia y recuperación de webhooks | Worker real validado en QA 4/4 (§78) | **98%** |
+| Backup/restore | QA desechable restaurado 3 veces (§72) | **90%** |
+| H-09: rate limiter y retención | Purga desplegada y ejecutada (§79) | **90%** |
+| CHECK de `job_type` | Recomendación formal: conservarlo (§74) | **90%** |
+| **Avance general ponderado** | | **98%** |
+
+La fila nueva no llega al 100% por una sola razón, y conviene que quede
+explícita: **nadie ha visto todavía la etiqueta en pantalla.** La lógica está
+probada y el alcance también, pero la comprobación visual —que la marca se lea
+bien en la tarjeta, en la conversación y en el encabezado, y que el selector se
+vea correctamente en la columna de filtros— exige el deploy que hará Codex.
+
+Sin commit, push ni deploy por parte del agente.

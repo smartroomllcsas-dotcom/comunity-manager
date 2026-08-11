@@ -6,6 +6,9 @@ import { format, isToday, isYesterday } from "date-fns";
 import { es } from "date-fns/locale";
 import { Clock } from "lucide-react";
 import { ChannelAvatarMark, ChannelBadge } from "./ChannelBadge";
+import { BrandTag } from "./BrandTag";
+import { useInboxBrands } from "@/hooks/useInboxBrands";
+import { indexBrands } from "@/lib/inbox/brand-display";
 
 interface ConversationItemProps {
   conversation: Conversation;
@@ -25,6 +28,8 @@ export function ConversationItem({ conversation, isSelected, onClick }: Conversa
   const displayName = contact?.name || contact?.wa_id || "Desconocido";
   const assignedAgent = conversation.assigned_agent;
   const isSnoozed = !!conversation.snoozed_until;
+  const { data: brands } = useInboxBrands();
+  const brandsById = indexBrands(brands);
 
   return (
     <button
@@ -80,6 +85,10 @@ export function ConversationItem({ conversation, isSelected, onClick }: Conversa
               {formatTimestamp(conversation.updated_at)}
             </span>
           </div>
+        </div>
+        {/* Marca de la conversación, resuelta por brand_id. */}
+        <div className="mt-1">
+          <BrandTag brandId={conversation.brand_id} brandsById={brandsById} />
         </div>
         <div className="flex items-center justify-between mt-0.5 gap-2">
           <p className={cn(

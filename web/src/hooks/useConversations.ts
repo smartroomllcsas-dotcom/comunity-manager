@@ -13,6 +13,7 @@ export function useConversations(initialData: Conversation[] = []) {
   const searchQuery = useInboxStore((s) => s.searchQuery);
   const statusFilter = useInboxStore((s) => s.statusFilter);
   const channelFilter = useInboxStore((s) => s.channelFilter);
+  const brandFilter = useInboxStore((s) => s.brandFilter);
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -56,13 +57,16 @@ export function useConversations(initialData: Conversation[] = []) {
   }, [agent?.organization_id, queryClient]);
 
   return useQuery<Conversation[]>({
-    queryKey: ["conversations", filter, searchQuery, statusFilter, channelFilter],
+    queryKey: ["conversations", filter, searchQuery, statusFilter, channelFilter, brandFilter],
     initialData,
     queryFn: async () => {
       const params = new URLSearchParams();
       if (filter && filter !== "all") params.set("filter", filter);
       if (statusFilter && statusFilter !== "all") params.set("status", statusFilter);
       if (channelFilter && channelFilter !== "all") params.set("channel", channelFilter);
+      // El filtro por marca se resuelve en el servidor: si el id no pertenece al
+      // usuario, la API responde 403 y aquí se propaga como error.
+      if (brandFilter && brandFilter !== "all") params.set("brandId", brandFilter);
       if (searchQuery) params.set("search", searchQuery);
       params.set("limit", "50");
       const qs = params.toString();
