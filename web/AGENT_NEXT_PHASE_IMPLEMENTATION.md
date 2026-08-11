@@ -4035,11 +4035,12 @@ seguiría viendo sólo sus marcas.
 - **No se ejecutó contra PostgreSQL real.** El Supabase en memoria no proyecta
   columnas, así que «la ruta no devuelve `access_token`» se comprueba sobre la
   whitelist del código fuente, no sobre una respuesta real.
-- **No se pudo completar la prueba visual autenticada.** El despliegue de
-  producción sí quedó realizado por Codex (`dpl_dxyH5yw96bxq2hhSBYnPRQttRSQz`),
-  el healthcheck respondió `200` y `/api/inbox/brands` respondió `401` sin
-  sesión. La pestaña interna disponible no tenía una sesión iniciada y no hubo
-  una sesión externa conectada para abrir el Inbox autenticado.
+- **No se pudo completar la prueba visual autenticada desde Codex.** El segundo
+  despliegue de producción quedó realizado por Codex
+  (`dpl_AM6LN2oKQAcce9vCQtYDpQzYeRNi`), el healthcheck respondió `200` y
+  `/api/inbox/brands` respondió `401` sin sesión. La captura aportada por el
+  usuario sí permitió identificar el fallo visual y corregirlo (§94); queda
+  refrescar el Inbox autenticado para confirmar el resultado final en pantalla.
 - `/api/inbox/conversations/bulk-close` y `/api/inbox/contacts/search` **no**
   aplican alcance por marca. No es un hallazgo: son endpoints operativos
   protegidos por `CRON_SECRET`, sin sesión de usuario, fuera del recorrido del
@@ -4056,7 +4057,7 @@ Reemplaza a la de §69 en la fila nueva; el resto se mantiene.
 | Reactivación, renovación, upgrade y downgrade programado | Cerrado por cron | **100%** |
 | UI de facturación y estados | Verificada en producción | **100%** |
 | Concurrencia y límites de cuota | Suite PostgreSQL 18/18 | **100%** |
-| **Aislamiento visual por marca en el Inbox** | **31/31 pruebas; alcance validado contra las rutas reales; desplegado en producción** | **95%** — falta verlo en un navegador autenticado |
+| **Aislamiento visual por marca en el Inbox** | **31/31 pruebas; alcance validado contra las rutas reales; corrección desplegada** | **95%** — falta confirmación final tras refrescar el navegador autenticado |
 | Outbox, idempotencia y recuperación de webhooks | Worker real validado en QA 4/4 (§78) | **98%** |
 | Backup/restore | QA desechable restaurado 3 veces (§72) | **90%** |
 | H-09: rate limiter y retención | Purga desplegada y ejecutada (§79) | **90%** |
@@ -4073,8 +4074,30 @@ encabezado, y que el selector se vea correctamente en la columna de filtros.
 
 - Commit: `5f94bd4 feat(inbox): add brand filtering and visibility scope`.
 - Rama publicada: `codex/add-manual-contact`.
-- Deploy de producción: `dpl_dxyH5yw96bxq2hhSBYnPRQttRSQz`.
+- Deploy de producción inicial: `dpl_dxyH5yw96bxq2hhSBYnPRQttRSQz`.
+- Deploy de corrección: `dpl_AM6LN2oKQAcce9vCQtYDpQzYeRNi`.
 - Alias activo: `https://www.comunitymanager.io`.
 - `GET /api/health`: `200`.
 - `GET /api/inbox/brands` sin sesión: `401 No autenticado` (comportamiento
   esperado; no expone el catálogo de marcas públicamente).
+
+### 94. Diagnóstico de la captura y corrección aplicada
+
+La captura mostró dos síntomas relacionados:
+
+1. El Inbox sí tenía `brand_id` en las conversaciones (`b44e96b1…` y
+   `1ebd1ea3…`), pero el selector decía «Sin marcas asignadas» y las etiquetas
+   mostraban «Marca no disponible». El login local no siempre hidrata una
+   sesión Supabase en el navegador; `useInboxBrands` y `useConversations`
+   dependían de `useCurrentAgent` del cliente y por eso no ejecutaban las rutas
+   API autenticadas por servidor. Ahora ambos hooks consultan la API usando la
+   sesión real de la ruta, sin ese bloqueo cliente.
+2. Los logs mostraron `column conversations.channel_type does not exist` al
+   abrir mensajes o actualizar conversaciones. `channel_type` no es una
+   columna de `conversations`: el tipo real está en `channels.type`. Ahora
+   `getAccessibleConversation` obtiene la relación `channels(type)` y expone
+   `channel_type` normalizado para los consumidores existentes.
+
+En los datos QA, los IDs de la captura corresponden a `[QA] Marca Limite 02`
+y `[QA] Marca Limite 03`; después de un refresco deben aparecer esos nombres
+en el selector y en las etiquetas. No requiere migración ni cambio de datos.
