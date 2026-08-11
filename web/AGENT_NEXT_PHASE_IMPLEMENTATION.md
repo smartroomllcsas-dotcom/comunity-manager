@@ -2873,8 +2873,7 @@ conserva el plan vigente hasta `current_period_end`; el plan destino queda en
 
 La migración fue validada previamente contra PostgreSQL 16.14 desechable con
 18/18 pruebas aprobadas. El código de `billing-lifecycle`, la UI y el logger
-estructurado ya quedó publicado en producción; falta únicamente ejecutar la
-prueba end-to-end controlada del downgrade diferido.
+estructurado ya quedó publicado en producción.
 
 ## 60.1 Próximos pasos de publicación
 
@@ -2885,8 +2884,8 @@ prueba end-to-end controlada del downgrade diferido.
 3. ~~Esperar el deployment de Vercel~~ → **HECHO**: deployment
    `dpl_FkHNWm3kYG586Qju8DpZGjDdverP` en estado `READY`, aliasado a
    `https://www.comunitymanager.io`.
-4. Ejecutar una prueba controlada de downgrade: confirmar que conserva acceso,
-   que crea el plan pendiente y que sólo cambia al llegar la fecha efectiva.
+4. ~~Ejecutar una prueba controlada de downgrade~~ → **HECHO**: ePayco aprobó
+   la compra y el cron aplicó exactamente un cambio (`planChangesApplied: 1`).
 5. Confirmar en logs `writeFailures: 0`, `auditFailures: 0` y
    `webhook_recovery_summary`.
 
@@ -2924,13 +2923,35 @@ Esto demuestra que el pago no cambia el plan ni recorta el acceso de inmediato:
 el plan actual queda vigente hasta la fecha efectiva y el plan destino queda
 pendiente. No se debe repetir el pago.
 
-### Validación final pendiente
+### Validación final — **APLICADA**
 
-Cuando llegue `change_effective_at`, el cron debe dejar `pending_plan_id` y
-`pending_plan_price_id` en `NULL`, mover `plan_id`/`plan_price_id` al plan
-destino, actualizar `organizations.plan_id` y registrar
-`reason = 'plan_change_applied'`. La próxima ejecución diaria posterior a la
-fecha efectiva es la que cierra esta última parte del ciclo.
+El propietario ejecutó manualmente `/api/cron/billing-lifecycle` después de
+adelantar `change_effective_at` para QA. Resultado:
+
+```json
+{"ok":true,"movedToPastDue":0,"cancelled":0,"suspended":0,
+ "graceNotifications":0,"suspensionNotifications":0,
+ "planChangesApplied":1}
+```
+
+El endpoint respondió HTTP 200, por lo que el worker encontró y materializó
+exactamente un downgrade pendiente. La consulta final de Supabase debe dejar
+`pending_plan_id` y `pending_plan_price_id` en `NULL`, mover
+`plan_id`/`plan_price_id` al plan destino, actualizar `organizations.plan_id` y
+registrar `reason = 'plan_change_applied'`. La bitácora final confirmó ese
+evento con esta evidencia:
+
+| Evento | Resultado |
+|---|---|
+| `reason` | `plan_change_applied` |
+| `from_plan_id` | `8debac97-2a60-4569-ab8a-7f3d39409d84` |
+| `to_plan_id` | `9c06e41c-839a-4d47-86b2-88fd3c3ba42e` |
+| `effective_at` | `2026-08-11T15:11:29.800948+00:00` |
+| `created_at` | `2026-08-11 15:19:10.102822+00` |
+
+Con esto H-12/D-5 queda validado end-to-end. La consulta de la fila de
+`subscriptions` y `organizations` queda como comprobación de consistencia
+final, no como bloqueo funcional.
 
 ---
 ---
