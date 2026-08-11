@@ -4035,8 +4035,11 @@ seguiría viendo sólo sus marcas.
 - **No se ejecutó contra PostgreSQL real.** El Supabase en memoria no proyecta
   columnas, así que «la ruta no devuelve `access_token`» se comprueba sobre la
   whitelist del código fuente, no sobre una respuesta real.
-- **No se probó en el navegador.** Sin commit ni deploy, no hay build
-  desplegado que abrir.
+- **No se pudo completar la prueba visual autenticada.** El despliegue de
+  producción sí quedó realizado por Codex (`dpl_dxyH5yw96bxq2hhSBYnPRQttRSQz`),
+  el healthcheck respondió `200` y `/api/inbox/brands` respondió `401` sin
+  sesión. La pestaña interna disponible no tenía una sesión iniciada y no hubo
+  una sesión externa conectada para abrir el Inbox autenticado.
 - `/api/inbox/conversations/bulk-close` y `/api/inbox/contacts/search` **no**
   aplican alcance por marca. No es un hallazgo: son endpoints operativos
   protegidos por `CRON_SECRET`, sin sesión de usuario, fuera del recorrido del
@@ -4053,7 +4056,7 @@ Reemplaza a la de §69 en la fila nueva; el resto se mantiene.
 | Reactivación, renovación, upgrade y downgrade programado | Cerrado por cron | **100%** |
 | UI de facturación y estados | Verificada en producción | **100%** |
 | Concurrencia y límites de cuota | Suite PostgreSQL 18/18 | **100%** |
-| **Aislamiento visual por marca en el Inbox** | **31/31 pruebas; alcance validado contra las rutas reales** | **95%** — falta verlo en el navegador tras el deploy de Codex |
+| **Aislamiento visual por marca en el Inbox** | **31/31 pruebas; alcance validado contra las rutas reales; desplegado en producción** | **95%** — falta verlo en un navegador autenticado |
 | Outbox, idempotencia y recuperación de webhooks | Worker real validado en QA 4/4 (§78) | **98%** |
 | Backup/restore | QA desechable restaurado 3 veces (§72) | **90%** |
 | H-09: rate limiter y retención | Purga desplegada y ejecutada (§79) | **90%** |
@@ -4061,9 +4064,17 @@ Reemplaza a la de §69 en la fila nueva; el resto se mantiene.
 | **Avance general ponderado** | | **98%** |
 
 La fila nueva no llega al 100% por una sola razón, y conviene que quede
-explícita: **nadie ha visto todavía la etiqueta en pantalla.** La lógica está
-probada y el alcance también, pero la comprobación visual —que la marca se lea
-bien en la tarjeta, en la conversación y en el encabezado, y que el selector se
-vea correctamente en la columna de filtros— exige el deploy que hará Codex.
+explícita: **falta confirmar la etiqueta en pantalla con una sesión autenticada.**
+La lógica, el alcance y el despliegue ya están verificados; queda comprobar
+visualmente que la marca se lea bien en la tarjeta, en la conversación y en el
+encabezado, y que el selector se vea correctamente en la columna de filtros.
 
-Sin commit, push ni deploy por parte del agente.
+### 93. Publicación realizada por Codex
+
+- Commit: `5f94bd4 feat(inbox): add brand filtering and visibility scope`.
+- Rama publicada: `codex/add-manual-contact`.
+- Deploy de producción: `dpl_dxyH5yw96bxq2hhSBYnPRQttRSQz`.
+- Alias activo: `https://www.comunitymanager.io`.
+- `GET /api/health`: `200`.
+- `GET /api/inbox/brands` sin sesión: `401 No autenticado` (comportamiento
+  esperado; no expone el catálogo de marcas públicamente).
