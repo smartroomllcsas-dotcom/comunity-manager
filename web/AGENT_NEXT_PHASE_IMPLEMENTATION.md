@@ -3375,7 +3375,7 @@ web/AGENT_NEXT_PHASE_IMPLEMENTATION.md
 | 1 | Registrar `/api/cron/rate-limit-purge` en `vercel.json` | Codex — aplicado y desplegado en producción |
 | 2 | Repetir el ensayo de restauración con un **backup real de producción** | Operación |
 | 3 | Decidir sobre el CHECK de `job_type` (§63) — recomendación: mantener | Negocio |
-| 4 | Observar `webhook_recovery_summary` con eventos reales, no sólo con `scanned: 0` | Operación |
+| 4 | Observar `webhook_recovery_summary` con un evento fallido real de producción, no sólo QA | Operación |
 | 5 | Estado compartido para el rate limiter (Redis/Upstash) si se quiere cerrar H-09 del todo | Infraestructura |
 
 ## 68. Recomendaciones finales
@@ -3406,9 +3406,9 @@ porcentaje de archivos escritos.
 | Reactivación, renovación, upgrade y downgrade programado | Compra aprobada y cambio programado/aplicado por cron | **100%** |
 | UI de facturación, uso, estado cancelado/activo y aviso de cambio futuro | Verificada visualmente en producción | **100%** |
 | Concurrencia y límites de cuota | Suite PostgreSQL 18/18 y pruebas de resiliencia | **100%** |
-| Outbox, idempotencia y recuperación de webhooks | Código desplegado; logs sin fallos; **flujo controlado de selección, lease, RPC y auditoría validado en QA** (§73) | **95%** — falta ejecutar/observar el worker con un evento real |
+| Outbox, idempotencia y recuperación de webhooks | Código desplegado; **worker real validado en QA 4/4** y logs sin fallos (§78) | **98%** — falta observar un evento fallido real de producción |
 | Backup/restore | QA desechable restaurado sin errores **3 veces** (§72) | **90%** — falta un backup real de producción; **el agente no puede obtenerlo** (§72.2) |
-| H-09: rate limiter degradado y retención | Mitigación + purga horaria **desplegada y protegida** (§75) | **90%** — Redis/Upstash queda para estado compartido |
+| H-09: rate limiter degradado y retención | Mitigación + purga horaria desplegada, protegida y **ejecutada en producción** (§79) | **90%** — falta observar un `DELETE` real; Redis/Upstash queda para estado compartido |
 | CHECK de `job_type` | Revisado contra datos reales; **recomendación formal: conservarlo amplio** (§74) | **90%** — falta decisión de negocio |
 | **Avance general ponderado** | Sistema funcional y evidencia principal cerrada | **98%** |
 
@@ -3425,8 +3425,22 @@ porcentaje de archivos escritos.
   target `production`, alias `https://www.comunitymanager.io`.
 - Validaciones HTTP realizadas: `/api/health` devuelve `200` y el nuevo cron sin
   `Authorization` devuelve `401` (`{"error":"Unauthorized"}`).
-- Queda como observación operativa ver la primera línea
-  `rate_limit_purge_summary` en logs tras su primera ejecución horaria.
+- Primera ejecución observada: HTTP `200`, `purged: 0`, retención de una hora.
+- Queda como observación adicional verificar un `purged > 0` con un hit real
+  fuera de retención; el cron está funcionando, pero aún no hubo una fila que
+  eliminar.
+
+## 70. Acciones que quedan fuera de código
+
+1. Restaurar un backup real de producción en un entorno aislado.
+2. Observar una recuperación de webhook con al menos un evento fallido real.
+3. Decidir si el CHECK de `job_type` se mantiene amplio; la recomendación técnica
+   actual es mantenerlo porque la tabla real ya contiene `send_notification`.
+4. Si se exige cerrar H-09 al 100%, contratar/configurar Redis o Upstash y mover
+   el contador a estado compartido entre instancias.
+
+---
+---
 
 ## 71. Evidencia de publicación — 2026-08-11
 
@@ -3442,18 +3456,6 @@ porcentaje de archivos escritos.
 
 Con esta publicación, la acción de código y despliegue queda en **100%**; las
 acciones restantes son observaciones/decisiones operativas descritas en §70.
-
-## 70. Acciones que quedan fuera de código
-
-1. Restaurar un backup real de producción en un entorno aislado.
-2. Observar una recuperación de webhook con al menos un evento fallido real.
-3. Decidir si el CHECK de `job_type` se mantiene amplio; la recomendación técnica
-   actual es mantenerlo porque la tabla real ya contiene `send_notification`.
-4. Si se exige cerrar H-09 al 100%, contratar/configurar Redis o Upstash y mover
-   el contador a estado compartido entre instancias.
-
----
----
 
 # Iteración 11 — 2026-08-11 · Cierre de §70 con acciones seguras
 
@@ -3519,10 +3521,18 @@ psql -d restore_prueba < smartmedia_<fecha>.sql
 Hasta que eso ocurra, lo demostrado es que **el procedimiento funciona**, no que
 **ese backup concreto sea restaurable**. H-06 se mantiene al 90%.
 
-## 73. Recuperación de webhook con evento controlado — **EJECUTADO en QA** ✅
+## 73. Recuperación con evento controlado — validación **a nivel SQL** ✅
+
+Esta sección documenta la primera validación manual del contrato SQL. La
+validación del worker real llegó después y está documentada en §78.
 
 Nueva prueba **19** de la suite PostgreSQL, contra PostgreSQL 16.14 desechable y
 dentro de `BEGIN … ROLLBACK`. **No se insertó nada en producción.**
+
+> **Precisión importante.** Esta prueba reproduce las consultas del worker
+> —selección, claim, liquidación— **escritas a mano en SQL**; no ejecuta el
+> código del worker. Es una validación del *comportamiento esperado contra la
+> base*, no del módulo. La ejecución del **worker real** llegó después: §78.
 
 Escenario: la confirmación llegó y el evento se registró, pero la activación
 falló con `atomic_activation_failed` — el caso que el worker debe recuperar.
@@ -3545,7 +3555,8 @@ presenta como una prueba E2E del worker.
 
 **Lo que sigue sin demostrarse:** el mismo camino con un evento fallido **real de
 producción**. Provocar uno exigiría fabricar un fallo en un cobro real, y eso no
-se hizo. Por eso la fila de la matriz queda en 95%, no en 100%.
+se hizo. En ese momento la evidencia justificaba 95%; §78 actualiza la matriz
+a 98% porque ahora el worker real también fue ejecutado en QA.
 
 ## 74. `job_type` · recomendación formal: **conservar el CHECK amplio**
 
@@ -3589,9 +3600,9 @@ lectura:
 El endpoint **no queda expuesto**: exige el `CRON_SECRET` exacto, y un Bearer
 incorrecto se rechaza igual que la ausencia de credenciales.
 
-**Pendiente de observación:** la primera línea `rate_limit_purge_summary` en los
-logs. Al ser horario (`0 * * * *`), la ventana de observación es más larga que
-la de los crons de 2-10 minutos.
+**Observado:** `rate_limit_purge_summary` con HTTP `200`, `purged: 0` y
+`retentionMs: 3600000`. Sigue pendiente observar una ejecución con una fila
+realmente expirada (`purged > 0`).
 
 ## 76. Resultados de la iteración 11
 
@@ -3622,11 +3633,224 @@ Ninguna migración, ningún secreto, ningún dato de producción tocado.
 | 2 | Ver una recuperación con un **evento fallido real** | Que ocurra un fallo real; no debe provocarse | **No** — sólo observar |
 | 3 | Decidir sobre el **CHECK de `job_type`** | Roadmap de producto | **No** — recomendación en §74 |
 | 4 | **Estado compartido** para el rate limiter (Redis/Upstash) | Contratar infraestructura | **No** |
-| 5 | Observar la primera línea `rate_limit_purge_summary` | Esperar al tick horario | **No** — sólo observar |
+| 5 | Observar una purga con `purged > 0` | Debe existir un hit QA con más de una hora | **No** — sólo observar |
 
 **Ninguno de los cinco es trabajo de código pendiente.** Los cinco dependen de
 accesos, infraestructura, decisiones de producto o del paso del tiempo. Esa es
 la razón de que la matriz de §69 se quede en 98% y no llegue a 100%: subirla
 exigiría inventar evidencia.
+
+Sin commit, push ni deploy por parte del agente.
+
+---
+---
+
+# Iteración 12 — 2026-08-11 · Worker real contra PostgreSQL
+
+## 78. El worker real, ejecutado contra PostgreSQL ✅
+
+§73 dejó una imprecisión que conviene no arrastrar: la prueba 19 reproduce las
+consultas del worker **escritas a mano en SQL**, pero **no ejecuta el módulo**.
+Validaba el comportamiento esperado, no el código.
+
+Ahora sí se ejecuta el código de producción sin modificarlo.
+
+### 78.1 Cómo
+
+`src/qa-e2e/webhook-recovery-pg.test.ts` importa
+`recoverFailedWebhookEvents` **tal cual** y lo corre contra la base desechable.
+Lo único sustituido es el cliente Supabase: la base local no tiene PostgREST, así
+que se inyecta `helpers/pg-supabase-adapter.ts`, un adaptador respaldado por
+`pg` que implementa **exactamente** los métodos que el worker y sus dependencias
+usan (`select/insert/update/delete`, `eq/neq/lt/lte/gt/gte/is/in/or`,
+`order/limit`, `maybeSingle/single`, y `rpc`).
+
+El adaptador **no** es un cliente Supabase completo, y eso es deliberado: si el
+worker empieza a usar un método nuevo, falla ruidosamente en vez de devolver un
+resultado silenciosamente incorrecto.
+
+Se salta sin `QA_DATABASE_URL`, igual que la suite de `tests/`.
+
+### 78.2 Resultado: 4/4
+
+| Caso | Verifica |
+|---|---|
+| Recupera un evento fallido controlado | `scanned≥1`, `claimed≥1`, `recovered≥1`, `writeFailures=0`, `auditFailures=0`, `workerId` con su prefijo; evento `processed` con `last_error` nulo y **lease liberado**; **una sola** suscripción, `active`, `suspended_at` limpio; auditoría D-1 escrita con `result=success`; **sin pagos duplicados** |
+| Segunda pasada | No reprocesa lo ya procesado |
+| D-2 · conflicto de datos | Va a `dead_letter` con `review_required` y **la organización sigue activa** |
+| D-1 · firma inválida | El evento **no se toca**: sigue `failed`, sin lease y con su `attempt_count` intacto |
+
+### 78.3 Dos fallos reales que sólo aparecieron al ejecutar
+
+**1. `payment_insert_failed` — montaje irreal de la prueba.** El primer intento
+usaba una clave de evento distinta del `provider_transaction_id` del pago ya
+registrado. El worker no encontraba el pago existente, intentaba insertar uno
+nuevo y el índice único `(merchant_reference, attempt_number)` lo rechazaba.
+
+El fallo era **del escenario, no del worker**: en una recuperación real el pago
+ya existe con esa misma clave, porque lo creó el webhook original antes de que
+fallara la activación. Corregido usando la clave real del pago.
+
+Deja una observación útil: si llegase a recuperarse un evento **sin** su pago
+previo y con otro pago ocupando la misma referencia, el worker reintenta y acaba
+en `dead_letter`. Falla de forma segura, pero conviene saberlo.
+
+**2. `qa_cleanup_fixtures` no podía borrar las organizaciones.**
+`subscription_events.organization_id` es `ON DELETE RESTRICT`, así que borrar la
+organización antes que sus dependientes falla con violación de FK.
+
+**No se había visto nunca** porque la suite de `tests/` corre entera dentro de
+`BEGIN … ROLLBACK` y nada se confirma. El worker real sí commitea, y ahí saltó.
+Corregido: la limpieza ahora borra en orden —auditoría, outbox, eventos de
+suscripción, pagos, suscripciones— y **sólo** de las organizaciones del fixture.
+
+El guardián de `security-posture.test.ts` detectó a su vez que los `DELETE`
+nuevos no llevaban el prefijo literal. Se ajustó para aceptar el acotamiento por
+`= ANY(v_orgs)` **y** verificar que `v_orgs` sólo se puebla desde
+`name LIKE '[QA-FIXTURE]%'`: sin esa segunda comprobación, la guarda se habría
+debilitado.
+
+## 79. `rate_limit_purge_summary` · primera ejecución observada ✅
+
+Deployment `dpl_GECsNT6GWsJLoZ1JexzVCTP7AHD4` (commit `3f66be3`, production).
+
+```
+### 20:01:09 GET /api/cron/rate-limit-purge 200 [info/serverless]
+[billing] rate_limit_purge_summary {"event":"rate_limit_purge_summary",
+"correlation_id":"rate-limit-purge:batch","purged":0,"retentionMs":3600000,
+"durationMs":193,"processedAt":"2026-08-11T20:01:09.985Z"}
+```
+
+| Campo | Valor |
+|---|---|
+| HTTP | **200** |
+| `purged` | **0** |
+| `retentionMs` | 3 600 000 (1 h) |
+| `durationMs` | 193 |
+
+**Lectura honesta:** `purged: 0` significa que **no había hits con más de una
+hora** en ese momento, no que la purga borre correctamente. Lo demostrado es que
+el cron se ejecuta, está autorizado y emite su resumen. Que el `DELETE` elimine
+filas reales está cubierto por prueba unitaria, no por esta observación.
+
+## 80. Checklist · restaurar un backup **real** de producción
+
+Requiere acceso que el agente no tiene (§72.2). Para quien lo tenga:
+
+- [ ] **1. Localizar el dump.** `ssh <servidor>` → `ls -la /var/backups/stacks/`
+      (cron diario `backup-all-stacks.sh`, rotación 7 días, `RUNBOOK.md §5`).
+- [ ] **2. Anotar los cinco datos** del runbook §2: fecha/hora UTC, base y host
+      de origen, tamaño, duración, responsable.
+- [ ] **3. Copiar a una máquina con PostgreSQL 16.** El `pg_dump` debe ser de la
+      **misma versión mayor** que el servidor de origen.
+- [ ] **4. Crear una base DESECHABLE.** `createdb restore_prueba`. **Nunca**
+      restaurar sobre producción ni sobre la QA compartida.
+- [ ] **5. Restaurar.** `psql -d restore_prueba < <dump>.sql` (o `pg_restore`
+      si es formato custom). Anotar duración y errores.
+- [ ] **6. Comparar las seis métricas** de `BACKUP_RESTORE_RUNBOOK.md §4`:
+      tablas, funciones, tablas con RLS, policies, índices y filas de
+      `subscriptions`/`payments`.
+- [ ] **7. Verificación funcional.** Que `finalize_epayco_approved_payment`
+      contenga `plan_downgrade_scheduled` (migración 035 presente).
+- [ ] **8. Comprobar `TOKEN_ENCRYPTION_KEY`.** **No viaja en el dump.** Sin ella
+      los tokens cifrados son irrecuperables aunque la base se restaure entera.
+      Confirmar que está respaldada **fuera** de la base.
+- [ ] **9. Registrar el resultado** en `BACKUP_RESTORE_RUNBOOK.md §5` junto a
+      los tres ensayos ya documentados.
+- [ ] **10. Destruir la base de prueba** y el dump copiado.
+
+**Criterio de cierre de H-06:** los pasos 6 y 7 en verde sobre un dump de
+producción. Hasta entonces lo demostrado es que *el procedimiento* funciona
+—tres veces—, no que *ese backup* sea restaurable.
+
+## 81. Checklist · estado compartido para el rate limiter (cerrar H-09)
+
+La mitigación actual acota el problema pero no lo elimina: con N instancias
+degradadas el límite efectivo sigue siendo N×(límite/4). Cerrarlo requiere un
+contador fuera del proceso.
+
+- [ ] **1. Elegir proveedor.** Upstash Redis encaja mejor con Vercel: es
+      serverless, se factura por petición y no exige gestionar conexiones.
+      Alternativa: cualquier Redis con REST.
+- [ ] **2. Dimensionar.** Una petición por comprobación de rate limit. Estimar
+      con el volumen actual de `/api/webhook/*` (200/min por IP como techo) y
+      de checkout.
+- [ ] **3. Variables nuevas** (no existen hoy): `UPSTASH_REDIS_REST_URL` y
+      `UPSTASH_REDIS_REST_TOKEN`. Cargarlas en Vercel; **no** con prefijo
+      `NEXT_PUBLIC_`.
+- [ ] **4. Implementar el backend** detrás de la interfaz actual: `rateLimit`
+      ya devuelve `RateLimitResult`, así que basta con añadir un backend
+      `"redis"` junto a `"db"` y `"memory-fallback"`. **No cambiar la firma.**
+- [ ] **5. Usar la primitiva atómica correcta:** `INCR` + `EXPIRE` en una
+      transacción, o el algoritmo de ventana deslizante con `ZADD`/`ZREMRANGEBYSCORE`.
+      Una lectura seguida de escritura no atómica reintroduce la carrera.
+- [ ] **6. Orden de fallback:** Redis → base de datos → memoria. Así una caída
+      de Redis no es peor que la situación actual.
+- [ ] **7. Pruebas:** las mismas 13 de H-09, más una de dos "instancias"
+      compartiendo contador —que hoy es justo lo que no se puede probar—.
+- [ ] **8. Retirar o conservar la purga.** Con Redis y TTL, `rate_limit_hits`
+      deja de ser el camino caliente; el cron de purga puede espaciarse o
+      retirarse.
+- [ ] **9. Medir antes y después:** latencia p95 de `/api/webhook/*` y consultas
+      por segundo contra la base.
+
+**Criterio de cierre de H-09:** dos instancias concurrentes respetando un único
+límite compartido, demostrado con prueba.
+
+## 82. Resultados de la iteración 12
+
+| Comando | Resultado real |
+|---|---|
+| `npx vitest run` (sin `QA_DATABASE_URL`) | **549 passed, 4 skipped / 31 files**, 0 fallos |
+| `npx vitest run src/qa-e2e/webhook-recovery-pg.test.ts` **con** `QA_DATABASE_URL` | **4 passed** — worker real contra PostgreSQL |
+| Suite PostgreSQL (`qa-postgres-suite.mjs`) | **19 ejecutadas, 19 aprobadas**, sin residuos |
+| `npm test` | vitest + node: 6 passed, 19 skipped |
+| `npm run lint` | **0 errores**, 168 warnings preexistentes |
+| `npx tsc --noEmit \| grep '^src/'` | sin salida |
+| `npm run build` | Compiled successfully |
+| `git diff --check` | sin salida |
+
+### Revisión de crons y secretos
+
+| Cron | `CRON_SECRET` | En `vercel.json` |
+|---|:--:|:--:|
+| `billing-lifecycle` · `billing-outbox` · `billing-webhook-recovery` | ✅ | ✅ |
+| `rate-limit-purge` · `reap-scheduled` · `refresh-tokens` · `release-contact-overage` | ✅ | ✅ |
+
+**7 de 7** protegidos y registrados. Sin valores de secreto embebidos en el
+código —los únicos literales son sintéticos, en archivos de prueba— y ningún
+secreto expuesto bajo `NEXT_PUBLIC_`.
+
+## 83. Archivos de la iteración 12
+
+**Nuevos**
+
+```
+web/src/qa-e2e/webhook-recovery-pg.test.ts        # worker real contra PostgreSQL
+web/src/qa-e2e/helpers/pg-supabase-adapter.ts     # adaptador pg con la superficie de supabase-js
+```
+
+**Modificados**
+
+```
+web/supabase/qa/001_qa_lifecycle_fixtures.sql     # limpieza en orden de FK
+web/src/qa-e2e/security-posture.test.ts           # guarda ajustada sin debilitarla
+web/AGENT_NEXT_PHASE_IMPLEMENTATION.md            # §§69-73 ordenadas y corregidas
+```
+
+Ninguna migración, ningún secreto, ningún dato de producción tocado.
+
+## 84. Qué queda pendiente
+
+| # | Pendiente | Bloqueado por | Checklist |
+|---|---|---|---|
+| 1 | Restaurar un **backup real de producción** | Acceso SSH al servidor | §80 |
+| 2 | Observar recuperación con un **evento fallido real** | Que ocurra; no debe provocarse | — |
+| 3 | Decidir sobre el **CHECK de `job_type`** | Roadmap de producto | §74 |
+| 4 | **Estado compartido** para el rate limiter | Contratar infraestructura | §81 |
+| 5 | Ver la purga borrando **filas reales** | Que haya hits de más de 1 h | — |
+
+Los cinco dependen de accesos, infraestructura, decisiones de producto o del
+paso del tiempo. **Ninguno es trabajo de código pendiente.**
 
 Sin commit, push ni deploy por parte del agente.

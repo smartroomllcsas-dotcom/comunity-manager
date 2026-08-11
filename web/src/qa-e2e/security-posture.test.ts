@@ -197,10 +197,22 @@ describe("Suite PostgreSQL · guardas del runner", () => {
     const deletes = fixtures.match(/DELETE FROM [^;]+;/g) || [];
     expect(deletes.length).toBeGreaterThan(0);
     for (const statement of deletes) {
+      // Dos formas admitidas de acotar, y ninguna más:
+      //  - el prefijo literal del fixture;
+      //  - `= ANY(v_orgs)`, donde v_orgs son las organizaciones del fixture.
+      // Las tablas dependientes tienen que usar la segunda porque no llevan
+      // nombre ni referencia con el prefijo.
       expect(statement, `DELETE sin filtro de fixture: ${statement}`).toMatch(
-        /LIKE '\[QA-FIXTURE\]%'/,
+        /LIKE '\[QA-FIXTURE\]%'|= ANY\(v_orgs\)/,
       );
     }
+
+    // Y `v_orgs` sólo puede poblarse desde el prefijo del fixture: si alguien
+    // lo llenara con otra consulta, los DELETE dejarían de estar acotados.
+    const asignaciones = fixtures.match(/INTO v_orgs\s+FROM [^;]+;/g) || [];
+    expect(asignaciones.length).toBe(1);
+    expect(asignaciones[0]).toMatch(/smarttalk\.organizations/);
+    expect(asignaciones[0]).toMatch(/name LIKE '\[QA-FIXTURE\]%'/);
   });
 
   it("los fixtures marcan sus registros para que un residuo sea evidente", () => {

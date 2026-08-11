@@ -276,7 +276,39 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   v_count BIGINT;
+  v_orgs UUID[];
 BEGIN
+  -- Organizaciones sembradas por el fixture. Todo lo que cuelgue de ellas debe
+  -- borrarse ANTES que ellas: `subscription_events.organization_id` es
+  -- ON DELETE RESTRICT, así que borrar la organización primero falla.
+  --
+  -- En la suite de tests/ esto nunca se notó porque todo corre dentro de
+  -- BEGIN … ROLLBACK. Se descubrió al ejecutar el worker real, que sí commitea.
+  SELECT array_agg(id) INTO v_orgs
+    FROM smarttalk.organizations WHERE name LIKE '[QA-FIXTURE]%';
+
+  IF v_orgs IS NOT NULL THEN
+    DELETE FROM smarttalk.billing_audit_events WHERE organization_id = ANY(v_orgs);
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    deleted_table := 'billing_audit_events'; deleted_rows := v_count; RETURN NEXT;
+
+    DELETE FROM smarttalk.billing_outbox_jobs WHERE organization_id = ANY(v_orgs);
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    deleted_table := 'billing_outbox_jobs'; deleted_rows := v_count; RETURN NEXT;
+
+    DELETE FROM smarttalk.subscription_events WHERE organization_id = ANY(v_orgs);
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    deleted_table := 'subscription_events'; deleted_rows := v_count; RETURN NEXT;
+
+    DELETE FROM smarttalk.payments WHERE organization_id = ANY(v_orgs);
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    deleted_table := 'payments'; deleted_rows := v_count; RETURN NEXT;
+
+    DELETE FROM smarttalk.subscriptions WHERE organization_id = ANY(v_orgs);
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    deleted_table := 'subscriptions'; deleted_rows := v_count; RETURN NEXT;
+  END IF;
+
   DELETE FROM smarttalk.checkout_sessions WHERE internal_reference LIKE '[QA-FIXTURE]%';
   GET DIAGNOSTICS v_count = ROW_COUNT;
   deleted_table := 'checkout_sessions'; deleted_rows := v_count; RETURN NEXT;
