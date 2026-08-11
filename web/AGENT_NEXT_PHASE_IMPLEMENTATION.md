@@ -3406,11 +3406,15 @@ porcentaje de archivos escritos.
 | Reactivación, renovación, upgrade y downgrade programado | Compra aprobada y cambio programado/aplicado por cron | **100%** |
 | UI de facturación, uso, estado cancelado/activo y aviso de cambio futuro | Verificada visualmente en producción | **100%** |
 | Concurrencia y límites de cuota | Suite PostgreSQL 18/18 y pruebas de resiliencia | **100%** |
-| Outbox, idempotencia y recuperación de webhooks | Código desplegado; logs sin fallos | **95%** — falta observar un evento fallido real |
-| Backup/restore | QA desechable restaurado sin errores | **90%** — falta restaurar un backup real de producción |
-| H-09: rate limiter degradado y retención | Mitigación por instancia + purga horaria preparada | **90%** — Redis/Upstash queda para estado compartido |
-| CHECK de `job_type` | Revisado contra datos reales; recomendación conservarlo amplio | **90%** — falta decisión de negocio |
+| Outbox, idempotencia y recuperación de webhooks | Código desplegado; logs sin fallos; **flujo controlado de selección, lease, RPC y auditoría validado en QA** (§73) | **95%** — falta ejecutar/observar el worker con un evento real |
+| Backup/restore | QA desechable restaurado sin errores **3 veces** (§72) | **90%** — falta un backup real de producción; **el agente no puede obtenerlo** (§72.2) |
+| H-09: rate limiter degradado y retención | Mitigación + purga horaria **desplegada y protegida** (§75) | **90%** — Redis/Upstash queda para estado compartido |
+| CHECK de `job_type` | Revisado contra datos reales; **recomendación formal: conservarlo amplio** (§74) | **90%** — falta decisión de negocio |
 | **Avance general ponderado** | Sistema funcional y evidencia principal cerrada | **98%** |
+
+> Matriz revisada en la iteración 11 (§§72-76). Los porcentajes que **no**
+> subieron es porque dependen de accesos o decisiones fuera del alcance del
+> agente, no de trabajo pendiente de código.
 
 ### Cierre de esta iteración
 
@@ -3447,3 +3451,182 @@ acciones restantes son observaciones/decisiones operativas descritas en §70.
    actual es mantenerlo porque la tabla real ya contiene `send_notification`.
 4. Si se exige cerrar H-09 al 100%, contratar/configurar Redis o Upstash y mover
    el contador a estado compartido entre instancias.
+
+---
+---
+
+# Iteración 11 — 2026-08-11 · Cierre de §70 con acciones seguras
+
+Las cuatro acciones de §70, ejecutadas hasta donde el acceso lo permite. **Una
+de ellas no se pudo hacer y se explica por qué en vez de simularla.**
+
+## 72. Backup real de producción — **NO EJECUTADO**
+
+### 72.1 Lo que sí se hizo
+
+Tercer ensayo del runbook sobre la base QA desechable, esta vez con el evento de
+recuperación de §73 ya presente:
+
+| Paso | Resultado |
+|---|---|
+| `pg_dump -Fc` | **383 KB, < 1 s**, sin errores |
+| `pg_restore` en `qarestore3` | **0 errores** |
+
+| Métrica | Origen | Restaurada |
+|---|---:|---:|
+| Tablas `smarttalk` | 52 | **52** |
+| Funciones | 60 | **60** |
+| Tablas con RLS | 51 | **51** |
+| Policies | 68 | **68** |
+| Índices | 145 | **145** |
+| Migración 035 presente | sí | **sí** |
+
+Tres ensayos independientes (§53, §61, §72) con resultado idéntico: el
+procedimiento es reproducible.
+
+### 72.2 Por qué NO se usó un backup real de producción
+
+**No hay forma de obtenerlo desde este entorno.** Comprobado, no supuesto:
+
+| Vía | Estado |
+|---|---|
+| Cadena de conexión Postgres en `.env.local` | **No existe.** Sólo hay `NEXT_PUBLIC_SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY`, que dan acceso a la API PostgREST, **no** a `pg_dump` |
+| `.env.production` / `.env` | No existen en el repositorio |
+| `/var/backups/stacks/` (RUNBOOK §5) | No existe en esta máquina: vive en el servidor donde corre el cron `backup-all-stacks.sh` |
+| Conector MCP de Supabase | `list_projects` devuelve vacío: la instancia es self-hosted (`smartmedia-api.smartgenapp.com`), no un proyecto gestionado |
+
+`pg_dump` necesita una conexión Postgres directa (host, puerto, usuario,
+contraseña). La clave de servicio de Supabase **no sirve** para eso.
+
+**Se descartó explícitamente** reconstruir un "backup" leyendo tablas por
+PostgREST: eso no es un backup, y presentarlo como tal sería inventar evidencia.
+
+### 72.3 Qué hace falta y quién puede hacerlo
+
+Quien tenga acceso SSH al servidor:
+
+```bash
+# 1. En el servidor, tomar o localizar el dump
+ls -la /var/backups/stacks/
+# 2. Copiarlo a una máquina con Postgres 16
+scp servidor:/var/backups/stacks/smartmedia_<fecha>.sql ./
+# 3. Restaurar en una base DESECHABLE, nunca sobre producción
+createdb restore_prueba
+psql -d restore_prueba < smartmedia_<fecha>.sql
+# 4. Ejecutar la verificación de docs/BACKUP_RESTORE_RUNBOOK.md §4
+```
+
+Hasta que eso ocurra, lo demostrado es que **el procedimiento funciona**, no que
+**ese backup concreto sea restaurable**. H-06 se mantiene al 90%.
+
+## 73. Recuperación de webhook con evento controlado — **EJECUTADO en QA** ✅
+
+Nueva prueba **19** de la suite PostgreSQL, contra PostgreSQL 16.14 desechable y
+dentro de `BEGIN … ROLLBACK`. **No se insertó nada en producción.**
+
+Escenario: la confirmación llegó y el evento se registró, pero la activación
+falló con `atomic_activation_failed` — el caso que el worker debe recuperar.
+
+| Fase verificada | Resultado |
+|---|---|
+| (a) La consulta del worker **selecciona** el evento (los cuatro filtros de §33.1) | ✅ 1 fila |
+| (b) El **claim con lease** lo reclama | ✅ |
+| (b') Un **segundo worker NO puede reclamarlo** con el lease vivo | ✅ 0 filas |
+| (c) La liquidación reejecuta el RPC | ✅ suscripción **activa**, `suspended_at` limpio |
+| (c') **Sin duplicar** la suscripción | ✅ 1 sola fila |
+| (d) Cierre del evento y **liberación del lease** | ✅ `processed`, `locked_by` nulo |
+| (e) La **auditoría de D-1** se escribe | ✅ `result = success` |
+
+Esto cubre los componentes SQL/RPC del flujo que §60 dejaba pendientes: allí el
+cron corría con `scanned: 0` porque no había eventos fallidos. La prueba no
+invoca directamente `recoverFailedWebhookEvents`; por eso demuestra el contrato
+de selección, lease, liquidación y auditoría contra PostgreSQL, pero no se
+presenta como una prueba E2E del worker.
+
+**Lo que sigue sin demostrarse:** el mismo camino con un evento fallido **real de
+producción**. Provocar uno exigiría fabricar un fallo en un cobro real, y eso no
+se hizo. Por eso la fila de la matriz queda en 95%, no en 100%.
+
+## 74. `job_type` · recomendación formal: **conservar el CHECK amplio**
+
+Consulta read-only ya realizada (§63) sobre `smarttalk.billing_outbox_jobs`:
+**1 fila total**, `send_notification | completed`; **cero** filas de los cinco
+tipos sin handler.
+
+**Recomendación: mantener el CHECK como está.** Razones, en orden de peso:
+
+1. **La protección efectiva ya existe y está en el sitio correcto.** El tipo
+   `BillingOutboxJobType` sólo admite `send_notification`, así que ningún código
+   de la aplicación puede encolar los otros cinco. Tres pruebas lo vigilan
+   (§28), incluida una que afirma que **el único `job_type` que la aplicación
+   encola es `send_notification`**.
+2. **Estrechar un CHECK es irreversible para el histórico** y no aporta
+   seguridad nueva: un job inesperado que llegase por SQL ya termina en
+   `dead_letter` de forma controlada y probada.
+3. **Cierra una puerta que el roadmap podría necesitar.** `renew_subscription`,
+   `reconcile_payment`, `expire_subscription` y `apply_plan_change` describen
+   flujos plausibles; si se implementan, habría que ensanchar el CHECK otra vez.
+4. El beneficio —que enum y CHECK coincidan— es de coherencia, no de riesgo.
+
+**Cuándo reconsiderarlo:** cuando se decida formalmente que esos cuatro flujos
+**no** se van a implementar. Ahí sí conviene estrechar el CHECK y retirar la
+constante `UNIMPLEMENTED_OUTBOX_JOB_TYPES`.
+
+**No se creó ninguna migración**, conforme a D-3.
+
+## 75. `/api/cron/rate-limit-purge` · desplegado y protegido — **VERIFICADO** ✅
+
+Comprobado de forma independiente contra producción, sólo con peticiones de
+lectura:
+
+| Comprobación | Resultado |
+|---|---|
+| `GET` **sin** `Authorization` | **`401`** · `{"error":"Unauthorized"}` |
+| `GET` con `Authorization: Bearer valor-incorrecto` | **`401`** · `{"error":"Unauthorized"}` |
+| `GET /api/health` | `200` |
+| Entrada en `vercel.json` | `{"path": "/api/cron/rate-limit-purge", "schedule": "0 * * * *"}` |
+
+El endpoint **no queda expuesto**: exige el `CRON_SECRET` exacto, y un Bearer
+incorrecto se rechaza igual que la ausencia de credenciales.
+
+**Pendiente de observación:** la primera línea `rate_limit_purge_summary` en los
+logs. Al ser horario (`0 * * * *`), la ventana de observación es más larga que
+la de los crons de 2-10 minutos.
+
+## 76. Resultados de la iteración 11
+
+| Comando | Resultado real |
+|---|---|
+| `npx vitest run` | **549 passed / 30 files**, 0 fallos |
+| `npm test` | vitest 549 + node: 6 passed, **19 skipped** |
+| **Suite PostgreSQL** | **19 ejecutadas, 19 aprobadas**, sin residuos |
+| `npm run lint` | **0 errores**, 168 warnings preexistentes |
+| `npx tsc --noEmit \| grep '^src/'` | sin salida |
+| `npm run build` | Compiled successfully |
+| `git diff --check` | sin salida |
+
+**Archivos modificados**
+
+```
+web/tests/postgres-integration.test.mjs   # caso 19: recuperación controlada
+web/AGENT_NEXT_PHASE_IMPLEMENTATION.md    # §69 actualizada + §§72-76
+```
+
+Ninguna migración, ningún secreto, ningún dato de producción tocado.
+
+## 77. Qué queda pendiente, y de quién depende
+
+| # | Pendiente | Bloqueado por | ¿Puede el agente? |
+|---|---|---|---|
+| 1 | Restaurar un **backup real de producción** en base desechable | Acceso SSH al servidor / credenciales Postgres | **No** — §72.2 |
+| 2 | Ver una recuperación con un **evento fallido real** | Que ocurra un fallo real; no debe provocarse | **No** — sólo observar |
+| 3 | Decidir sobre el **CHECK de `job_type`** | Roadmap de producto | **No** — recomendación en §74 |
+| 4 | **Estado compartido** para el rate limiter (Redis/Upstash) | Contratar infraestructura | **No** |
+| 5 | Observar la primera línea `rate_limit_purge_summary` | Esperar al tick horario | **No** — sólo observar |
+
+**Ninguno de los cinco es trabajo de código pendiente.** Los cinco dependen de
+accesos, infraestructura, decisiones de producto o del paso del tiempo. Esa es
+la razón de que la matriz de §69 se quede en 98% y no llegue a 100%: subirla
+exigiría inventar evidencia.
+
+Sin commit, push ni deploy por parte del agente.

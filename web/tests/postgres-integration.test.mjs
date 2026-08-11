@@ -571,6 +571,111 @@ test("18. la cola de canales admite duplicados, pero el mensaje no se duplica", 
   });
 });
 
+// ===========================================================================
+// 19. Flujo controlado de recuperación de un webhook fallido
+// ===========================================================================
+
+test("19. el flujo controlado de recuperación activa sin duplicar la suscripción", { skip }, async () => {
+  await withClient(async (client) => {
+    await inRollback(client, async () => {
+      // Escenario: la confirmación llegó, se registró el evento, pero la
+      // activación falló (p. ej. contención en el RPC). Es el caso
+      // `atomic_activation_failed` que el worker debe recuperar.
+      const ctx = await seed(client, "suspended");
+
+      const { rows: inserted } = await client.query(
+        `INSERT INTO smarttalk.billing_webhook_events(
+           provider, environment, event_key, payload_hash, signature_valid,
+           status, attempt_count, last_error, payload)
+         VALUES ('epayco', 'sandbox', $1, 'qa-hash', TRUE,
+                 'failed', 1, 'atomic_activation_failed', $2::jsonb)
+         RETURNING id, status, attempt_count`,
+        [`QA-RECOVERY-${ctx.payment_id}`, JSON.stringify({ x_extra1: ctx.checkout_session_id })],
+      );
+      const eventId = inserted[0].id;
+      assert.equal(inserted[0].status, "failed");
+
+      // (a) La consulta del worker debe seleccionarlo: es exactamente el filtro
+      //     de recoverFailedWebhookEvents (§33.1).
+      const { rows: elegibles } = await client.query(
+        `SELECT id FROM smarttalk.billing_webhook_events
+          WHERE status = 'failed'
+            AND signature_valid = TRUE
+            AND attempt_count < 5
+            AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
+            AND id = $1`,
+        [eventId],
+      );
+      assert.equal(elegibles.length, 1, "el worker no seleccionaría este evento");
+
+      // (b) El claim con lease: UPDATE condicional sobre lease libre o vencido.
+      const { rows: reclamado } = await client.query(
+        `UPDATE smarttalk.billing_webhook_events
+            SET locked_at = NOW(), locked_by = 'qa-worker-19'
+          WHERE id = $1 AND status = 'failed'
+            AND (locked_at IS NULL OR locked_at < NOW() - INTERVAL '120 seconds')
+          RETURNING id`,
+        [eventId],
+      );
+      assert.equal(reclamado.length, 1, "el claim con lease no funcionó");
+
+      // Un segundo worker no puede reclamarlo mientras el lease esté vivo.
+      const { rows: segundo } = await client.query(
+        `UPDATE smarttalk.billing_webhook_events
+            SET locked_at = NOW(), locked_by = 'qa-worker-19-bis'
+          WHERE id = $1 AND status = 'failed'
+            AND (locked_at IS NULL OR locked_at < NOW() - INTERVAL '120 seconds')
+          RETURNING id`,
+        [eventId],
+      );
+      assert.equal(segundo.length, 0, "dos workers reclamaron el mismo evento");
+
+      // (c) La liquidación: el worker reejecuta el mismo RPC que el webhook.
+      // Esta prueba valida los predicados, el lease y el RPC contra PostgreSQL;
+      // no invoca el módulo del worker, por lo que no se presenta como una
+      // prueba E2E de la función recoverFailedWebhookEvents.
+      await finalize(client, ctx, `QA-RECOVERY-${ctx.payment_id}`);
+
+      const { rows: subs } = await subscriptionsOf(client, ctx);
+      assert.equal(subs.length, 1, "la recuperación no debe duplicar la suscripción");
+      assert.equal(subs[0].status, "active", "la suscripción debía quedar activa");
+      assert.equal(subs[0].suspended_at, null);
+
+      // (d) Cierre del evento y liberación del lease.
+      await client.query(
+        `UPDATE smarttalk.billing_webhook_events
+            SET status = 'processed', last_error = NULL, processed_at = NOW(),
+                locked_at = NULL, locked_by = NULL
+          WHERE id = $1`,
+        [eventId],
+      );
+      const { rows: final } = await client.query(
+        `SELECT status, last_error, locked_by FROM smarttalk.billing_webhook_events WHERE id = $1`,
+        [eventId],
+      );
+      assert.equal(final[0].status, "processed");
+      assert.equal(final[0].last_error, null);
+      assert.equal(final[0].locked_by, null, "el lease debe liberarse al terminar");
+
+      // (e) Y la auditoría que D-1 exige puede escribirse.
+      await client.query(
+        `INSERT INTO smarttalk.billing_audit_events(
+           organization_id, actor_type, action, entity_type, entity_id,
+           correlation_id, before_data, after_data, result)
+         VALUES ($1, 'system', 'webhook_recovery_processed', 'billing_webhook_event', $2,
+                 gen_random_uuid(), '{"status":"failed"}', '{"status":"processed"}', 'success')`,
+        [ctx.organization_id, eventId],
+      );
+      const { rows: audit } = await client.query(
+        `SELECT action, result FROM smarttalk.billing_audit_events WHERE entity_id = $1`,
+        [eventId],
+      );
+      assert.equal(audit.length, 1);
+      assert.equal(audit[0].result, "success");
+    });
+  });
+});
+
 test("13. un checkout expirado no puede activar una suscripción", { skip }, async () => {
   await withClient(async (client) => {
     await inRollback(client, async () => {
