@@ -14,6 +14,7 @@
 //   Meta 10, TikTok 6, LinkedIn 5, Threads 5, GA4 2.
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { filterPausedBrandIds } from "@/lib/smarttalk/intake-guard";
 
 import { inngest } from "@/lib/inngest/client";
 import { decryptToken } from "@/lib/crypto";
@@ -189,8 +190,15 @@ export const fetchMetrics = inngest.createFunction(
       return (data ?? []) as AccountRow[];
     });
 
+    // Las métricas periódicas se omiten para marcas inactivas. Los datos
+    // históricos ya calculados permanecen.
+    const pausedClientIds = await filterPausedBrandIds(
+      accountsList.map((acc) => acc.client_id).filter((id): id is string => Boolean(id)),
+    );
+
     const accountsByLookup = new Map<string, AccountRow>();
     for (const acc of accountsList) {
+      if (acc.client_id && pausedClientIds.has(acc.client_id)) continue;
       accountsByLookup.set(`${acc.client_id ?? ""}::${acc.platform}`, acc);
     }
 

@@ -7,6 +7,8 @@ import type { WebhookPayload } from "@/lib/whatsapp/types";
 import { processIncomingMessage, processStatusUpdate } from "@/lib/whatsapp/webhook";
 import { persistWhatsAppWebhook } from "@/lib/webhook";
 import { clientIp, rateLimitWithWhitelist } from "@/lib/rate-limit";
+import { evaluateWhatsAppIntake } from "@/lib/smarttalk/intake-guard";
+import { INACTIVE_BRAND_INTAKE_RESPONSE } from "@/lib/smarttalk/brand-status";
 
 // Sprint 22 hardening: 200 req/min por IP para webhooks externos.
 const WEBHOOK_RATE_LIMIT = 200;
@@ -68,6 +70,28 @@ export async function POST(request: NextRequest) {
   }
 
   const payload: WebhookPayload = JSON.parse(body);
+
+  // Marca inactiva: se acusa recibo y se descarta ANTES de tocar nada. No se
+  // crea contacto, conversación, mensaje, historial legacy ni actividad, y no
+  // se actualiza unread_count. Sólo se descarta cuando **todos** los números
+  // del payload apuntan a marcas pausadas: un lote mixto se procesa y cada
+  // número vuelve a evaluarse aguas abajo.
+  const phoneNumberIds = [
+    ...new Set(
+      (payload.entry || [])
+        .flatMap((entry) => entry.changes || [])
+        .filter((change) => change.field === "messages")
+        .map((change) => change.value?.metadata?.phone_number_id)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
+
+  if (phoneNumberIds.length > 0) {
+    const decisions = await Promise.all(phoneNumberIds.map(evaluateWhatsAppIntake));
+    if (decisions.every((decision) => decision.reason === "inactive_brand")) {
+      return NextResponse.json(INACTIVE_BRAND_INTAKE_RESPONSE);
+    }
+  }
 
   await persistWhatsAppWebhook(payload);
 

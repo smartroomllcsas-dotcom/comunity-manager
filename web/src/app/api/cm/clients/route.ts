@@ -14,6 +14,7 @@ import { mysqlQuery, quoteId } from "@/lib/mysql";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
+import { getChannelsNeedingReconnection } from "@/lib/smarttalk/brand-lifecycle";
 
 const ALLOWED_PLATFORMS = new Set([
   "Instagram",
@@ -88,7 +89,24 @@ export async function GET() {
 
   const { data, error } = await query;
   if (error) return Response.json({ error: "No fue posible cargar las marcas." }, { status: 500 });
-  return Response.json({ clients: data || [] });
+
+  const clients = (data || []) as Record<string, unknown>[];
+
+  // Canales que una reactivación no pudo restaurar. Viaja con el listado —y no
+  // sólo en la respuesta del POST— para que el aviso sobreviva a una recarga:
+  // tras reactivar, la marca ya no está pausada y sin este dato no quedaría en
+  // la interfaz ninguna señal de que un canal se quedó fuera.
+  const needsReconnection = await getChannelsNeedingReconnection(
+    agent.organization_id,
+    clients.map((client) => client.id as string),
+  );
+
+  return Response.json({
+    clients: clients.map((client) => ({
+      ...client,
+      needs_reconnection: needsReconnection.get(client.id as string) || [],
+    })),
+  });
 }
 
 export async function POST(request: NextRequest) {

@@ -17,6 +17,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
+import { BRAND_STATUS_PAUSED } from "@/lib/smarttalk/brand-status";
 
 export async function GET() {
   const supabase = await createClient();
@@ -55,6 +56,11 @@ export async function GET() {
     .from("cm_clients")
     .select("id, name")
     .eq("smarttalk_organization_id", agent.organization_id)
+    // Una marca inactiva no es una marca operativa: no debe ofrecerse como
+    // filtro ni como destino de trabajo nuevo. El historial de sus
+    // conversaciones sigue siendo accesible por otras vías; lo que desaparece
+    // es la marca como opción viva del Inbox.
+    .or(`status.is.null,status.neq.${BRAND_STATUS_PAUSED}`)
     .order("name", { ascending: true });
 
   // `assignedBrandIds` nulo significa "sin restricción por marca": la consulta

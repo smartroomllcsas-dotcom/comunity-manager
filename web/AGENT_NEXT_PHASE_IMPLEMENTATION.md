@@ -4259,3 +4259,532 @@ el nombre y guardarlo sin desconectar sus cuentas ni alterar sus canales,
 contactos o conversaciones. El endpoint `PATCH /api/cm/clients` valida sesión,
 organización y asignación de marca; también soporta el proveedor local MySQL.
 No requiere migración.
+
+---
+
+# Iteración 14 · Desactivación reversible de marcas
+
+## 93. Objetivo de negocio
+
+La agencia necesita **dejar de administrar una marca sin eliminarla**. Hasta
+ahora la única salida era borrarla —perdiendo contactos, conversaciones,
+mensajes y configuración— o dejarla viva ocupando cupo del plan y recibiendo
+leads que nadie atiende.
+
+La desactivación resuelve las dos mitades del problema:
+
+| | Antes | Ahora |
+|---|---|---|
+| Dejar de atender una marca | Borrarla o ignorarla | Desactivarla; deja de recibir |
+| Crear otra marca con el plan lleno | Subir de plan o borrar una | Desactivar libera el cupo |
+| Volver atrás | Imposible | Reactivar restaura canales e historial |
+
+Nada se borra. Ni `cm_clients`, ni contactos, ni conversaciones, ni mensajes, ni
+cuentas sociales, ni credenciales cifradas, ni asignaciones de asesores. La
+suscripción de la agencia no se toca.
+
+## 94. Estados
+
+Se **reutiliza** `public.cm_clients.status = 'paused'`. Es TEXT, no un enum, y
+la interfaz de `/clients` ya sabía pintar ese valor (`statusStyles.paused`
+existía desde antes). No se creó ningún estado nuevo.
+
+| Capa | Valor |
+|---|---|
+| Base de datos | `paused` |
+| Interfaz | **«Inactiva»** |
+| Canales de la marca | `disconnected` |
+
+La etiqueta difiere a propósito. «Pausada» sugiere algo temporal y automático;
+lo que el cliente necesita entender es que la marca **no recibe nada**. Los dos
+literales viven en `brand-status.ts`, que no importa Supabase y por eso puede
+usarse tanto en servidor como en los componentes.
+
+Para `channels` no hizo falta tocar nada: el enum `smarttalk.channel_status` ya
+tenía `disconnected` y `pending`, que es todo lo que la pausa necesita.
+
+## 95. Endpoint
+
+```
+POST /api/cm/clients/[id]/lifecycle
+Body: { "action": "deactivate" } | { "action": "reactivate" }
+```
+
+| Rol | Resultado |
+|---|---|
+| super admin | 200 |
+| admin de agencia (`role='admin'` y `member_type='agency_user'`) | 200 |
+| `brand_admin` | **403**, aunque la marca sea suya |
+| `brand_advisor` | **403** |
+| marca de otra organización | **404** |
+| marca inexistente | **404**, con el **mismo** mensaje |
+
+Los dos últimos casos responden idéntico a propósito: un 403 confirmaría que
+ese identificador existe. El filtro por organización viaja dentro de la propia
+consulta (`getBrandInOrg`), no en una comprobación posterior, así que una marca
+ajena es literalmente indistinguible de una inexistente.
+
+`brand_admin` queda fuera porque quién administra el catálogo de marcas —y por
+tanto el consumo del plan— es la agencia, no quien opera una marca concreta.
+
+La respuesta incluye `changed`. Es `false` cuando la marca ya estaba en el
+estado pedido: la llamada es idempotente y responde 200 igualmente, porque el
+estado final es el que se pidió.
+
+## 96. Migración
+
+`supabase/migrations/20260812000100_036_brand_pause_lifecycle.sql` — **no
+aplicada**, lista para revisión.
+
+Cuatro bloques:
+
+1. **Admitir `paused`.** Si existe un CHECK sobre `status`, se **extiende**
+   (`… OR status = 'paused'`) conservando íntegra la definición previa. No se
+   elimina: perder esa validación sería un daño colateral silencioso.
+2. **`smarttalk.brand_channel_pause_state`** — estado previo por canal, con
+   índice **único por `channel_id`**. Es lo que hace la pausa idempotente:
+   pausar dos veces reescribe la misma fila.
+3. **`smarttalk.brand_lifecycle_events`** — append-only: quién, cuándo, qué
+   acción, cuántos canales y si fue no-op.
+4. **`reserve_billing_capacity`** re-emitida con **un solo cambio**: la rama
+   `brands.total` ahora filtra `status IS DISTINCT FROM 'paused'`.
+
+### Por qué dos tablas y no una
+
+El requisito pedía «una tabla de estado de pausa» con único por `channel_id`, y
+también «registrar quién y cuándo realizó la pausa». Esas dos cosas no caben en
+la misma tabla:
+
+- Una marca **sin canales operativos** no generaría ninguna fila, y la pausa no
+  dejaría rastro de haber ocurrido.
+- El único por `channel_id` **sobrescribe** la pausa anterior, así que el
+  historial de pausas se perdería.
+
+`brand_channel_pause_state` guarda lo que hay que restaurar (la última pausa de
+cada canal); `brand_lifecycle_events` guarda lo que hay que auditar (todas las
+operaciones, incluidos los intentos no-op). Ambas con RLS `service_role`-only,
+igual que `billing_quota_reservations`.
+
+### Un caso que apareció al ejecutar la migración
+
+`pg_get_constraintdef()` añade el sufijo ` NOT VALID` cuando la restricción
+nunca se validó contra las filas existentes. La primera versión del bloque 1
+reinsertaba ese sufijo **dentro** del paréntesis:
+
+```sql
+CHECK (((status = ANY (...))) NOT VALID OR status = 'paused')  -- error de sintaxis
+```
+
+Lo destapó el fixture de QA, no una revisión. La versión final separa el
+sufijo, lo vuelve a poner fuera del paréntesis y **conserva el estado de
+validación original**: revalidar de golpe una restricción que el equipo dejó
+`NOT VALID` a propósito podría fallar por filas históricas ajenas a esta
+migración.
+
+## 97. Cómo se preservan los datos
+
+Desactivar hace exactamente dos escrituras, y ningún `DELETE`:
+
+1. `cm_clients.status = 'paused'`
+2. por cada canal **que no estuviera ya `disconnected`**: guardar su estado
+   previo y bajarlo a `disconnected`
+
+El orden es deliberado. PostgREST no da transacción entre esquemas distintos,
+así que hay que elegir qué pasa si el proceso muere a mitad. Con la marca
+primero, el peor caso es «marca pausada con algún canal aún activo» — y la
+recepción ya está bloqueada, porque los webhooks consultan el estado de la
+marca. Con el orden inverso el peor caso sería «canales caídos con la marca
+viva»: no bloquearía nada y además parecería una avería.
+
+**Las asignaciones de asesores no se tocan.** El requisito permitía retirarlas;
+se descartó. Borrarlas obligaría a rehacerlas a mano al reactivar y perdería
+quién atendía qué. El efecto buscado se consigue igual: la marca pausada deja
+de aparecer como asignable y deja de admitir operaciones nuevas.
+
+## 98. Cómo se liberan los cupos
+
+Dos filtros que **deben decir lo mismo**, y por eso llevan comentarios cruzados:
+
+| Capa | Filtro |
+|---|---|
+| SQL (`reserve_billing_capacity`) | `status IS DISTINCT FROM 'paused'` |
+| TypeScript (`getCurrentUsage`) | `.or("status.is.null,status.neq.paused")` |
+
+La cláusula de TypeScript parece rebuscada y no lo es. `.neq("status","paused")`
+a secas **también descarta las filas con `status` NULL**, porque en SQL
+`NULL <> 'paused'` no es TRUE. La función SQL usa `IS DISTINCT FROM`, que sí las
+cuenta. Con `.neq` solo, una marca con estado nulo desaparecería del cupo en la
+comprobación previa y reaparecería en la reserva atómica: el cliente vería un
+error contradictorio. Hay una prueba dedicada a esto.
+
+La regla es por **exclusión**, no por lista blanca: todo lo que no sea `paused`
+cuenta. Así un estado futuro cuenta por defecto en vez de desaparecer del cupo
+sin que nadie se entere.
+
+`channels.active` no necesitó cambio: ya excluía `disconnected`, y la pausa deja
+los canales exactamente ahí.
+
+## 99. Cómo se bloquean los webhooks
+
+Una sola guarda, `intake-guard.ts`, con dos barreras:
+
+1. **Canal `disconnected`** — la barrera principal, que ya existía en casi todos
+   los caminos.
+2. **Marca pausada** — la red de seguridad, que cubre un canal que quedara
+   operativo pese a la pausa y deja la intención de negocio escrita donde se
+   aplica.
+
+| Camino | Estado antes | Qué se hizo |
+|---|---|---|
+| `/api/webhook/whatsapp` | filtraba `status='active'` | + respuesta explícita `ignored: inactive_brand` |
+| `processIncomingMessage` / `processStatusUpdate` | ya exigían canal `active` | cubiertos por la pausa |
+| `persistWhatsAppWebhook` (histórico `cm_*`) | **no miraba el canal** | guarda por `account.client_id` |
+| `findMatchingChannel` (Meta) | filtraba `status='active'` | + exclusión de marcas pausadas |
+| `receiveMetaWebhook` | encolaba siempre | descarta antes de encolar |
+| `processWebhookEventRow` / eventos pendientes | — | sin canal que emparejar → 0 procesados |
+| `/api/webhook/respond-io` | **seleccionaba `status` y no lo miraba** | guarda completa |
+
+Dos de esas filas eran huecos reales, no defensa en profundidad:
+
+- **El histórico legacy** escribía en `cm_chat_history` y `cm_activity_log` a
+  partir de `account.client_id` —que *es* la marca— sin consultar nunca el
+  estado del canal SmartTalk. Una marca pausada habría seguido acumulando
+  actividad por ahí.
+- **Respond.io** seleccionaba la columna `status` del canal y no la comprobaba
+  en ningún momento: un canal `disconnected` seguía creando contactos,
+  conversaciones y mensajes.
+
+La respuesta siempre es **200** con `{ ok: true, ignored: "inactive_brand" }`.
+Un 4xx o 5xx haría que el proveedor reintentara durante horas y, en Meta,
+provocaría la baja automática de la suscripción del webhook.
+
+En Meta se descarta **antes de encolar** en `webhook_events`. Encolar y que el
+procesador lo ignore después dejaría la cola acumulando trabajo que nunca
+producirá nada.
+
+## 100. Bloqueo de envíos y automatizaciones
+
+| Camino | Comportamiento con marca inactiva |
+|---|---|
+| Responder desde el Inbox | 409 `inactive_brand` |
+| `/api/messages/send` | 409, **antes** de consumir cupo de mensajes |
+| `/api/broadcasts/send` | 409; el broadcast y sus destinatarios se conservan |
+| Publicación programada (Inngest) | se omite; el post conserva fila y programación |
+| Sync de Instagram | el canal se salta |
+| Menciones nuevas | no se consultan; las guardadas siguen visibles |
+| Métricas periódicas | se omiten; el histórico permanece |
+| Health checks | se omiten |
+
+El caso de las métricas y los health checks tiene una razón propia además de la
+obvia: medirían una caída provocada por la propia pausa y dispararían falsas
+alertas de crisis de marca.
+
+En `/api/messages/send` la guarda va **antes** de `checkBillingFeature`.
+Descontar un envío que no se va a realizar sería cobrar por nada.
+
+## 101. Reactivación, y qué pasa si un token expiró
+
+Restaura **sólo** los canales cuyo `previous_status` era `active`. Un canal que
+ya estaba `pending` o `error` antes de la pausa se queda como estaba: la pausa
+no puede arreglar lo que ya venía roto, y devolverlo a `active` sería inventar
+una conexión que nunca existió.
+
+| Situación al reactivar | Estado final | Aviso |
+|---|---|---|
+| Estaba `active`, token vigente | `active` | — |
+| Estaba `active`, `token_expires_at` vencido | **`pending`** | «Requiere reconexión» |
+| El canal desapareció durante la pausa | — | «Requiere reconexión» |
+| Estaba `disconnected` / `error` antes | sin cambios | — |
+
+La marca vuelve a **su estado anterior**, no a `active` por defecto: una marca
+que estaba en `onboarding` cuando se pausó vuelve a `onboarding`, no se da por
+configurada. Ese estado se lee del último evento `deactivate` de
+`brand_lifecycle_events`.
+
+Las filas de `brand_channel_pause_state` no se borran: se sellan con
+`reactivated_at`, `reactivated_by` y el motivo.
+
+## 102. Interfaz de `/clients`
+
+**Marca activa:** botón «Desactivar» → modal de confirmación con el texto
+acordado literal (vive en `BRAND_DEACTIVATE_CONFIRMATION`, y una prueba
+comprueba sus cuatro frases).
+
+**Marca inactiva:**
+
+- badge **«Inactiva»** en lugar del estado crudo;
+- aviso *«Esta marca está inactiva y no recibe nuevos leads ni mensajes»*, más
+  la aclaración de que el histórico sigue disponible;
+- botón «Reactivar»;
+- los botones de conexión de Facebook, Instagram y WhatsApp **no se
+  renderizan**: viven dentro de la rama `!isPaused`;
+- si algún canal quedó pidiendo reconexión, se nombra explícitamente.
+
+La interfaz **no oculta el botón según el rol**. Si un `brand_admin` lo pulsa,
+recibe el 403 del backend y ve su mensaje. Es preferible un error claro a una
+interfaz que decide permisos por su cuenta y acaba divergiendo del servidor.
+
+## 103. Filtros y seguridad
+
+| Punto | Cambio |
+|---|---|
+| `/api/inbox/brands` | las marcas pausadas dejan de listarse como operativas |
+| `POST /api/channels` | 409 si la marca está inactiva |
+| `/api/channels/whatsapp/connect` | 409 |
+| `/api/channels/respond-io/connect` | 409 |
+| `/api/channels/sync-legacy` | excluye marcas pausadas de la resincronización |
+| `/api/agents/memberships` | 409 al asignar un asesor **nuevo** a una marca inactiva |
+
+`sync-legacy` merece mención: reinsertaba canales en estado `active` a partir de
+las cuentas legacy. Sin excluir las marcas pausadas, habría deshecho la pausa
+por la puerta de atrás.
+
+En `memberships` sólo se bloquean las asignaciones **nuevas**. Las existentes se
+conservan intactas, coherente con §97.
+
+## 104. Pruebas ejecutadas
+
+### `src/qa-e2e/brand-lifecycle.test.ts` — 29 pruebas, 29 en verde
+
+Contra las rutas y funciones reales, con el Supabase en memoria de QA.
+
+| Bloque | Cubre | Resultado |
+|---|---|---|
+| **A · Permisos** | admin 200, super admin 200, brand_admin 403, brand_advisor 403, otra organización 404 con mensaje idéntico al de una marca inexistente, acción inválida 400 sin tocar nada | ✅ 6/6 |
+| **B · Datos** | contactos, conversaciones, mensajes, sociales, asignaciones y `unread_count` intactos; tokens (plano y cifrado) sin tocar; sólo baja el canal operativo; reactivar restaura ese y no el que ya estaba caído; `onboarding` vuelve a `onboarding`; auditoría de quién y cuándo; token vencido → `pending` | ✅ 6/6 |
+| **C · Idempotencia** | desactivar ×2 y reactivar ×2 sin duplicar ni fallar; el segundo intento queda como `was_noop`; un ciclo repetido reutiliza la misma fila | ✅ 3/3 |
+| **D · Cupos** | plan de 1 marca lleno → bloqueado; desactivar libera; creada la siguiente, la tercera vuelve a bloquearse; una marca con `status` NULL sigue contando; el Inbox deja de ofrecer la pausada | ✅ 5/5 |
+| **E · Webhooks** | el mismo `phone_number_id` pasa de admitido a `inactive_brand`; Respond.io ignora un canal de marca pausada aunque siguiera `active`; el evento Meta pendiente ya no encuentra destino; un canal inexistente **no** se confunde con marca inactiva; la respuesta es 200 | ✅ 5/5 |
+| **F · Interfaz** | modal con el texto literal, badge, aviso, botón Reactivar, y los tres conectores dentro de la rama no-pausada | ✅ 4/4 |
+
+### `supabase/qa/002_qa_brand_pause_capacity.sql` — 5/5 en verde
+
+Ejecutado contra el clúster PostgreSQL 16 desechable (socket `/tmp/pgqa`, base
+`qatest`), con la migración 036 aplicada. Todo dentro de `BEGIN … ROLLBACK`.
+
+```
+OK 1 · con la marca A activa el cupo está lleno (1/1)
+OK 2 · con la marca A pausada el cupo se libera (uso=0)
+OK 3 · la tercera marca sigue bloqueada (1/1)
+OK 4 · una marca con status NULL sigue ocupando cupo
+OK 5 · CHECK extendido conservando lo anterior:
+        CHECK (((status = ANY (ARRAY['active','onboarding'])) OR (status = 'paused'))) NOT VALID
+```
+
+La migración se aplicó y **se reaplicó** sobre la misma base sin errores.
+
+### Suite completa
+
+```
+npm test     → Test Files 32 passed | 1 skipped (33)
+               Tests 609 passed | 4 skipped (613)
+               node --test: 25 tests, 0 fail
+npm run lint → ✖ 171 problems (0 errors, 171 warnings)   ← todos preexistentes
+npm run build → ✓ Compiled successfully; ƒ /api/cm/clients/[id]/lifecycle registrada
+```
+
+## 105. Validación manual pendiente
+
+Nada de lo siguiente se puede cerrar sin despliegue, y ninguno es trabajo de
+código:
+
+1. **Ver la interfaz en el navegador**: modal, badge «Inactiva», desaparición de
+   los botones de conexión y aviso de reconexión.
+2. **Un webhook real de un proveedor real** contra una marca pausada. Las
+   pruebas ejercitan la guarda; nadie ha visto todavía a Meta o a WhatsApp
+   recibir el `200 ignored`.
+3. **Aplicar la migración 036** en producción. Está sin aplicar por diseño.
+4. **Un token realmente expirado** durante una pausa larga: el camino
+   `pending` + «Requiere reconexión» está probado con un `token_expires_at`
+   sintético, no con una revocación real de Meta.
+
+## 106. Riesgos pendientes
+
+| # | Riesgo | Gravedad | Mitigación actual |
+|---|---|---|---|
+| 1 | Desactivar no es atómico entre esquemas: si el proceso muere tras pausar la marca, algún canal puede quedar `active` | Media | El orden elegido deja el fallo del lado seguro (§97) y la guarda de marca bloquea igual; repetir la acción lo corrige, porque es idempotente |
+| 2 | `brand_channel_pause_state` guarda sólo la última pausa por canal | Baja | Aceptado y documentado; el historial completo está en `brand_lifecycle_events` |
+| 3 | Un canal creado **durante** la pausa quedaría activo bajo una marca pausada | Baja | Los cuatro puntos de conexión responden 409 (§103); si aun así ocurriera, la guarda de recepción lo bloquea |
+| 4 | Si la lectura de `cm_clients` falla, `isBrandPaused` devuelve `false` (no bloquea) | Baja | Deliberado: un fallo transitorio de base no debe tumbar la recepción de las marcas sanas; la barrera del canal `disconnected` sigue en pie |
+| 5 | El CHECK de `cm_clients.status` no se revierte en el rollback | Baja | Documentado en ROLLBACK.md con la comprobación previa de marcas pausadas |
+| 6 | Marcas pausadas al revertir la migración quedarían ocupando cupo sin recibir nada | Media | ROLLBACK.md obliga a comprobarlo antes del primer paso |
+
+## 107. Archivos
+
+**Nuevos**
+
+```
+web/supabase/migrations/20260812000100_036_brand_pause_lifecycle.sql
+web/supabase/qa/002_qa_brand_pause_capacity.sql
+web/src/lib/smarttalk/brand-status.ts               # literales y reglas puras
+web/src/lib/smarttalk/brand-lifecycle.ts            # desactivar/reactivar
+web/src/lib/smarttalk/intake-guard.ts               # guarda única de recepción
+web/src/app/api/cm/clients/[id]/lifecycle/route.ts  # endpoint
+web/src/qa-e2e/brand-lifecycle.test.ts              # 29 pruebas A–F
+```
+
+**Modificados**
+
+```
+web/src/lib/billing/service.ts                      # brands.total excluye pausadas
+web/src/lib/smarttalk/brand-scope.ts                # getBrandInOrganization expone status
+web/src/lib/smarttalk/meta-webhook.ts               # exclusión de marcas pausadas + descarte previo a encolar
+web/src/lib/smarttalk/instagram-sync.ts             # se salta canales de marcas pausadas
+web/src/lib/webhook.ts                              # histórico legacy cm_* bloqueado
+web/src/app/api/webhook/whatsapp/route.ts           # respuesta ignored: inactive_brand
+web/src/app/api/webhook/respond-io/route.ts         # guarda que faltaba por completo
+web/src/app/api/messages/send/route.ts              # 409 antes de consumir cupo
+web/src/app/api/broadcasts/send/route.ts            # 409
+web/src/app/api/inbox/[conversationId]/reply/route.ts  # 409
+web/src/app/api/inbox/brands/route.ts               # excluye pausadas
+web/src/app/api/channels/route.ts                   # 409 al conectar
+web/src/app/api/channels/whatsapp/connect/route.ts  # 409
+web/src/app/api/channels/respond-io/connect/route.ts # 409
+web/src/app/api/channels/sync-legacy/route.ts       # no resincroniza pausadas
+web/src/app/api/agents/memberships/route.ts         # 409 en asignaciones nuevas
+web/src/lib/inngest/functions/publish-scheduled-post.ts
+web/src/lib/inngest/functions/fetch-mentions.ts
+web/src/lib/inngest/functions/fetch-metrics.ts
+web/src/lib/inngest/functions/compute-brand-health.ts
+web/src/app/(agency)/clients/page.tsx               # Desactivar, modal, badge, Reactivar
+web/src/qa-e2e/helpers/fake-supabase.ts             # upsert con onConflict
+web/supabase/migrations/ROLLBACK.md                 # rollback de 036
+```
+
+Ninguna migración aplicada. Ningún secreto ni token en este documento. Ningún
+dato de producción tocado: todo el SQL corrió contra el clúster desechable.
+
+## 108. Identificador del commit
+
+**Sin commit.** El trabajo queda en el árbol de `codex/add-manual-contact`, sin
+`git add`, sobre el commit base `73da677` (*feat: allow renaming managed
+companies*). Codex hará commit, push y deploy tras la revisión.
+
+`git diff --check` limpio.
+
+---
+
+# Iteración 15 · Corrección del aviso de reconexión
+
+## 109. El defecto
+
+El aviso «Requiere reconexión» estaba escrito, pero **no se veía nunca en el
+momento en que sirve**. Dos fallos encadenados, ambos en §102:
+
+1. **Se renderizaba dentro de la rama `isPaused`.** El aviso sólo tiene sentido
+   *después* de reactivar —la marca ya volvió, pero uno de sus canales no—, y
+   en ese instante `isPaused` es `false`. El bloque era código inalcanzable en
+   la práctica.
+2. **Vivía sólo en estado de React.** Aunque la condición hubiera sido la
+   correcta, el dato venía únicamente de la respuesta del POST. Una recarga —o
+   simplemente volver a `/clients` más tarde— lo borraba, y no quedaba ninguna
+   señal de que un canal se había quedado fuera.
+
+El resultado combinado: un canal podía quedar en `pending` tras la
+reactivación y el operador no enterarse jamás, salvo mirando la respuesta HTTP
+en el momento exacto.
+
+## 110. La corrección
+
+**`getChannelsNeedingReconnection(organizationId, brandIds)`** en
+`brand-lifecycle.ts`, consultando `brand_channel_pause_state`.
+
+La decisión de diseño que importa: el aviso **se deriva del estado actual del
+canal, no sólo de la nota histórica**. `reactivation_note` registra lo que pasó
+aquella vez y no caduca; si el aviso dependiera sólo de ella seguiría
+apareciendo para siempre, incluso después de que el operador reconectara el
+canal. Cruzándola con el estado vigente del canal:
+
+| `reactivation_note` | Estado actual del canal | ¿Se avisa? |
+|---|---|---|
+| `token_expired` | `pending` / `disconnected` / `error` | **Sí** |
+| `token_expired` | `active` (ya reconectado) | No — se apaga solo |
+| `channel_missing` | el canal ya no existe | **Sí** |
+| `previously_inactive` | cualquiera | No |
+
+`previously_inactive` queda fuera a propósito: ese canal ya estaba caído antes
+de la pausa, así que no es algo que la pausa haya roto ni que la reactivación
+deba reclamar.
+
+Nadie tiene que marcar el aviso como resuelto: desaparece cuando el problema
+desaparece.
+
+### Dónde se expone
+
+`GET /api/cm/clients` devuelve ahora `needs_reconnection` por marca, con
+`channelId`, `channelName` y `note`. Va en el listado —no sólo en la respuesta
+del POST— precisamente para que sobreviva a la recarga.
+
+### Cómo se combina en la interfaz
+
+El aviso se renderiza **fuera** de `isPaused`, antes del bloque de canales. La
+fuente duradera es `client.needs_reconnection`; el estado local sólo cubre el
+instante entre el POST y el refresco del listado.
+
+Una sutileza que costó una segunda pasada: el estado local **sólo gana cuando
+tiene contenido**. Con un `??` a secas, una desactivación —que siempre responde
+`needsReconnection: []`— habría tapado un aviso real que el servidor sí estaba
+reportando. La condición es explícitamente `localReconnect.length > 0`.
+
+## 111. Pruebas
+
+`src/qa-e2e/brand-lifecycle.test.ts` pasa de 29 a **38 pruebas, 38 en verde**.
+Bloque nuevo **G · Aviso de reconexión**:
+
+| Prueba | Resultado |
+|---|---|
+| El POST de reactivación reporta el canal que no volvió | ✅ |
+| `GET /api/cm/clients` lo sigue reportando **con la marca ya activa** | ✅ |
+| El aviso **se apaga solo** cuando el canal vuelve a `active` | ✅ |
+| Un canal desaparecido durante la pausa se reporta como `channel_missing` | ✅ |
+| Un canal que ya estaba caído antes de la pausa **no** pide reconexión | ✅ |
+| Una reactivación limpia no deja aviso en ninguna marca | ✅ |
+| El aviso no se filtra a marcas de otra organización | ✅ |
+| La interfaz lo renderiza **fuera** de la rama `isPaused` | ✅ |
+| La interfaz prefiere el dato del servidor y no lo tapa con un vacío local | ✅ |
+
+### Comprobación de que las pruebas sirven
+
+No basta con que pasen. Se revirtió la corrección en la ruta
+(`needs_reconnection: []`) y se volvió a ejecutar:
+
+```
+× GET /api/cm/clients lo sigue reportando cuando la marca YA está activa
+× el aviso se apaga solo cuando el canal se reconecta
+× un canal desaparecido durante la pausa también se reporta
+  Tests  3 failed | 35 passed (38)
+```
+
+Restaurada la corrección, 38/38. Las pruebas detectan la regresión que dicen
+cubrir.
+
+### Suite completa
+
+```
+npm test     → Test Files 32 passed | 1 skipped (33)
+               Tests 618 passed | 4 skipped (622)
+               node --test: 25 tests, 0 fail
+npm run build → ✓ Compiled successfully
+```
+
+## 112. Archivos
+
+**Modificados**
+
+```
+web/src/lib/smarttalk/brand-status.ts       # RECONNECTION_NOTES
+web/src/lib/smarttalk/brand-lifecycle.ts    # getChannelsNeedingReconnection
+web/src/app/api/cm/clients/route.ts         # GET expone needs_reconnection
+web/src/app/(agency)/clients/page.tsx       # aviso fuera de isPaused, dato del servidor
+web/src/qa-e2e/brand-lifecycle.test.ts      # bloque G (9 pruebas)
+```
+
+Sin migraciones nuevas: `brand_channel_pause_state` ya tenía
+`reactivation_note` desde la migración 036. Sin commit, push ni deploy.
+
+## 113. Validación manual pendiente
+
+Sigue en pie lo de §105: nadie ha visto el aviso en pantalla. Lo que ahora sí
+está cubierto por pruebas es que el dato llega al cliente y persiste; lo que
+falta es comprobar visualmente que el bloque ámbar se lee bien en la tarjeta,
+tras el despliegue.

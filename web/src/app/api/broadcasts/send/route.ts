@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isBrandPaused } from "@/lib/smarttalk/brand-lifecycle";
 import { sendTemplate, getOrgWhatsAppCredentials } from "@/lib/whatsapp/api";
 import {
   billingDeniedResponse,
@@ -84,6 +85,15 @@ export async function POST(request: NextRequest) {
 
   const recipients = contacts.map((c) => ({ broadcast_id: broadcastId, contact_id: c.id, status: "pending" as const }));
   await admin.from("broadcast_recipients").insert(recipients);
+
+  // Los broadcasts de una marca inactiva no salen. El broadcast conserva su
+  // fila y sus destinatarios: se podrá enviar cuando la marca vuelva.
+  if (channelBrandId && (await isBrandPaused(channelBrandId))) {
+    return NextResponse.json(
+      { error: "inactive_brand", message: "Esta marca está inactiva y no puede enviar difusiones." },
+      { status: 409 },
+    );
+  }
 
   const { phoneNumberId, accessToken } = await getOrgWhatsAppCredentials(agent.organization_id, broadcast.channel_id);
 

@@ -19,6 +19,7 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
+import { filterPausedBrandIds } from "@/lib/smarttalk/intake-guard";
 import { inngest, INNGEST_EVENTS } from "@/lib/inngest/client";
 
 function getPublicAdmin() {
@@ -107,13 +108,19 @@ export const computeBrandHealth = inngest.createFunction(
 
     if (clients.length === 0) return { snapshots: 0, crises: 0 };
 
+    // Los health checks operativos no corren para marcas inactivas: medirían
+    // una caída provocada por la propia pausa y dispararían falsas crisis.
+    const pausedClientIds = await filterPausedBrandIds(clients.map((c) => c.client_id));
+    const activeClients = clients.filter((c) => !pausedClientIds.has(c.client_id));
+    if (activeClients.length === 0) return { snapshots: 0, crises: 0 };
+
     let snapshots = 0;
     let crises = 0;
     const now = new Date();
     const windowStart = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const prevStart = new Date(now.getTime() - 48 * 60 * 60 * 1000);
 
-    for (const c of clients) {
+    for (const c of activeClients) {
       const result = await step.run(`snapshot-${c.client_id}`, async () => {
         const supabase = getPublicAdmin();
 

@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { filterPausedBrandIds } from "@/lib/smarttalk/intake-guard";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import {
   billingDeniedResponse,
@@ -260,6 +261,24 @@ export async function PATCH(request: NextRequest) {
         source: "api/agents/memberships",
       });
       if (!decision.allowed) return billingDeniedResponse(decision);
+    }
+  }
+
+  // Un asesor no recibe asignaciones nuevas de una marca inactiva. Las
+  // asignaciones que ya existían NO se tocan: se conservan para que la
+  // reactivación devuelva el equipo tal como estaba.
+  const newBrandIds = brandIds.filter((id) => !currentBrandIds.has(id));
+  if (newBrandIds.length > 0) {
+    const pausedTargets = await filterPausedBrandIds(newBrandIds);
+    if (pausedTargets.size > 0) {
+      return Response.json(
+        {
+          error: "inactive_brand",
+          message: "No se pueden asignar asesores a una marca inactiva.",
+          brandIds: [...pausedTargets],
+        },
+        { status: 409 }
+      );
     }
   }
 

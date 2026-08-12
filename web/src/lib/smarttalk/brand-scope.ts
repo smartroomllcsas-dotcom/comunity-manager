@@ -34,7 +34,10 @@ export async function getBrandInOrganization(brandId: string, organizationId: st
   const admin = createAdminClient("public");
   const { data, error } = await admin
     .from("cm_clients")
-    .select("id, name, smarttalk_organization_id")
+    // `status` viaja para que quien conecte un canal pueda rechazar una marca
+    // inactiva. La lectura NO se filtra por estado: una marca pausada sigue
+    // siendo accesible para consultar su historial.
+    .select("id, name, status, smarttalk_organization_id")
     .eq("id", brandId)
     .eq("smarttalk_organization_id", organizationId)
     .maybeSingle();

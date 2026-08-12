@@ -19,6 +19,7 @@ import {
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { rateLimit } from "@/lib/rate-limit";
 import { getAccessibleConversation } from "@/lib/smarttalk/brand-scope";
+import { isBrandPaused } from "@/lib/smarttalk/brand-lifecycle";
 
 // Sprint 22 hardening: 60 req/min por user para envío de mensajes.
 const MESSAGES_RATE_LIMIT = 60;
@@ -83,6 +84,15 @@ export async function POST(request: NextRequest) {
 
   if (!conversation || !conversation.contact) {
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+  }
+
+  // Una marca inactiva no envía. Va antes del consumo de cupo de mensajes:
+  // descontar un envío que no se va a realizar sería cobrar por nada.
+  if (await isBrandPaused(accessibleConversation.brand_id)) {
+    return NextResponse.json(
+      { error: "inactive_brand", message: "Esta marca está inactiva y no puede enviar mensajes." },
+      { status: 409 },
+    );
   }
 
   const billingDecision = await checkBillingFeature({

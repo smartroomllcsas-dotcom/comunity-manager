@@ -14,6 +14,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { filterPausedBrandIds } from "@/lib/smarttalk/intake-guard";
 import { createClient } from "@supabase/supabase-js";
 import { inngest } from "@/lib/inngest/client";
 import { decryptToken } from "@/lib/crypto";
@@ -107,6 +108,10 @@ export const fetchMentions = inngest.createFunction(
       return map;
     });
 
+    const pausedClientIds = await step.run("load-paused-clients", async () =>
+      Array.from(await filterPausedBrandIds(clientIds)),
+    ).then((ids) => new Set(ids as string[]));
+
     const anthropicKey = process.env.ANTHROPIC_API_KEY;
     const anthropic = anthropicKey
       ? new Anthropic({ apiKey: anthropicKey })
@@ -116,6 +121,9 @@ export const fetchMentions = inngest.createFunction(
 
     for (const account of accounts) {
       if (!account.client_id || !account.access_token_encrypted) continue;
+      // Una marca inactiva no consulta menciones nuevas. Las ya guardadas se
+      // conservan y siguen consultables.
+      if (pausedClientIds.has(account.client_id)) continue;
 
       const stepId = `process-${account.id}`;
       const inserted = await step.run(stepId, async () => {

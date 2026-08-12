@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { isPausedBrandStatus } from "@/lib/smarttalk/brand-status";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -45,6 +46,16 @@ export async function POST(request: NextRequest) {
   if (!brand) {
     return Response.json({ error: "La marca no pertenece a esta organización" }, { status: 403 });
   }
+  if (isPausedBrandStatus((brand as { status?: string | null }).status)) {
+    return Response.json(
+      {
+        error: "inactive_brand",
+        message: "Esta marca está inactiva. Reactívala antes de conectar canales.",
+      },
+      { status: 409 }
+    );
+  }
+
   const assignedBrandIds = await getAgentBrandIds(agent);
   if (assignedBrandIds && !assignedBrandIds.includes(brand.id)) {
     return Response.json({ error: "No autorizado para esta marca" }, { status: 403 });

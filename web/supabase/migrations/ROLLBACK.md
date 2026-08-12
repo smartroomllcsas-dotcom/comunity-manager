@@ -165,3 +165,78 @@ aplicarlos en orden restaura el estado sin pasos adicionales:
 
 Verificado en la base desechable: rollback completo y reaplicación, ambos sin
 error.
+
+---
+
+# 036 · Desactivación reversible de marcas
+
+Rollback de `20260812000100_036_brand_pause_lifecycle.sql`.
+
+## Antes de nada: ¿hay marcas pausadas?
+
+El rollback devuelve el conteo de cupo a «todas las marcas cuentan». Si alguna
+marca está pausada, revertir sin reactivarla la deja **ocupando cupo pero sin
+recibir nada**: lo peor de los dos mundos. Comprueba primero:
+
+```sql
+SELECT id, name, smarttalk_organization_id
+FROM public.cm_clients
+WHERE status = 'paused';
+```
+
+Si devuelve filas, decide explícitamente qué hacer con ellas —reactivarlas por
+la interfaz, o dejarlas pausadas asumiendo que consumirán cupo— antes de seguir.
+
+## Pasos
+
+```sql
+-- 1. Restaurar el conteo de brands.total de la migración 031.
+--    Sólo cambia esa rama; el resto del cuerpo es idéntico.
+--    Reaplica el archivo 031 completo:
+--    \i supabase/migrations/20260809000100_031_atomic_billing_quota.sql
+
+-- 2. Tablas nuevas. CASCADE no es necesario: nada más las referencia.
+DROP TABLE IF EXISTS smarttalk.brand_channel_pause_state;
+DROP TABLE IF EXISTS smarttalk.brand_lifecycle_events;
+```
+
+**El CHECK de `cm_clients.status` no se revierte automáticamente, y es
+deliberado.** La migración lo extiende (`… OR status = 'paused'`) sólo si
+existía uno. Quitar esa alternativa haría fallar cualquier fila que siguiera en
+`paused`. Si de verdad quieres restringirlo otra vez, hazlo después de haber
+resuelto el punto anterior:
+
+```sql
+-- Sólo si NO quedan filas en 'paused'.
+SELECT conname, pg_get_constraintdef(oid)
+FROM pg_constraint
+WHERE conrelid = 'public.cm_clients'::regclass AND contype = 'c';
+-- y reescribe la restricción a mano con la definición que tenías.
+```
+
+## Verificación
+
+```sql
+SELECT to_regclass('smarttalk.brand_channel_pause_state'),
+       to_regclass('smarttalk.brand_lifecycle_events');
+-- esperado: NULL, NULL
+
+-- La función vuelve a contar todas las marcas
+SELECT prosrc LIKE '%IS DISTINCT FROM ''paused''%' AS sigue_excluyendo
+FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'smarttalk' AND p.proname = 'reserve_billing_capacity';
+-- esperado: false
+```
+
+## Reaplicación
+
+`036` es idempotente (`CREATE TABLE IF NOT EXISTS`, `CREATE OR REPLACE
+FUNCTION`, y el bloque del CHECK detecta si ya admite `paused`). Verificado en
+la base desechable: aplicada, reaplicada y comprobada con
+`supabase/qa/002_qa_brand_pause_capacity.sql` (5/5 en verde).
+
+Orden completo de reaplicación:
+
+```
+031 → 032 → 034 → 035 → 036
+```

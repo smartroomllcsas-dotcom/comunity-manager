@@ -8,6 +8,21 @@ import WhatsAppConnectButton from '@/components/WhatsAppConnectButton'
 import WhatsAppSetupPanel from '@/components/WhatsAppSetupPanel'
 import { supabase } from '@/lib/supabase'
 import type { CMClient } from '@/types/database'
+import {
+  BRAND_DEACTIVATE_CONFIRMATION,
+  BRAND_INACTIVE_LABEL,
+  BRAND_INACTIVE_NOTICE,
+  isPausedBrandStatus,
+} from '@/lib/smarttalk/brand-status'
+
+/** Canal que una reactivación no logró restaurar. Lo envía /api/cm/clients. */
+interface ReconnectionChannel {
+  channelId: string
+  channelName: string | null
+  note: 'token_expired' | 'channel_missing'
+}
+
+type ClientRow = CMClient & { needs_reconnection?: ReconnectionChannel[] }
 
 interface SocialAccount {
   id: string
@@ -69,7 +84,7 @@ const ACTIVE_BILLING_STATUSES = new Set<BillingStatus>(['unlimited', 'active', '
 export default function ClientsPage() {
   const { user } = useAuth()
   const searchParams = useSearchParams()
-  const [clients, setClients] = useState<CMClient[]>([])
+  const [clients, setClients] = useState<ClientRow[]>([])
   const [socials, setSocials] = useState<Record<string, SocialAccount>>({})
   const [whatsapps, setWhatsapps] = useState<Record<string, WhatsAppAccount>>({})
   const [campaignsByClient, setCampaignsByClient] = useState<
@@ -87,6 +102,14 @@ export default function ClientsPage() {
   const [billingLoading, setBillingLoading] = useState(true)
   const [billingStatus, setBillingStatus] = useState<BillingStatusPayload | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
+  // Marca sobre la que se pide confirmación para desactivar. null = modal cerrado.
+  const [deactivateTarget, setDeactivateTarget] = useState<CMClient | null>(null)
+  const [lifecycleBusyId, setLifecycleBusyId] = useState<string | null>(null)
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null)
+  // Refuerzo inmediato tras el POST: la respuesta del endpoint ya trae los
+  // canales que no volvieron, y así el aviso aparece sin esperar al recargado.
+  // La fuente duradera es `client.needs_reconnection`, que llega en el GET.
+  const [reconnectNotice, setReconnectNotice] = useState<Record<string, ReconnectionChannel[]>>({})
   const [saving, setSaving] = useState(false)
   const [editingClientId, setEditingClientId] = useState<string | null>(null)
   const [editingClientName, setEditingClientName] = useState('')
@@ -196,6 +219,43 @@ export default function ClientsPage() {
       }
     }
   }, [user, loading, clients, socials, campaignsByClient, insightsByClient])
+
+  /**
+   * Desactiva o reactiva una marca.
+   *
+   * La autorización real la aplica el backend: aquí sólo se pide la acción y se
+   * refleja el resultado. Si el endpoint responde 403 —por ejemplo a un
+   * brand_admin— se muestra su mensaje tal cual, sin ocultar el botón por
+   * adelantado: es preferible un error claro a una interfaz que miente sobre
+   * qué permisos tiene quien la usa.
+   */
+  async function changeBrandLifecycle(client: CMClient, action: 'deactivate' | 'reactivate') {
+    setLifecycleBusyId(client.id)
+    setLifecycleError(null)
+    try {
+      const response = await fetch(`/api/cm/clients/${client.id}/lifecycle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setLifecycleError(payload?.error || 'No fue posible cambiar el estado de la marca.')
+        return
+      }
+
+      const needsReconnection: ReconnectionChannel[] = Array.isArray(payload?.needsReconnection)
+        ? payload.needsReconnection
+        : []
+      setReconnectNotice((current) => ({ ...current, [client.id]: needsReconnection }))
+      setDeactivateTarget(null)
+      await loadData()
+    } catch {
+      setLifecycleError('No fue posible contactar el servidor.')
+    } finally {
+      setLifecycleBusyId(null)
+    }
+  }
 
   async function loadData() {
     const [clientsRes, whatsappsResponse] = await Promise.all([
@@ -550,6 +610,19 @@ export default function ClientsPage() {
           {clients.map((client) => {
             const social = socials[client.id]
             const whatsapp = whatsapps[client.id]
+            // Estado interno 'paused' → al cliente se le dice «Inactiva».
+            const isPaused = isPausedBrandStatus(client.status)
+            // El servidor manda: `needs_reconnection` sobrevive a la recarga.
+            // El estado local sólo cubre el instante entre el POST y el
+            // refresco del listado, y por eso **sólo gana cuando tiene algo que
+            // decir**: si ganara también estando vacío, una desactivación
+            // —que siempre responde sin canales pendientes— taparía un aviso
+            // real que el servidor sí está reportando.
+            const localReconnect = reconnectNotice[client.id]
+            const pendingReconnect: ReconnectionChannel[] =
+              localReconnect && localReconnect.length > 0
+                ? localReconnect
+                : client.needs_reconnection ?? []
             const traceMatchesClient = metaTrace?.clientId === client.id && Boolean(metaTrace.flow)
             const facebookConnected = Boolean(
               social?.page_id ||
@@ -614,8 +687,11 @@ export default function ClientsPage() {
                     )}
                     <p className="text-xs text-slate-500 mt-0.5">{client.industry || 'Sin industria'}</p>
                   </div>
-                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${statusStyles[client.status]}`}>
-                    {client.status}
+                  <span
+                    data-testid={isPaused ? 'brand-inactive-badge' : 'brand-status-badge'}
+                    className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${statusStyles[client.status] || 'bg-slate-700 text-slate-300'}`}
+                  >
+                    {isPaused ? BRAND_INACTIVE_LABEL : client.status}
                   </span>
                 </div>
 
@@ -627,6 +703,42 @@ export default function ClientsPage() {
                   ))}
                 </div>
 
+                {/* Aviso de reconexión.
+                    Va FUERA de `isPaused` a propósito: el caso que importa es
+                    justo el contrario —la marca acaba de reactivarse y uno de
+                    sus canales no volvió—. Dentro de la rama pausada no se
+                    vería nunca en el momento en que hace falta. */}
+                {pendingReconnect.length > 0 && (
+                  <div
+                    data-testid="brand-reconnect-notice"
+                    className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3"
+                  >
+                    <p className="text-[11px] font-medium text-amber-300">
+                      Requiere reconexión:{' '}
+                      {pendingReconnect
+                        .map((channel) => channel.channelName || channel.channelId)
+                        .join(', ')}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      {pendingReconnect.some((channel) => channel.note === 'token_expired')
+                        ? 'El acceso caducó durante la pausa. Vuelve a conectar el canal para reanudar la recepción.'
+                        : 'El canal ya no está disponible en el proveedor. Vuelve a conectarlo para reanudar la recepción.'}
+                    </p>
+                  </div>
+                )}
+
+                {isPaused ? (
+                  <div
+                    data-testid="brand-inactive-notice"
+                    className="mb-3 rounded-lg border border-slate-600/40 bg-slate-800/60 p-3"
+                  >
+                    <p className="text-[11px] font-medium text-slate-300">{BRAND_INACTIVE_NOTICE}</p>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Sus contactos, conversaciones y datos históricos siguen disponibles.
+                    </p>
+                  </div>
+                ) : (
+                  <>
                 {/* Social Connection Status */}
                 {(((client.platforms || []).includes('Facebook')) || facebookConnected) ? (
                   facebookConnected ? (
@@ -767,6 +879,8 @@ export default function ClientsPage() {
                     </div>
                   )
                 ) : null}
+                  </>
+                )}
 
                 <div className="flex items-center justify-between pt-3 border-t border-slate-800">
                   <span className="text-xs text-slate-500">
@@ -776,11 +890,86 @@ export default function ClientsPage() {
                     {client.posts_this_month} posts/mes
                   </span>
                 </div>
+
+                <div className="mt-3">
+                  {isPaused ? (
+                    <button
+                      type="button"
+                      data-testid="brand-reactivate-button"
+                      onClick={() => void changeBrandLifecycle(client, 'reactivate')}
+                      disabled={lifecycleBusyId === client.id}
+                      className="w-full rounded-lg border border-emerald-500/30 bg-emerald-600/20 px-3 py-2 text-xs font-medium text-emerald-300 transition-colors hover:bg-emerald-600/30 disabled:opacity-50"
+                    >
+                      {lifecycleBusyId === client.id ? 'Reactivando…' : 'Reactivar'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      data-testid="brand-deactivate-button"
+                      onClick={() => {
+                        setLifecycleError(null)
+                        setDeactivateTarget(client)
+                      }}
+                      disabled={lifecycleBusyId === client.id}
+                      className="w-full rounded-lg border border-slate-600/50 bg-slate-800 px-3 py-2 text-xs font-medium text-slate-300 transition-colors hover:bg-slate-700 disabled:opacity-50"
+                    >
+                      Desactivar
+                    </button>
+                  )}
+                </div>
               </div>
             )
           })}
         </div>
       )}
+
+      {deactivateTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="deactivate-brand-title"
+        >
+          <div
+            data-testid="brand-deactivate-modal"
+            className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 p-6 shadow-xl"
+          >
+            <h2 id="deactivate-brand-title" className="text-base font-semibold text-slate-100">
+              Desactivar {deactivateTarget.name}
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-slate-300">
+              {BRAND_DEACTIVATE_CONFIRMATION}
+            </p>
+
+            {lifecycleError && (
+              <p className="mt-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                {lifecycleError}
+              </p>
+            )}
+
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeactivateTarget(null)}
+                disabled={lifecycleBusyId === deactivateTarget.id}
+                className="rounded-md px-3 py-2 text-xs font-medium text-slate-400 transition-colors hover:text-slate-200 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                data-testid="brand-deactivate-confirm"
+                onClick={() => void changeBrandLifecycle(deactivateTarget, 'deactivate')}
+                disabled={lifecycleBusyId === deactivateTarget.id}
+                className="rounded-md border border-amber-500/40 bg-amber-500/20 px-4 py-2 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-500/30 disabled:opacity-50"
+              >
+                {lifecycleBusyId === deactivateTarget.id ? 'Desactivando…' : 'Desactivar marca'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }

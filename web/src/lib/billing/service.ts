@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { BILLING_FEATURES } from "@/lib/billing/features";
+import { BRAND_STATUS_PAUSED } from "@/lib/smarttalk/brand-status";
 import { billingError, billingWarn } from "@/lib/billing/log";
 import type {
   BillingEnforcementMode,
@@ -313,11 +314,20 @@ async function getCurrentUsage(
   }
 
   if (featureCode === BILLING_FEATURES.BRANDS_TOTAL) {
+    // Las marcas pausadas no ocupan cupo: desactivar una marca debe permitir
+    // crear otra. Este filtro tiene que ser **idéntico** al de la rama
+    // 'brands.total' de smarttalk.reserve_billing_capacity (migración 036); si
+    // divergen, la comprobación previa y la reserva atómica darían veredictos
+    // distintos y el cliente vería un error contradictorio.
     const publicAdmin = createAdminClient("public");
     const { count } = await publicAdmin
       .from("cm_clients")
       .select("id", { count: "exact", head: true })
-      .eq("smarttalk_organization_id", organizationId);
+      .eq("smarttalk_organization_id", organizationId)
+      // `neq` por sí solo descartaría también las filas con status NULL, porque
+      // en SQL `NULL <> 'paused'` no es TRUE. El SQL usa `IS DISTINCT FROM`,
+      // que sí las cuenta; esta cláusula reproduce esa semántica exacta.
+      .or(`status.is.null,status.neq.${BRAND_STATUS_PAUSED}`);
     return count || 0;
   }
 

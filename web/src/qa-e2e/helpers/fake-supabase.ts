@@ -37,7 +37,7 @@ export interface Seed {
     string,
     Partial<
       Record<
-        "insert" | "update" | "delete" | "select",
+        "insert" | "upsert" | "update" | "delete" | "select",
         { code: string; message: string; times?: number; skip?: number }
       >
     >
@@ -72,6 +72,10 @@ interface FakeClient {
 interface FakeQuery {
   select: (cols?: string, opts?: { count?: string; head?: boolean }) => FakeQuery;
   insert: (payload: unknown) => FakeQuery;
+  upsert: (
+    payload: unknown,
+    options?: { onConflict?: string; ignoreDuplicates?: boolean },
+  ) => FakeQuery;
   update: (payload: Record<string, unknown>) => FakeQuery;
   delete: () => FakeQuery;
   eq: (c: string, v: unknown) => FakeQuery;
@@ -103,8 +107,9 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
 
   function from(table: string): FakeQuery {
     if (!store[table]) store[table] = [];
-    let op: "select" | "insert" | "update" | "delete" = "select";
+    let op: "select" | "insert" | "upsert" | "update" | "delete" = "select";
     let opts: { count?: string; head?: boolean } = {};
+    let upsertOptions: { onConflict?: string; ignoreDuplicates?: boolean } = {};
     let payload: unknown = null;
     let limitN: number | null = null;
     let orderBy: { column: string; ascending: boolean } | null = null;
@@ -153,6 +158,40 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
         }
         return { data: inserted, error: null };
       }
+      if (op === "upsert") {
+        // Reproduce ON CONFLICT (cols) DO UPDATE / DO NOTHING. Sin `onConflict`
+        // se comporta como un INSERT, igual que PostgREST.
+        const conflictColumns = (upsertOptions.onConflict || "")
+          .split(",")
+          .map((column) => column.trim())
+          .filter(Boolean);
+        const list = (Array.isArray(payload) ? payload : [payload]) as Record<string, unknown>[];
+        const affected: Record<string, unknown>[] = [];
+
+        for (const candidate of list) {
+          const existing = conflictColumns.length
+            ? store[table].find((row) =>
+                conflictColumns.every((column) => row[column] === candidate[column]),
+              )
+            : undefined;
+
+          if (existing) {
+            if (upsertOptions.ignoreDuplicates) continue;
+            Object.assign(existing, candidate);
+            affected.push(existing);
+            continue;
+          }
+          const copy = { ...candidate };
+          if (copy.id === undefined) copy.id = `${table}-${++idSeq}`;
+          store[table].push(copy);
+          affected.push(copy);
+        }
+
+        if (mode === "single" || mode === "maybeSingle") {
+          return { data: affected[0] ?? null, error: null };
+        }
+        return { data: affected, error: null, count: affected.length };
+      }
       if (op === "update") {
         const matched = match();
         for (const row of matched) Object.assign(row, payload as Record<string, unknown>);
@@ -198,6 +237,12 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
         return builder;
       },
       insert(p) { op = "insert"; payload = p; return builder; },
+      upsert(p, options) {
+        op = "upsert";
+        payload = p;
+        upsertOptions = options || {};
+        return builder;
+      },
       update(p) { op = "update"; payload = p; return builder; },
       delete() { op = "delete"; return builder; },
       eq(c, v) { filters.push((r) => r[c] === v); return builder; },
@@ -221,6 +266,11 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
                 return raw === "null" ? value === null || value === undefined : String(value) === raw;
               case "eq":
                 return String(value) === raw;
+              case "neq":
+                // PostgREST: NULL <> 'x' es NULL, así que una fila con NULL no
+                // satisface neq. Por eso `status.is.null,status.neq.paused`
+                // necesita las dos ramas.
+                return value != null && String(value) !== raw;
               case "lt":
                 return value != null && String(value) < raw;
               case "lte":

@@ -111,7 +111,10 @@ export async function POST(_request: NextRequest) {
   const { data: brands, error: brandsError } = await publicAdmin
     .from("cm_clients")
     .select("id")
-    .eq("smarttalk_organization_id", org.organizationId);
+    .eq("smarttalk_organization_id", org.organizationId)
+    // Una marca inactiva no vuelve a tener canales por la puerta de atrás: la
+    // sincronización legacy los reinsertaría en 'active' y desharía la pausa.
+    .or("status.is.null,status.neq.paused");
 
   if (brandsError) {
     return NextResponse.json({ error: brandsError.message }, { status: 500 });
