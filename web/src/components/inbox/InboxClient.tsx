@@ -136,7 +136,7 @@ export function InboxClient({ initialConversations, initialChannels, initialBran
         {showTopPanel && <InboxChannelsBar channels={channels || []} />}
 
         <div className={cn("flex min-h-0 flex-1 gap-4 overflow-hidden p-4", !showTopPanel && "pt-3")}>
-          <div className="w-[320px] min-w-[320px] overflow-hidden rounded-3xl border border-white/6 bg-[#11172a]/85 shadow-2xl shadow-black/20 backdrop-blur-sm">
+          <div className="flex min-h-0 w-[320px] min-w-[320px] flex-col overflow-hidden rounded-3xl border border-white/6 bg-[#11172a]/85 shadow-2xl shadow-black/20 backdrop-blur-sm">
             <ConversationList conversations={conversations || []} isLoading={isLoading} />
           </div>
 

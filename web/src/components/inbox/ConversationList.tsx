@@ -18,9 +18,9 @@ export function ConversationList({ conversations = [], isLoading = false }: Conv
   const openCount = conversations?.filter((c) => c.status === "open").length || 0;
 
   return (
-    <>
+    <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
-      <div className="h-12 min-h-[48px] flex items-center justify-between px-4 border-b border-border">
+      <div className="h-12 min-h-[48px] shrink-0 flex items-center justify-between px-4 border-b border-border">
         <h2 className="text-sm font-semibold text-foreground">Bandeja de entrada</h2>
         {openCount > 0 && (
           <span
@@ -36,7 +36,7 @@ export function ConversationList({ conversations = [], isLoading = false }: Conv
       <ConversationFilters />
 
       {/* Conversation List */}
-      <div className="flex-1 overflow-y-auto scrollbar-thin">
+      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
         {isLoading ? (
           <div className="flex items-center justify-center py-8" role="status" aria-live="polite">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-label="Cargando conversaciones" />
@@ -59,6 +59,6 @@ export function ConversationList({ conversations = [], isLoading = false }: Conv
           ))
         )}
       </div>
-    </>
+    </div>
   );
 }

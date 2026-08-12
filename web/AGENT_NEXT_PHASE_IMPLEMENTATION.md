@@ -4153,3 +4153,20 @@ migración ni cambio de datos.
 Publicada por Codex en producción como `dpl_9mHrJUuUfisXefGWGJTLBZziMKEX`;
 alias `https://www.comunitymanager.io`; `GET /api/health` respondió `200` con
 base de datos operativa el 12 de agosto de 2026.
+
+### 97. Scroll de la bandeja de leads
+
+La captura mostró que la bandeja quedaba recortada después de pocos leads. El
+listado tenía `overflow-y-auto`, pero su contenedor no era un layout flex con
+altura mínima cero; por eso el contenido excedente quedaba oculto por el panel.
+
+Corregido en esta iteración:
+
+- La columna de la bandeja ahora es `flex`, `flex-col`, `h-full` y `min-h-0`.
+- Encabezado y filtros quedan fijos; sólo el listado de conversaciones hace
+  scroll vertical.
+- Se conserva el panel completo dentro del alto disponible del Inbox.
+
+No requiere migración ni cambio de datos. La validación final consiste en abrir
+`/inbox` y desplazar el cursor sobre la lista de leads; deben aparecer todos
+los elementos cargados sin mover el encabezado ni los filtros.
