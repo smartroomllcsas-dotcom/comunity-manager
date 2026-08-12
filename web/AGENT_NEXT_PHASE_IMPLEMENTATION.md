@@ -4101,3 +4101,25 @@ La captura mostró dos síntomas relacionados:
 En los datos QA, los IDs de la captura corresponden a `[QA] Marca Limite 02`
 y `[QA] Marca Limite 03`; después de un refresco deben aparecer esos nombres
 en el selector y en las etiquetas. No requiere migración ni cambio de datos.
+
+### 95. Corrección del filtro que conservaba conversaciones de otra marca
+
+La captura posterior confirmó un segundo problema de interfaz: al seleccionar
+`[QA] Marca Limite 04`, el `<select>` cambiaba, pero la lista seguía mostrando
+conversaciones de Demo Inicial y de las marcas 02/03. La causa era que
+TanStack Query renderizaba el `initialData` del Inbox —que contiene varias
+marcas— mientras cargaba la consulta nueva; ese seed no se filtraba por
+`brandFilter`.
+
+Corregido en `src/hooks/useConversations.ts`:
+
+- El mismo filtrado se aplica al `initialData` y a la respuesta de la API.
+- La lista nunca muestra temporalmente conversaciones de otra marca al cambiar
+  el selector, incluso si la consulta tarda o falla.
+- La autorización sigue estando en `/api/inbox/conversations`, que aplica
+  `brandId` y rechaza marcas no autorizadas con `403`.
+- Si una marca no tiene conversaciones, la lista queda vacía y muestra «No hay
+  conversaciones», que es el resultado correcto.
+
+Esta corrección no necesita migración. Debe verificarse después de refrescar el
+Inbox seleccionando una marca con y sin conversaciones.
