@@ -4170,3 +4170,7 @@ Corregido en esta iteración:
 No requiere migración ni cambio de datos. La validación final consiste en abrir
 `/inbox` y desplazar el cursor sobre la lista de leads; deben aparecer todos
 los elementos cargados sin mover el encabezado ni los filtros.
+
+Publicada por Codex en producción como `dpl_E93k3J9zE47UDeTnuPoeXjVq2sXn`;
+alias `https://www.comunitymanager.io`; `GET /api/health` respondió `200` con
+base de datos operativa el 12 de agosto de 2026.
