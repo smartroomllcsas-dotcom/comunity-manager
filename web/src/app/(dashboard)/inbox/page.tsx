@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { Channel, Conversation } from "@/types/database";
 import { InboxClient } from "@/components/inbox/InboxClient";
 import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
+import type { InboxBrand } from "@/lib/inbox/brand-display";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,7 @@ export default async function InboxPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return <InboxClient initialConversations={[]} initialChannels={[]} />;
+    return <InboxClient initialConversations={[]} initialChannels={[]} initialBrands={[]} />;
   }
 
   const { data: agent } = await admin
@@ -25,12 +26,12 @@ export default async function InboxPage() {
     .maybeSingle();
 
   if (!agent) {
-    return <InboxClient initialConversations={[]} initialChannels={[]} />;
+    return <InboxClient initialConversations={[]} initialChannels={[]} initialBrands={[]} />;
   }
 
   const assignedBrandIds = await getAgentBrandIds(agent);
   if (assignedBrandIds && assignedBrandIds.length === 0) {
-    return <InboxClient initialConversations={[]} initialChannels={[]} />;
+    return <InboxClient initialConversations={[]} initialChannels={[]} initialBrands={[]} />;
   }
 
   let conversationsQuery = admin
@@ -44,15 +45,23 @@ export default async function InboxPage() {
       .select("*")
       .eq("organization_id", agent.organization_id)
       .order("created_at", { ascending: false });
+  const publicAdmin = createAdminClient("public");
+  let brandsQuery = publicAdmin
+    .from("cm_clients")
+    .select("id, name")
+    .eq("smarttalk_organization_id", agent.organization_id)
+    .order("name", { ascending: true });
 
   if (assignedBrandIds) {
     conversationsQuery = conversationsQuery.in("brand_id", assignedBrandIds);
     channelsQuery = channelsQuery.in("brand_id", assignedBrandIds);
+    brandsQuery = brandsQuery.in("id", assignedBrandIds);
   }
 
-  const [conversationsRes, channelsRes] = await Promise.all([
+  const [conversationsRes, channelsRes, brandsRes] = await Promise.all([
     conversationsQuery,
     channelsQuery,
+    brandsQuery,
   ]);
 
   const initialConversations = ((conversationsRes.data || []) as Conversation[]).filter((conversation) => {
@@ -65,6 +74,7 @@ export default async function InboxPage() {
     <InboxClient
       initialConversations={initialConversations}
       initialChannels={(channelsRes.data || []) as Channel[]}
+      initialBrands={(brandsRes.data || []) as InboxBrand[]}
     />
   );
 }

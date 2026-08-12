@@ -13,6 +13,8 @@ export function useInboxBrands(initialData: InboxBrand[] = []) {
   return useQuery<InboxBrand[]>({
     queryKey: ["inbox-brands"],
     initialData,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const response = await fetch("/api/inbox/brands", { cache: "no-store" });
       if (!response.ok) {

@@ -11,19 +11,26 @@ import { cn } from "@/lib/utils";
 import { useInboxStore } from "@/stores/inbox";
 import { useConversations } from "@/hooks/useConversations";
 import { useChannels } from "@/hooks/useChannels";
+import { useInboxBrands } from "@/hooks/useInboxBrands";
 import type { Channel, Conversation } from "@/types/database";
+import type { InboxBrand } from "@/lib/inbox/brand-display";
 
 interface InboxClientProps {
   initialConversations: Conversation[];
   initialChannels: Channel[];
+  initialBrands: InboxBrand[];
 }
 
-export function InboxClient({ initialConversations, initialChannels }: InboxClientProps) {
+export function InboxClient({ initialConversations, initialChannels, initialBrands }: InboxClientProps) {
   const selectedId = useInboxStore((s) => s.selectedConversationId);
   const contactPanelOpen = useInboxStore((s) => s.contactPanelOpen);
   const setSelectedConversation = useInboxStore((s) => s.setSelectedConversation);
   const { data: conversations, isLoading } = useConversations(initialConversations);
   const { data: channels } = useChannels(initialChannels);
+  // Seed the shared query cache before the child filters and rows render. The
+  // server already resolved the authorized catalog, so labels are available
+  // in the first paint instead of appearing after a browser fetch.
+  const { data: brands } = useInboxBrands(initialBrands);
   const selectedConversation = conversations?.find((c) => c.id === selectedId);
   // Keep the dashboard summary closed until the operator explicitly opens it.
   const [showTopPanel, setShowTopPanel] = useState(false);
@@ -38,6 +45,8 @@ export function InboxClient({ initialConversations, initialChannels }: InboxClie
   const pendingCount = conversations?.filter((c) => c.status === "pending").length || 0;
   const activeChannels = channels?.filter((channel) => channel.status === "active").length || 0;
   const unassignedCount = conversations?.filter((c) => c.status === "open" && !c.assigned_agent_id).length || 0;
+
+  void brands;
 
   return (
     <div className="relative flex flex-col h-[calc(100vh-48px)] overflow-hidden bg-[#0b1020]">

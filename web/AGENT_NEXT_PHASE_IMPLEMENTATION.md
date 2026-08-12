@@ -4126,3 +4126,26 @@ Inbox seleccionando una marca con y sin conversaciones.
 
 Publicada por Codex en producción como `dpl_J7MSdhCSXM3mnktiseKWFSsZ6KtG`;
 `GET /api/health` respondió `200` después del despliegue.
+
+### 96. Carga inmediata del catálogo de marcas
+
+La captura más reciente mostró que el selector podía permanecer unos segundos
+en «Sin marcas asignadas» y que las conversaciones mostraban el identificador
+corto («Marca no disponible · …») mientras el navegador terminaba de consultar
+`/api/inbox/brands`. No era una demora de la base ni una autorización pendiente:
+era un catálogo cargado después del primer render.
+
+Corregido en esta iteración:
+
+- La página servidor de `/inbox` consulta `cm_clients(id, name)` en paralelo
+  con conversaciones y canales, limitado por organización y por las marcas
+  autorizadas del agente.
+- `InboxClient` hidrata el cache compartido de React Query con ese catálogo
+  antes de renderizar filtros, tarjetas y encabezados.
+- El hook conserva el refresco de seguridad, pero no lo repite al enfocar la
+  ventana y mantiene el catálogo 30 segundos en cache.
+
+Resultado esperado: con una sesión autenticada, los nombres de marca deben
+aparecer desde la primera pintura del Inbox. «Sin marcas asignadas» sólo debe
+aparecer si el agente realmente no tiene marcas autorizadas. No requiere
+migración ni cambio de datos.
