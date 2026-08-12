@@ -140,6 +140,9 @@ export async function GET(
     if (!conv) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
+    if (conv.brand_id !== clientId) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
     if ((conv.contact as { visibility_status?: string } | null)?.visibility_status === "restricted") {
       return NextResponse.json({ error: "contact_restricted", message: "Amplía el plan para ver este contacto" }, { status: 402 });
     }
@@ -287,6 +290,9 @@ export async function PATCH(
   try {
     const conversation = await getAccessibleConversation(agent, parsed.ref);
     if (!conversation) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
+    if (conversation.brand_id !== clientId) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
     const stAdmin = createAdminClient("smarttalk");

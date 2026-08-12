@@ -115,11 +115,12 @@ export async function POST(request: NextRequest) {
     .from("contacts")
     .select("id")
     .eq("organization_id", agent.organization_id)
+    .eq("brand_id", input.brandId)
     .eq("wa_id", input.waId)
     .maybeSingle();
   if (existingError) return Response.json({ error: "No fue posible validar el contacto." }, { status: 500 });
   if (existingContact) {
-    return Response.json({ error: "Ya existe un contacto con este teléfono." }, { status: 409 });
+    return Response.json({ error: "Ya existe un contacto con este teléfono en esta marca." }, { status: 409 });
   }
 
   const billingDecision = await checkBillingFeature({

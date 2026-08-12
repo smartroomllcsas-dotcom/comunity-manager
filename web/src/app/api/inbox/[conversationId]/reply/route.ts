@@ -154,6 +154,9 @@ export async function POST(
       if (!conv) {
         return NextResponse.json({ error: "not_found" }, { status: 404 });
       }
+      if (conv.brand_id !== clientId) {
+        return NextResponse.json({ error: "not_found" }, { status: 404 });
+      }
       if (!conv.channel_type) {
         return NextResponse.json(
           { error: "channel_type_unavailable" },

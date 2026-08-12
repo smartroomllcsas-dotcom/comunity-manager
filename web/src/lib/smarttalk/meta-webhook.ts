@@ -187,6 +187,7 @@ async function findMatchingChannel(
   }
 
   const channels = (data || []) as SmarttalkChannel[];
+  const matches: SmarttalkChannel[] = [];
   for (const channel of channels) {
     const config = (channel.config || {}) as Record<string, unknown>;
     const legacyId = typeof config.legacy_id === "string" ? config.legacy_id : null;
@@ -199,11 +200,24 @@ async function findMatchingChannel(
       .filter(Boolean)
       .map((value) => normalizeId(value as string));
 
-    if (candidates.some((candidate) => metaIds.includes(normalizeId(candidate)))) {
-      return channel;
-    }
+    if (candidates.some((candidate) => metaIds.includes(normalizeId(candidate)))) matches.push(channel);
   }
-  return null;
+
+  // A provider asset must resolve to exactly one tenant/brand. Never select
+  // the first row when a misconfigured duplicate channel makes the routing
+  // ambiguous, otherwise one brand could receive another brand's messages.
+  const uniqueMatches = [...new Map(matches.map((channel) => [channel.id, channel])).values()];
+  if (uniqueMatches.length > 1) {
+    console.error("[meta-webhook] ambiguous channel routing; refusing event", {
+      channelKind,
+      candidates,
+      channelIds: uniqueMatches.map((channel) => channel.id),
+      brandIds: uniqueMatches.map((channel) => channel.brand_id),
+      organizationIds: uniqueMatches.map((channel) => channel.organization_id),
+    });
+    return null;
+  }
+  return uniqueMatches[0] || null;
 }
 
 async function upsertContactAndConversation(

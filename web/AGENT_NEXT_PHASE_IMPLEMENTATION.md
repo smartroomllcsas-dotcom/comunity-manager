@@ -4195,3 +4195,33 @@ conversaciones y la capacidad de la API, no por una única página fija.
 Publicada por Codex en producción como `dpl_6QSAS1VRvadpL15DwecD6vWHDw8m`;
 alias `https://www.comunitymanager.io`; `GET /api/health` respondió `200` con
 base de datos operativa el 12 de agosto de 2026.
+
+### 99. Revisión final de aislamiento agencia–marca–webhook
+
+Se confirmó el modelo de negocio: una misma persona puede ser lead de varias
+marcas de la misma agencia. No se debe deduplicar únicamente por organización.
+La identidad persistida queda separada por:
+
+`organization_id + brand_id + wa_id`
+
+Así, el mismo teléfono puede tener un contacto en Marca A y otro en Marca B;
+cada uno conserva sus conversaciones, canales, asignaciones y permisos. La
+restricción de la base de datos y los webhooks ya trabajan con esa clave.
+
+Correcciones aplicadas en esta revisión:
+
+- El alta manual ya comprueba duplicados dentro de la marca, no dentro de toda
+  la agencia.
+- GET, PATCH y reply de una conversación verifican que `client_id` coincida
+  con `conversation.brand_id`.
+- El autoasignador de WhatsApp sólo considera asesores asignados a la marca,
+  además de usuarios de agencia y superadministradores autorizados.
+- El enrutamiento Meta rechaza identificadores externos ambiguos; nunca elige
+  arbitrariamente el primer canal y por tanto no puede cruzar marcas.
+- Las consultas de Meta, WhatsApp y Respond.io resuelven contacto y
+  conversación usando `channel.organization_id` y `channel.brand_id`.
+
+Validación: suite de aislamiento `31/31` y build de producción aprobados. No
+requiere migración. Para Respond.io queda una acción de configuración: cada
+canal debe tener `webhookSecret` para que su firma sea obligatoria; la ruta
+actual mantiene compatibilidad con canales existentes sin ese secreto.
