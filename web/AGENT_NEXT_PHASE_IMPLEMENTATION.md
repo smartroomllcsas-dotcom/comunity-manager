@@ -4123,3 +4123,6 @@ Corregido en `src/hooks/useConversations.ts`:
 
 Esta corrección no necesita migración. Debe verificarse después de refrescar el
 Inbox seleccionando una marca con y sin conversaciones.
+
+Publicada por Codex en producción como `dpl_J7MSdhCSXM3mnktiseKWFSsZ6KtG`;
+`GET /api/health` respondió `200` después del despliegue.
