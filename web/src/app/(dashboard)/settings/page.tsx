@@ -2,7 +2,7 @@
 import Link from "next/link";
 import {
   MessageSquare, Users, FileText, Zap, Radio, Building2, CreditCard,
-  ChevronRight, Shield, Globe, UsersRound, Tag, GitBranch, ClipboardList, ListChecks
+  ChevronRight, Shield, Globe, UsersRound, Tag, GitBranch, ClipboardList, ListChecks, UserCircle
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +11,12 @@ const sections = [
   {
     title: "General",
     items: [
+      {
+        href: "/settings/profile",
+        title: "Mi perfil",
+        description: "Tu nombre, correo, telefono y los datos de tu agencia",
+        icon: UserCircle,
+      },
       {
         href: "/settings/organization",
         title: "Configuracion de la Organizacion",

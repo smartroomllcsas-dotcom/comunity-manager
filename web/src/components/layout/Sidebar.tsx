@@ -1,9 +1,10 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useCurrentAgent } from "@/hooks/useCurrentAgent";
+import { useAuth } from "@/components/AuthProvider";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -17,6 +18,7 @@ import {
   Shield,
   UserRoundCog,
   PanelLeftClose,
+  LogOut,
 } from "lucide-react";
 import {
   Tooltip,
@@ -24,6 +26,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const mainNav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -43,6 +52,22 @@ const bottomNav = [
 export function Sidebar() {
   const pathname = usePathname();
   const { data: currentAgent } = useCurrentAgent();
+  // El cierre de sesión pasa por AuthProvider: además de `signOut()` limpia la
+  // cookie `cm_user_id` del Community Manager legacy y redirige. Llamar sólo a
+  // `signOut()` dejaría esa cookie viva y el usuario seguiría autenticado en la
+  // mitad legacy de la aplicación.
+  const { logout } = useAuth();
+  const router = useRouter();
+
+  const agentName = (currentAgent?.name || "").trim();
+  const initials = agentName
+    ? agentName
+        .split(/\s+/)
+        .map((word) => word[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2)
+    : "";
   const isSuperAdmin = currentAgent?.is_super_admin === true;
   const [expanded, setExpanded] = useState(false);
 
@@ -213,27 +238,65 @@ export function Sidebar() {
             </Tooltip>
           )}
 
-          {/* User avatar */}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <div
-                  className={cn(
-                    "flex h-10 items-center rounded-lg cursor-pointer text-[#7d8590] hover:text-[#e6edf3]",
-                    expanded ? "w-full justify-start px-3" : "w-10 justify-center"
-                  )}
-                />
+          {/* Menú de usuario.
+              Era un <div> sin onClick: se veía como un botón y no hacía nada.
+              Ahora es un <button> real, así que entra en el orden de tabulación
+              y responde a Enter y Espacio sin manejadores de teclado propios.
+              El menú funciona igual con la barra expandida y contraída; sólo
+              cambia el ancho y si se muestra la etiqueta. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              data-testid="sidebar-user-menu"
+              aria-label={
+                agentName
+                  ? `Menú de usuario: ${agentName}`
+                  : "Menú de usuario"
               }
+              className={cn(
+                "flex h-10 items-center rounded-lg text-[#7d8590] transition-colors",
+                "hover:text-[#e6edf3] hover:bg-[#21262d]",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#388bfd] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1117]",
+                expanded ? "w-full justify-start px-3" : "w-10 justify-center"
+              )}
             >
-                <div className="w-7 h-7 rounded-full bg-secondary border border-border flex items-center justify-center">
+              <div className="w-7 h-7 rounded-full bg-secondary border border-border flex items-center justify-center shrink-0">
+                {initials ? (
+                  <span className="text-[11px] font-semibold text-[#e6edf3]">{initials}</span>
+                ) : (
                   <User className="h-3.5 w-3.5" />
-                </div>
-                {expanded && <span className="ml-2 text-sm font-medium">Perfil</span>}
-            </TooltipTrigger>
-            <TooltipContent side="right" sideOffset={8}>
-              Perfil
-            </TooltipContent>
-          </Tooltip>
+                )}
+              </div>
+              {expanded && (
+                <span className="ml-2 truncate text-sm font-medium">
+                  {agentName || "Perfil"}
+                </span>
+              )}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side="right"
+              align="end"
+              sideOffset={8}
+              className="w-52 bg-[#1a1f2e] border-[#2d333b]"
+            >
+              <DropdownMenuItem
+                data-testid="sidebar-view-profile"
+                onClick={() => router.push("/settings/profile")}
+                className="text-[#e6edf3] focus:bg-[#21262d] focus:text-white"
+              >
+                <User className="h-4 w-4 mr-2" />
+                Ver perfil
+              </DropdownMenuItem>
+              <DropdownMenuSeparator className="bg-[#2d333b]" />
+              <DropdownMenuItem
+                data-testid="sidebar-logout"
+                onClick={() => void logout()}
+                className="text-[#e6edf3] focus:bg-[#21262d] focus:text-white"
+              >
+                <LogOut className="h-4 w-4 mr-2" />
+                Cerrar sesión
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </aside>
     </TooltipProvider>

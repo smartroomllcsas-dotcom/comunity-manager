@@ -4788,3 +4788,222 @@ Sigue en pie lo de §105: nadie ha visto el aviso en pantalla. Lo que ahora sí
 está cubierto por pruebas es que el dato llega al cliente y persiste; lo que
 falta es comprobar visualmente que el bloque ámbar se lee bien en la tarjeta,
 tras el despliegue.
+
+---
+
+# Iteración 16 · Perfil de usuario y cierre de sesión
+
+## 114. El problema
+
+Un usuario autenticado **no podía ver sus datos ni cerrar sesión desde la
+interfaz**. Tres piezas rotas que se tapaban entre sí:
+
+1. El avatar inferior de `Sidebar.tsx` era un `<div>` con `cursor-pointer` y sin
+   `onClick`. Parecía un botón, no hacía nada, y al no ser un elemento
+   interactivo tampoco entraba en el orden de tabulación.
+2. No existía `/settings/profile`.
+3. `Header.tsx` sí tenía «Cerrar sesión», pero `AppShell.tsx` **nunca lo
+   renderiza** — sólo monta `<Sidebar />`. El único cierre de sesión de la
+   aplicación estaba en un componente muerto.
+
+El resultado: la sesión sólo se podía cerrar borrando cookies a mano.
+
+## 115. Verificación de esquema: **ninguna migración necesaria**
+
+Antes de escribir nada se comprobó contra el esquema real (lectura del OpenAPI
+de PostgREST, sin escribir):
+
+| Tabla | Columnas necesarias | ¿Existen? |
+|---|---|---|
+| `smarttalk.agents` | `name`, `email`, `role`, `status`, `created_at` | ✅ (+ `member_type`, `is_super_admin`) |
+| `smarttalk.organizations` | `name`, `billing_phone` | ✅ |
+| `public.cm_users` | `name`, `email`, `avatar_url` | ✅ (+ `password_hash`, que **no** se toca ni se devuelve) |
+
+No se creó ninguna migración.
+
+## 116. `GET` / `PATCH /api/profile`
+
+### Por qué el perfil necesita una ruta propia
+
+La identidad de un usuario vive repartida por razones históricas: `agents` tiene
+la identidad operativa, `organizations` la agencia y su teléfono de
+facturación, y `cm_users` el usuario legacy del Community Manager — **ligado por
+correo, no por id**. Resolver esa costura en el cliente obligaría a exponerle el
+`service_role`.
+
+### Escritura del nombre en dos sitios
+
+El nombre se escribe en `agents` **y** en `cm_users`. Hoy la interfaz nueva lee
+del primero y el CM legacy del segundo; actualizar sólo uno dejaría al usuario
+con dos nombres distintos según por dónde entre.
+
+La sincronización legacy es **best-effort**: si falla, el perfil ya quedó
+guardado donde importa y se responde 200 con un `warnings`. Devolver 500 haría
+creer que no se guardó nada, cuando sí se guardó.
+
+### Lo que no se puede modificar
+
+`role`, `organization_id`, `plan_id`, `is_super_admin`, `member_type`,
+`status`, `password_hash`, `password`, `access_token` y `email`.
+
+Dos decisiones sobre cómo se aplica:
+
+- **Lista blanca construida campo a campo**, no filtrado del cuerpo recibido.
+  Filtrar es una lista negra disfrazada: falla en cuanto alguien añade una
+  columna sensible nueva.
+- **Un campo prohibido invalida toda la petición** (400), no se ignora en
+  silencio. Quien intenta subirse el rol merece un error, no un 200 que parece
+  haber funcionado.
+
+### Lo que nunca se devuelve
+
+Ni contraseñas, ni `access_token`, ni `webhook_verify_token`. La respuesta se
+construye explícitamente como `ProfilePayload` con ocho claves y nada más; los
+`select()` piden columnas concretas como segunda barrera.
+
+## 117. El correo es de sólo lectura
+
+`emailEditable: false`, y la interfaz lo muestra deshabilitado con candado y una
+explicación.
+
+No es una limitación por comodidad. El correo identifica la sesión en Supabase
+Auth **y** es la clave hacia `cm_users`: escribirlo directamente en la base
+dejaría la autenticación apuntando a un correo distinto del de la fila, y la
+cuenta quedaría inaccesible. El cambio real exige
+`supabase.auth.updateUser({ email })` con confirmación por correo, y se deja
+documentado como trabajo futuro en vez de implementarse a medias.
+
+## 118. Sidebar: menú de usuario
+
+El `<div>` inerte pasa a ser un `DropdownMenuTrigger`, que renderiza un
+`<button>` real: entra en el orden de tabulación y responde a Enter y Espacio
+**sin manejadores de teclado propios** — no hace falta reimplementar lo que el
+elemento nativo ya hace.
+
+- `aria-label` con el nombre del agente cuando se conoce.
+- Anillo de foco visible (`focus-visible:ring`).
+- **Ver perfil** → `/settings/profile`.
+- **Cerrar sesión** → `useAuth().logout()`.
+- Funciona igual con la barra expandida y contraída: `expanded` sólo cambia el
+  ancho y si se muestra la etiqueta; el menú se monta en ambos casos.
+- El avatar muestra ahora las iniciales del agente en lugar de un icono genérico.
+
+### Por qué `useAuth().logout()` y no `auth.signOut()`
+
+`Header.tsx` hacía `await supabase.auth.signOut()` y redirigía. Eso deja viva la
+cookie `cm_user_id`, así que el usuario seguiría autenticado en la mitad legacy
+de la plataforma. `AuthProvider.logout()` hace las tres cosas: cierra la sesión
+de Supabase, borra `cm_user_id` y redirige a `/login`.
+
+Se comprobó que `Sidebar` está dentro del `AuthProvider` (raíz en
+`app/layout.tsx` → `(dashboard)/layout.tsx` → `AppShell` → `Sidebar`). De no
+estarlo, `useAuth()` habría devuelto el contexto por defecto, cuyo `logout` es
+una función vacía: el botón habría parecido funcionar sin cerrar nada.
+
+## 119. Página `/settings/profile`
+
+Sigue el patrón de `/settings/organization`: barra superior con flecha de
+regreso, título, botón «Guardar cambios», y tarjetas `#1a1f2e` sobre `#0d1117`.
+
+| Bloque | Contenido |
+|---|---|
+| Identidad | Avatar con iniciales, nombre, correo (bloqueado), teléfono/WhatsApp |
+| Agencia | Nombre de la agencia o empresa |
+| Cuenta | Rol, estado de conexión con indicador de color, miembro desde |
+
+Estados: carga, guardado, error de carga y error de guardado, todos con
+`data-testid` propio.
+
+**La página no se queda en blanco.** Si el perfil no carga, la rama `!profile`
+renderiza qué pasó y un enlace de vuelta a Configuración — no `null`.
+
+Tras guardar se invalida `["current-agent"]`, que es la consulta que alimenta el
+avatar de la barra lateral: sin eso seguiría mostrando el nombre anterior hasta
+la próxima recarga completa.
+
+El rol se muestra legible («Usuario de agencia · Administrador»), no como código
+interno, y un super admin se identifica como tal por encima de su rol nominal.
+
+## 120. Pruebas
+
+`src/qa-e2e/profile.test.ts` — **34 pruebas, 34 en verde**. La API se ejercita
+contra la ruta real; Sidebar y página se verifican sobre el código, porque el
+proyecto no tiene jsdom ni testing-library.
+
+| Grupo | Cubre |
+|---|---|
+| `GET` (8) | 401 sin sesión; datos de las tres tablas; rol legible; super admin; **ningún secreto en la respuesta**; el payload tiene exactamente 8 claves; caída al nombre legacy; funciona sin usuario legacy |
+| `PATCH` (14) | 401; actualiza los tres campos; escribe también en `cm_users`; rechaza rol, organización, plan, super admin, `member_type`, contraseñas, tokens y correo; un campo prohibido invalida toda la petición; nombre y agencia no pueden quedar vacíos; el teléfono sí es opcional; petición vacía rechazada; fallo legacy → 200 con `warnings`; el PATCH tampoco filtra secretos |
+| Sidebar (6) | El avatar es botón accesible; el menú ofrece Ver perfil y Cerrar sesión; navega a `/settings/profile`; usa `useAuth().logout` y **no** `signOut()` suelto; el logout limpia sesión, cookie y redirige; funciona expandido y contraído |
+| Página (6) | Todos los campos pedidos; los cuatro estados; **no queda en blanco**; correo de sólo lectura explicado; invalida `current-agent`; `/settings` enlaza «Mi perfil» |
+
+### Comprobación de que las pruebas sirven
+
+Se rompieron a propósito las dos protecciones del endpoint (anular la validación
+de campos prohibidos y cambiar el `select()` a `*`):
+
+```
+× rechaza cambiar el rol
+× rechaza cambiar organización, plan y super admin
+× rechaza cambiar contraseñas y tokens
+× rechaza cambiar el correo: exige confirmación en Supabase Auth
+× un campo prohibido invalida toda la petición, no sólo ese campo
+  Tests  5 failed | 29 passed (34)
+```
+
+Restauradas, 34/34.
+
+**Una limitación honesta:** cambiar el `select()` a `*` **no** hizo fallar
+ninguna prueba. El Supabase en memoria no proyecta columnas, así que la
+whitelist de columnas no es verificable ahí. Lo que sí protege de verdad —y lo
+que las pruebas comprueban— es que la respuesta se construye campo a campo:
+aunque el `select()` trajera de más, el payload sigue teniendo ocho claves.
+
+### Suite completa
+
+```
+npm test     → Test Files 33 passed | 1 skipped (34)
+               Tests 652 passed | 4 skipped (656)
+               node --test: 25 tests, 0 fail
+npm run build → ✓ Compiled successfully
+                ƒ /api/profile
+                ƒ /settings/profile
+npm run lint → 0 errors
+```
+
+## 121. Archivos
+
+**Nuevos**
+
+```
+web/src/app/api/profile/route.ts                       # GET + PATCH
+web/src/app/(dashboard)/settings/profile/page.tsx      # página de perfil
+web/src/qa-e2e/profile.test.ts                         # 34 pruebas
+```
+
+**Modificados**
+
+```
+web/src/components/layout/Sidebar.tsx        # avatar → botón con menú accesible
+web/src/app/(dashboard)/settings/page.tsx    # entrada «Mi perfil»
+```
+
+**Migraciones: ninguna.** Las columnas necesarias ya existen (§115).
+
+## 122. Pendiente y decisiones no tomadas
+
+1. **Cambio de correo.** Requiere `supabase.auth.updateUser({ email })`, flujo
+   de confirmación y actualizar `agents.email` y `cm_users.email` sólo cuando la
+   confirmación llegue. No se implementó a medias a propósito.
+2. **`Header.tsx` sigue huérfano.** `AppShell` no lo renderiza y su
+   `handleLogout` usa `signOut()` suelto, con el problema de la cookie descrito
+   en §118. No se tocó porque queda fuera del alcance pedido, pero **es código
+   muerto con una implementación peor que la nueva**: o se monta y se corrige, o
+   se elimina.
+3. **`cm_users.avatar_url` no se usa todavía.** El avatar muestra iniciales. La
+   columna existe y está lista si se decide subir imágenes.
+4. **Validación en pantalla, no sólo en el servidor.** Hoy los errores de
+   longitud o de campo vacío llegan del backend. Funciona, pero la respuesta es
+   más lenta que validar al escribir.
+
+Sin commit, push ni deploy.
