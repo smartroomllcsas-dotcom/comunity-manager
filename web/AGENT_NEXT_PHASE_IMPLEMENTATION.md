@@ -4149,3 +4149,7 @@ Resultado esperado: con una sesión autenticada, los nombres de marca deben
 aparecer desde la primera pintura del Inbox. «Sin marcas asignadas» sólo debe
 aparecer si el agente realmente no tiene marcas autorizadas. No requiere
 migración ni cambio de datos.
+
+Publicada por Codex en producción como `dpl_9mHrJUuUfisXefGWGJTLBZziMKEX`;
+alias `https://www.comunitymanager.io`; `GET /api/health` respondió `200` con
+base de datos operativa el 12 de agosto de 2026.
