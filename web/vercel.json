@@ -28,8 +28,20 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/billing-outbox",
+      "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/billing-webhook-recovery",
+      "schedule": "*/10 * * * *"
+    },
+    {
       "path": "/api/cron/reap-scheduled",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/rate-limit-purge",
+      "schedule": "0 * * * *"
     }
   ]
 }

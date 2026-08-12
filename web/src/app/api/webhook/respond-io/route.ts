@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { evaluateChannelIntake } from "@/lib/smarttalk/intake-guard";
+import { INACTIVE_BRAND_INTAKE_RESPONSE } from "@/lib/smarttalk/brand-status";
 import crypto from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { RespondIoWebhookEvent } from "@/lib/respond-io/types";
@@ -61,6 +63,19 @@ export async function POST(request: NextRequest) {
 
   if (!channel) {
     return NextResponse.json({ error: "No matching Respond.io channel" }, { status: 404 });
+  }
+
+  // Esta ruta seleccionaba `status` pero nunca lo miraba: un canal
+  // `disconnected` seguía creando contactos y conversaciones. La guarda cubre
+  // las dos condiciones —canal caído y marca inactiva— y responde 200 para que
+  // Respond.io no reintente.
+  const intake = await evaluateChannelIntake(channel);
+  if (intake.blocked) {
+    return NextResponse.json(
+      intake.reason === "inactive_brand"
+        ? INACTIVE_BRAND_INTAKE_RESPONSE
+        : { ok: true, ignored: intake.reason }
+    );
   }
 
   const webhookSecret = (channel.config as { webhookSecret?: string } | null)?.webhookSecret;

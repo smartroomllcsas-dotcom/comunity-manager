@@ -120,6 +120,151 @@ export function entitlementRow(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Matriz de ciclo de vida.
+//
+// Espejo en memoria de smarttalk.qa_seed_lifecycle_case (supabase/qa/
+// 001_qa_lifecycle_fixtures.sql). Los mismos ocho casos se siembran aquí para
+// la suite rápida y allí para la suite contra PostgreSQL, de modo que ambas
+// hablen del mismo escenario.
+// ---------------------------------------------------------------------------
+
+export type LifecycleCase =
+  | "active"
+  | "past_due"
+  | "grace_period"
+  | "past_due_expired"
+  | "suspended"
+  | "cancelled"
+  | "renewal"
+  | "plan_change"
+  | "plan_downgrade"
+  | "scheduled_cancellation";
+
+const DAY_MS = 86_400_000;
+const ahead = (days: number) => new Date(Date.now() + days * DAY_MS).toISOString();
+const behind = (days: number) => new Date(Date.now() - days * DAY_MS).toISOString();
+
+export interface LifecycleFixture {
+  /** Fila de `subscriptions` en el estado del caso. */
+  subscription: Record<string, unknown>;
+  /** ¿La organización conserva acceso a las funcionalidades del plan? */
+  hasAccess: boolean;
+  /** ¿La pantalla exige un pago para salir de este estado? */
+  requiresPayment: boolean;
+}
+
+/**
+ * Un fixture por estado, con la expectativa de acceso y de pago asociada.
+ *
+ * `hasAccess` es la verdad que debe respetar `checkBillingFeature`;
+ * `requiresPayment` la que debe respetar `deriveSubscriptionUi`. Cruzarlas
+ * detecta que backend y UI se desincronicen.
+ */
+export const LIFECYCLE_FIXTURES: Record<LifecycleCase, LifecycleFixture> = {
+  active: {
+    subscription: subscriptionRow({
+      status: "active",
+      current_period_start: behind(15),
+      current_period_end: ahead(15),
+    }),
+    hasAccess: true,
+    requiresPayment: false,
+  },
+  scheduled_cancellation: {
+    subscription: subscriptionRow({
+      status: "active",
+      current_period_start: behind(15),
+      current_period_end: ahead(15),
+      cancel_at_period_end: true,
+    }),
+    // Programar la baja no revoca nada hasta el fin del período.
+    hasAccess: true,
+    requiresPayment: false,
+  },
+  past_due: {
+    subscription: subscriptionRow({
+      status: "past_due",
+      current_period_end: behind(1),
+      grace_ends_at: ahead(2),
+    }),
+    hasAccess: true,
+    requiresPayment: true,
+  },
+  grace_period: {
+    subscription: subscriptionRow({
+      status: "past_due",
+      current_period_end: behind(1),
+      grace_ends_at: ahead(2),
+    }),
+    hasAccess: true,
+    requiresPayment: true,
+  },
+  past_due_expired: {
+    subscription: subscriptionRow({
+      status: "past_due",
+      current_period_end: behind(4),
+      grace_ends_at: behind(1),
+    }),
+    hasAccess: false,
+    requiresPayment: true,
+  },
+  suspended: {
+    subscription: subscriptionRow({
+      status: "suspended",
+      current_period_end: behind(5),
+      grace_ends_at: behind(2),
+    }),
+    hasAccess: false,
+    requiresPayment: true,
+  },
+  cancelled: {
+    subscription: subscriptionRow({
+      status: "cancelled",
+      current_period_end: behind(5),
+      cancel_at_period_end: true,
+    }),
+    hasAccess: false,
+    requiresPayment: true,
+  },
+  renewal: {
+    subscription: subscriptionRow({
+      status: "active",
+      current_period_start: behind(29),
+      current_period_end: ahead(1),
+    }),
+    hasAccess: true,
+    requiresPayment: false,
+  },
+  plan_change: {
+    subscription: subscriptionRow({
+      status: "active",
+      plan_id: "plan-qa",
+      current_period_start: behind(15),
+      current_period_end: ahead(15),
+    }),
+    hasAccess: true,
+    requiresPayment: false,
+  },
+  plan_downgrade: {
+    subscription: subscriptionRow({
+      status: "active",
+      plan_id: "plan-qa",
+      current_period_start: behind(15),
+      current_period_end: ahead(15),
+      // D-5: el downgrade está programado, pero el acceso actual se conserva
+      // íntegro hasta `change_effective_at`.
+      pending_plan_id: "plan-qa-barato",
+      pending_plan_price_id: "price-qa-barato",
+      change_effective_at: ahead(15),
+    }),
+    hasAccess: true,
+    requiresPayment: false,
+  },
+};
+
+export const LIFECYCLE_CASES = Object.keys(LIFECYCLE_FIXTURES) as LifecycleCase[];
+
 /** Genera n filas mínimas con organization_id. */
 export function repeat(n: number, make: (i: number) => Record<string, unknown>) {
   return Array.from({ length: Math.max(0, n) }, (_, i) => make(i));

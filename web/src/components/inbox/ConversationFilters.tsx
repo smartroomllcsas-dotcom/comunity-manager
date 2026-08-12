@@ -2,6 +2,8 @@
 import { useInboxStore } from "@/stores/inbox";
 import { cn } from "@/lib/utils";
 import { Search } from "lucide-react";
+import { useInboxBrands } from "@/hooks/useInboxBrands";
+import { brandFilterOptions } from "@/lib/inbox/brand-display";
 
 const ownerFilters = [
   { value: "all", label: "Todos" },
@@ -23,9 +25,15 @@ export function ConversationFilters() {
   const setSearchQuery = useInboxStore((s) => s.setSearchQuery);
   const statusFilter = useInboxStore((s) => s.statusFilter);
   const setStatusFilter = useInboxStore((s) => s.setStatusFilter);
+  const brandFilter = useInboxStore((s) => s.brandFilter);
+  const setBrandFilter = useInboxStore((s) => s.setBrandFilter);
+  const { data: brands } = useInboxBrands();
+  // El selector sólo lista lo que el backend devolvió como accesible; no se
+  // construyen opciones en el cliente.
+  const brandOptions = brandFilterOptions(brands);
 
   return (
-    <div className="flex flex-col gap-2 p-3">
+    <div className="flex shrink-0 flex-col gap-2 p-3">
       {/* Search */}
       <div className="relative">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#484f58]" />
@@ -36,6 +44,32 @@ export function ConversationFilters() {
           onChange={(e) => setSearchQuery(e.target.value)}
           className="w-full h-8 pl-8 pr-3 rounded-md bg-[#0d1117] border border-[#2d333b] text-sm text-white placeholder:text-[#484f58] focus:outline-none focus:border-[#388bfd] focus:ring-1 focus:ring-[#388bfd]/30 transition-colors"
         />
+      </div>
+
+      {/* Filtro «Marca».
+          Es presentación: acotar la vista. La autorización real la aplica el
+          backend, que responde 403 si el brandId no pertenece al usuario. */}
+      <div className="flex items-center gap-1.5">
+        <label htmlFor="inbox-brand-filter" className="text-[11px] font-medium text-[#8b949e] shrink-0">
+          Marca
+        </label>
+        <select
+          id="inbox-brand-filter"
+          data-testid="brand-filter"
+          aria-label="Filtrar por marca"
+          value={brandFilter}
+          onChange={(event) => setBrandFilter(event.target.value)}
+          className="min-w-0 flex-1 h-7 rounded-md border border-[#2d333b] bg-[#0d1117] px-2 text-[11px] text-white focus:border-[#388bfd] focus:outline-none focus:ring-1 focus:ring-[#388bfd]/30"
+        >
+          <option value="all">
+            {brandOptions.length > 0 ? "Todas las marcas" : "Sin marcas asignadas"}
+          </option>
+          {brandOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Status Filter Tabs */}

@@ -29,22 +29,28 @@ Actualizacion Vercel 2026-07-30:
 | Arquitectura multiempresa por organizacion | Aplicada | Si, tecnicamente |
 | Catalogo de planes y beneficios | Aplicado | Si, tecnicamente |
 | Precios por pasarela | Aplicado | Si, tecnicamente |
-| Panel de planes | Aplicado y compilado | Pendiente prueba visual autenticada |
-| Panel de pasarelas | Aplicado y compilado | Pendiente prueba visual autenticada |
-| Checkout generico e idempotente | Aplicado | Pendiente sandbox |
-| ePayco | Confirmacion y activacion implementadas | Pendiente sandbox end-to-end |
+| Panel de planes | Aplicado, compilado y revisado visualmente | Validado en QA autenticado |
+| Panel de pasarelas | Aplicado, compilado y revisado visualmente | Validado en QA autenticado |
+| Checkout generico e idempotente | Aplicado y probado en sandbox | Validado para los tres planes ePayco |
+| ePayco | Confirmacion y activacion implementadas | Sandbox end-to-end validado para los tres planes |
 | Wompi | Configuracion, checkout y firmas preparados | No; webhook de activacion pendiente |
 | PayU | Configuracion, WebCheckout y firmas preparados | No; confirmacion pendiente |
-| Renovacion manual | Implementada para ePayco | Pendiente sandbox |
+| Renovacion manual | Implementada para ePayco | Pendiente prueba específica antes/después del vencimiento |
 | Renovacion automatica | Solo infraestructura de datos | No habilitar |
-| Limites backend | Integrados con modo gradual | Mantener en `off` |
+| Limites backend | Integrados, con reservas atómicas desplegadas | Falta ejecutar dos altas simultáneas en QA |
 | Cron de vencimiento y gracia | Desplegado, ejecucion diaria y acceso protegido | Pendiente ejecucion autenticada |
-| Outbox y cola | Tablas e indices preparados | No; worker pendiente |
-| Notificaciones de billing | Tabla preparada | No; servicio de envio pendiente |
+| Outbox y cola | Migración `032`, worker y cron desplegados | Falta evidencia de procesamiento real |
+| Notificaciones de billing | Worker, reintentos y backoff implementados | Falta evidencia de envío idempotente |
 | Cambios programados de plan | Campos preparados | No; orquestacion pendiente |
 | Servicios de dominio Fase 2 | Contratos documentados; implementacion parcial | No aprobar como completos |
 | Migraciones `009` y `010` | Aplicadas y verificadas en Supabase `smartmedia` | Completo |
 | Build, lint y pruebas unitarias | Aprobados localmente | Si |
+
+Actualización 2026-08-09: el propietario confirmó que ePayco sandbox fue
+configurado, que Demo Inicial, Demo Crecimiento y Demo Escala se compraron y se
+llevaron hasta sus límites, y que se revisaron `/admin/plans`,
+`/admin/payment-gateways` y `/settings/billing`. Esta validación no cubre aún
+renovación, suspensión/reactivación, concurrencia ni procesamiento de outbox.
 
 ## 2. Decisiones de seguridad vigentes
 
@@ -615,9 +621,13 @@ los crons del deployment anterior. Verifica ambos componentes.
 - [x] Migraciones `009` y `010` aplicadas el 2026-07-30.
 - [ ] Esquema `smarttalk` expuesto.
 - [ ] RLS validado con dos organizaciones.
-- [ ] Panel de planes validado visualmente.
-- [ ] Panel de pasarelas validado visualmente.
-- [ ] ePayco sandbox aprobado end-to-end.
+- [x] Panel de planes validado visualmente el 2026-08-09.
+- [x] Panel de pasarelas validado visualmente el 2026-08-09.
+- [x] ePayco sandbox aprobado end-to-end para Demo Inicial, Demo Crecimiento
+  y Demo Escala, llevados hasta sus límites.
+- [x] Alta manual de contacto abre el modal en Production y rechaza con el
+  límite esperado cuando la cuenta ya alcanzó `contacts.total`.
+- [x] Deployment manual Production `Ready` con `BILLING_ATOMIC_QUOTA_MODE=on`.
 - [ ] Renovacion manual aprobada.
 - [ ] Webhook duplicado aprobado.
 - [ ] Cron aprobado.
@@ -631,7 +641,7 @@ los crons del deployment anterior. Verifica ambos componentes.
 - [ ] Backup de produccion.
 - [x] Migraciones `009` y `010` aplicadas en la base conectada.
 - [x] Smoke test tecnico de produccion.
-- [ ] Compra ePayco sandbox end-to-end.
+- [x] Compra ePayco sandbox end-to-end para los tres planes.
 - [ ] Logs y responsable operativo definidos.
 - [ ] Plan de rollback comprobado.
 
@@ -645,12 +655,16 @@ los crons del deployment anterior. Verifica ambos componentes.
 - [ ] Renovacion automatica.
 - [ ] Reintentos automaticos de cobro.
 - [ ] Conciliacion automatica multi-pasarela.
-- [ ] Worker de `billing_outbox_jobs`.
+- [x] Worker de `billing_outbox_jobs` implementado y desplegado; falta prueba
+  operativa de un job real.
 - [ ] Envio real desde `notification_logs`.
-- [ ] Rate limiting especifico para checkout y webhooks.
+- [x] Rate limiting específico para checkout y webhooks implementado y probado;
+  falta validación de carga en entorno desplegado.
 - [ ] Orquestacion completa de upgrade/downgrade.
 - [ ] `BILLING_ENFORCEMENT_MODE=observe`.
-- [ ] `BILLING_ENFORCEMENT_MODE=hard`.
+- [x] `BILLING_ENFORCEMENT_MODE=hard` y `BILLING_ATOMIC_QUOTA_MODE=on` activos
+  en Production; quedan pendientes las pruebas operativas de concurrencia,
+  outbox y resiliencia.
 
 ## 15. Referencias
 

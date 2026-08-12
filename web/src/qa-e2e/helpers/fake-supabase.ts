@@ -13,6 +13,35 @@ export type Rows = Record<string, unknown>[];
 export interface Seed {
   tables?: Record<string, Rows>;
   currentUserId?: string;
+  /**
+   * Índices únicos a emular, por tabla: cada entrada es la tupla de columnas.
+   * Un INSERT que los viole devuelve `{ code: "23505" }` igual que PostgREST,
+   * que es la señal en la que se apoya la deduplicación de webhooks.
+   */
+  uniqueIndexes?: Record<string, string[][]>;
+  /**
+   * Implementaciones de RPC. Sin handler, `rpc()` sólo registra la llamada y
+   * devuelve null (comportamiento histórico). Con handler se puede emular el
+   * efecto de una función SQL sobre el store para probar los guardas de la ruta.
+   */
+  rpcHandlers?: Record<string, (args: unknown, store: Record<string, Rows>) => unknown>;
+  /**
+   * Errores inyectados por tabla y operación, para probar los caminos de fallo
+   * de escritura que en producción provoca la base (permisos, deadlock, etc.).
+   *
+   * `skip` deja pasar las primeras N llamadas antes de empezar a fallar (útil
+   * cuando la operación bajo prueba comparte tabla con un paso previo, como el
+   * claim del lease). `times` limita cuántas veces falla; sin él, falla siempre.
+   */
+  errorOn?: Record<
+    string,
+    Partial<
+      Record<
+        "insert" | "upsert" | "update" | "delete" | "select",
+        { code: string; message: string; times?: number; skip?: number }
+      >
+    >
+  >;
 }
 
 type Filter = (row: Record<string, unknown>) => boolean;
@@ -20,14 +49,22 @@ type Filter = (row: Record<string, unknown>) => boolean;
 export interface FakeSupabase {
   store: Record<string, Rows>;
   admin: (schema?: string) => FakeClient;
-  server: { auth: { getUser: () => Promise<{ data: { user: { id: string } | null } }> } };
+  // El cliente de servidor expone `from` además de `auth` porque algunas rutas
+  // (p. ej. /api/admin/subscriptions) leen tablas con la sesión del usuario.
+  server: {
+    auth: { getUser: () => Promise<{ data: { user: { id: string } | null } }> };
+    from: (table: string) => FakeQuery;
+  };
   // Registro de llamadas a rpc() para poder aseverar el RPC de activación.
   rpcCalls: Array<{ name: string; args: unknown }>;
 }
 
 interface FakeClient {
   from: (table: string) => FakeQuery;
-  rpc: (name: string, args?: unknown) => Promise<{ data: unknown; error: null }>;
+  rpc: (
+    name: string,
+    args?: unknown,
+  ) => Promise<{ data: unknown; error: { code: string; message: string } | null }>;
   storage: { from: () => { remove: () => Promise<{ error: null }> } };
 }
 
@@ -35,9 +72,15 @@ interface FakeClient {
 interface FakeQuery {
   select: (cols?: string, opts?: { count?: string; head?: boolean }) => FakeQuery;
   insert: (payload: unknown) => FakeQuery;
+  upsert: (
+    payload: unknown,
+    options?: { onConflict?: string; ignoreDuplicates?: boolean },
+  ) => FakeQuery;
   update: (payload: Record<string, unknown>) => FakeQuery;
   delete: () => FakeQuery;
   eq: (c: string, v: unknown) => FakeQuery;
+  is: (c: string, v: unknown) => FakeQuery;
+  or: (expression: string) => FakeQuery;
   neq: (c: string, v: unknown) => FakeQuery;
   in: (c: string, v: unknown[]) => FakeQuery;
   gt: (c: string, v: unknown) => FakeQuery;
@@ -46,7 +89,7 @@ interface FakeQuery {
   lte: (c: string, v: unknown) => FakeQuery;
   contains: (c: string, v: unknown[]) => FakeQuery;
   overlaps: (c: string, v: unknown[]) => FakeQuery;
-  order: () => FakeQuery;
+  order: (column?: string, options?: { ascending?: boolean }) => FakeQuery;
   limit: (n: number) => FakeQuery;
   maybeSingle: () => Promise<{ data: unknown; error: unknown }>;
   single: () => Promise<{ data: unknown; error: unknown }>;
@@ -64,17 +107,45 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
 
   function from(table: string): FakeQuery {
     if (!store[table]) store[table] = [];
-    let op: "select" | "insert" | "update" | "delete" = "select";
+    let op: "select" | "insert" | "upsert" | "update" | "delete" = "select";
     let opts: { count?: string; head?: boolean } = {};
+    let upsertOptions: { onConflict?: string; ignoreDuplicates?: boolean } = {};
     let payload: unknown = null;
     let limitN: number | null = null;
+    let orderBy: { column: string; ascending: boolean } | null = null;
     const filters: Filter[] = [];
 
     const match = () => store[table].filter((row) => filters.every((f) => f(row)));
 
     async function terminate(mode: "await" | "maybeSingle" | "single") {
+      const injected = seed.errorOn?.[table]?.[op];
+      if (injected) {
+        if (injected.skip !== undefined && injected.skip > 0) {
+          injected.skip -= 1;
+        } else if (injected.times === undefined || injected.times > 0) {
+          if (injected.times !== undefined) injected.times -= 1;
+          return { data: null, error: { code: injected.code, message: injected.message } };
+        }
+      }
       if (op === "insert") {
         const list = Array.isArray(payload) ? payload : [payload];
+        const indexes = seed.uniqueIndexes?.[table] || [];
+        for (const candidate of list as Record<string, unknown>[]) {
+          for (const columns of indexes) {
+            const clash = store[table].some((row) =>
+              columns.every((column) => row[column] === candidate[column]),
+            );
+            if (clash) {
+              return {
+                data: null,
+                error: {
+                  code: "23505",
+                  message: `duplicate key value violates unique constraint on (${columns.join(", ")})`,
+                },
+              };
+            }
+          }
+        }
         const inserted = list.map((r) => {
           const copy = { ...(r as Record<string, unknown>) };
           // Genera un id sintético cuando la fila no lo trae (INSERT ... RETURNING id).
@@ -86,6 +157,40 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
           return { data: inserted[0] ?? null, error: null };
         }
         return { data: inserted, error: null };
+      }
+      if (op === "upsert") {
+        // Reproduce ON CONFLICT (cols) DO UPDATE / DO NOTHING. Sin `onConflict`
+        // se comporta como un INSERT, igual que PostgREST.
+        const conflictColumns = (upsertOptions.onConflict || "")
+          .split(",")
+          .map((column) => column.trim())
+          .filter(Boolean);
+        const list = (Array.isArray(payload) ? payload : [payload]) as Record<string, unknown>[];
+        const affected: Record<string, unknown>[] = [];
+
+        for (const candidate of list) {
+          const existing = conflictColumns.length
+            ? store[table].find((row) =>
+                conflictColumns.every((column) => row[column] === candidate[column]),
+              )
+            : undefined;
+
+          if (existing) {
+            if (upsertOptions.ignoreDuplicates) continue;
+            Object.assign(existing, candidate);
+            affected.push(existing);
+            continue;
+          }
+          const copy = { ...candidate };
+          if (copy.id === undefined) copy.id = `${table}-${++idSeq}`;
+          store[table].push(copy);
+          affected.push(copy);
+        }
+
+        if (mode === "single" || mode === "maybeSingle") {
+          return { data: affected[0] ?? null, error: null };
+        }
+        return { data: affected, error: null, count: affected.length };
       }
       if (op === "update") {
         const matched = match();
@@ -100,6 +205,18 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
       }
       // select
       let rows = match();
+      if (orderBy) {
+        const { column, ascending } = orderBy;
+        rows = [...rows].sort((a, b) => {
+          const left = a[column];
+          const right = b[column];
+          if (left === right) return 0;
+          if (left === null || left === undefined) return 1;
+          if (right === null || right === undefined) return -1;
+          const comparison = String(left) < String(right) ? -1 : 1;
+          return ascending ? comparison : -comparison;
+        });
+      }
       if (limitN != null) rows = rows.slice(0, limitN);
       if (opts.head) return { data: null, error: null, count: rows.length };
       if (mode === "maybeSingle") return { data: rows[0] ?? null, error: null };
@@ -113,14 +230,63 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
 
     const builder: FakeQuery = {
       select(_cols, o) {
-        if (op !== "insert") op = "select";
+        // `select()` encadenado sobre insert/update/delete es la forma de
+        // supabase-js de pedir RETURNING; no convierte la operación en lectura.
+        // Sólo registra las opciones (count/head) para el terminador.
         opts = o || {};
         return builder;
       },
       insert(p) { op = "insert"; payload = p; return builder; },
+      upsert(p, options) {
+        op = "upsert";
+        payload = p;
+        upsertOptions = options || {};
+        return builder;
+      },
       update(p) { op = "update"; payload = p; return builder; },
       delete() { op = "delete"; return builder; },
       eq(c, v) { filters.push((r) => r[c] === v); return builder; },
+      // PostgREST usa `is` para NULL/booleanos; `undefined` y `null` se tratan
+      // igual porque una columna ausente en el fake equivale a NULL.
+      is(c, v) {
+        filters.push((r) => (v === null ? r[c] === null || r[c] === undefined : r[c] === v));
+        return builder;
+      },
+      // Subconjunto de la sintaxis de PostgREST: "col.op.valor,col2.op.valor".
+      // Cubre is.null, eq, lt, lte, gt y gte, que es lo que usa el claim del
+      // worker de recuperación.
+      or(expression) {
+        const clauses = expression.split(",").map((clause) => {
+          const [column, op, ...rest] = clause.split(".");
+          const raw = rest.join(".");
+          return (row: Record<string, unknown>) => {
+            const value = row[column];
+            switch (op) {
+              case "is":
+                return raw === "null" ? value === null || value === undefined : String(value) === raw;
+              case "eq":
+                return String(value) === raw;
+              case "neq":
+                // PostgREST: NULL <> 'x' es NULL, así que una fila con NULL no
+                // satisface neq. Por eso `status.is.null,status.neq.paused`
+                // necesita las dos ramas.
+                return value != null && String(value) !== raw;
+              case "lt":
+                return value != null && String(value) < raw;
+              case "lte":
+                return value != null && String(value) <= raw;
+              case "gt":
+                return value != null && String(value) > raw;
+              case "gte":
+                return value != null && String(value) >= raw;
+              default:
+                return false;
+            }
+          };
+        });
+        filters.push((r) => clauses.some((clause) => clause(r)));
+        return builder;
+      },
       neq(c, v) { filters.push((r) => r[c] !== v); return builder; },
       in(c, v) { filters.push((r) => v.includes(r[c])); return builder; },
       gt(c, v) { filters.push((r) => (r[c] as number) > (v as number)); return builder; },
@@ -135,7 +301,13 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
         filters.push((r) => Array.isArray(r[c]) && v.some((x) => (r[c] as unknown[]).includes(x)));
         return builder;
       },
-      order() { return builder; },
+      // Ordena de verdad. Antes era un no-op, y eso dejó pasar a producción un
+      // `.order("created_at")` sobre una tabla cuya columna es `received_at`:
+      // la consulta real fallaba entera y ninguna prueba lo veía.
+      order(column, options) {
+        if (column) orderBy = { column, ascending: options?.ascending !== false };
+        return builder;
+      },
       limit(n) { limitN = n; return builder; },
       maybeSingle: () => terminate("maybeSingle"),
       single: () => terminate("single"),
@@ -148,7 +320,16 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
     from,
     rpc: async (name: string, args?: unknown) => {
       rpcCalls.push({ name, args });
-      return { data: null, error: null };
+      const handler = seed.rpcHandlers?.[name];
+      if (!handler) return { data: null, error: null };
+      try {
+        return { data: handler(args, store) ?? null, error: null };
+      } catch (error) {
+        // supabase-js no lanza: los errores de una función SQL vuelven en
+        // `error`. Un handler que lanza emula una EXCEPTION de plpgsql.
+        const message = error instanceof Error ? error.message : String(error);
+        return { data: null, error: { code: "P0001", message } };
+      }
     },
     storage: { from: () => ({ remove: async () => ({ error: null }) }) },
   };
@@ -156,7 +337,10 @@ export function createFakeSupabase(seed: Seed = {}): FakeSupabase {
   return {
     store,
     admin: () => client,
-    server: { auth: { getUser: async () => ({ data: { user: { id: currentUserId } } }) } },
+    server: {
+      auth: { getUser: async () => ({ data: { user: { id: currentUserId } } }) },
+      from,
+    },
     rpcCalls,
   };
 }

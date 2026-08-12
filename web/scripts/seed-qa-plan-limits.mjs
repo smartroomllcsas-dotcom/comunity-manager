@@ -2,7 +2,8 @@
  * Populate the paid QA organization with synthetic plan-limit data.
  *
  * This script is intentionally separate from migrations. It reads web/.env.local
- * when present, targets only "QA Agencia Inicial", and never creates provider
+ * when present, targets the QA organization selected by QA_ORGANIZATION_ID,
+ * and never creates provider
  * OAuth accounts or stores real access tokens.
  */
 import fs from "node:fs";
@@ -26,6 +27,8 @@ loadEnvFile(path.join(webDir, ".env.local"));
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+const targetOrganizationId = process.env.QA_ORGANIZATION_ID?.trim();
+const qaPrefix = process.env.QA_SEED_PREFIX?.trim() || "[QA]";
 if (!url || !serviceKey) {
   throw new Error("NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required");
 }
@@ -47,7 +50,13 @@ function fail(message) {
 const organizations = await query(
   smarttalk,
   "organizations",
-  (table) => table.select("id,name,plan_id").eq("name", "QA Agencia Inicial").limit(2)
+  (table) => {
+    const scoped = table.select("id,name,plan_id");
+    return (targetOrganizationId
+      ? scoped.eq("id", targetOrganizationId)
+      : scoped.eq("name", "QA Agencia Inicial")
+    ).limit(2);
+  }
 );
 if (organizations.length !== 1) fail(`expected exactly one QA organization, found ${organizations.length}`);
 const organization = organizations[0];
@@ -62,7 +71,7 @@ const subscriptions = await query(
     .order("created_at", { ascending: false })
     .limit(1)
 );
-if (subscriptions.length !== 1) fail("QA Agencia Inicial must have an active subscription");
+if (subscriptions.length !== 1) fail("target QA organization must have an active subscription");
 const planId = subscriptions[0].plan_id;
 
 const [plans, entitlements, agents] = await Promise.all([
@@ -102,7 +111,7 @@ if (![maxAgencyUsers, maxAdvisors, maxAdvisorsPerBrand, maxBrands, maxChannels, 
   .every((value) => Number.isInteger(value) && value > 0)) {
   fail("the active plan must have finite positive limits for the QA dataset");
 }
-if (maxChannels < 3) fail(`plan exposes only ${maxChannels} channel slots; three are required for this QA dataset`);
+if (maxChannels < 1) fail(`plan exposes no channel slots for this QA dataset`);
 
 const adminEmails = agents.map((agent) => agent.email.toLowerCase());
 const cmUsers = await query(
@@ -124,7 +133,7 @@ let brands = await query(
 if (brands.length > maxBrands) fail(`organization already has ${brands.length} brands; plan limit is ${maxBrands}`);
 
 for (let index = 1; index <= maxBrands; index += 1) {
-  const name = index === 1 ? "[QA] Marca Demo Inicial" : `[QA] Marca Limite ${String(index).padStart(2, "0")}`;
+  const name = `${qaPrefix} Marca Limite ${String(index).padStart(2, "0")}`;
   if (brands.some((brand) => brand.name === name)) continue;
   if (brands.length >= maxBrands) fail("existing non-QA brands consume the remaining brand slots");
   const created = await query(publicDb, "cm_clients", (table) => table.insert({
@@ -146,28 +155,37 @@ let channels = await query(
 );
 const activeChannels = channels.filter((channel) => channel.status === "active");
 if (activeChannels.some((channel) => channel.config?.qa_seed !== true)) {
-  fail("real active channels exist in QA Agencia Inicial; no channel was modified");
+  fail("real active channels exist in target organization; no channel was modified");
 }
 if (activeChannels.length > maxChannels) fail(`active channel count ${activeChannels.length} exceeds limit ${maxChannels}`);
 
-const channelDefinitions = [
-  { seed: "facebook", type: "facebook_messenger", label: "Facebook", sampleIndex: 1 },
-  { seed: "instagram", type: "instagram", label: "Instagram", sampleIndex: 2 },
-  { seed: "whatsapp", type: "whatsapp_cloud_api", label: "WhatsApp", sampleIndex: 3 },
+const channelBases = [
+  { seed: "facebook", type: "facebook_messenger", label: "Facebook" },
+  { seed: "instagram", type: "instagram", label: "Instagram" },
+  { seed: "whatsapp", type: "whatsapp_cloud_api", label: "WhatsApp" },
 ];
+const channelDefinitions = Array.from({ length: maxChannels }, (_, offset) => {
+  const base = channelBases[offset % channelBases.length];
+  const number = offset + 1;
+  return {
+    seed: `${base.seed}-${String(number).padStart(2, "0")}`,
+    type: base.type,
+    label: `${base.label} ${String(number).padStart(2, "0")}`,
+    sampleIndex: number,
+  };
+});
 const seededChannels = [];
 for (let index = 0; index < channelDefinitions.length; index += 1) {
   const definition = channelDefinitions[index];
   let channel = channels.find((item) => item.config?.qa_seed_code === definition.seed);
-  const brandName = index === 0 ? "[QA] Marca Demo Inicial" : `[QA] Marca Limite ${String(index + 1).padStart(2, "0")}`;
-  const brand = brands.find((item) => item.name === brandName);
+  const brand = brands[index % brands.length];
   if (!brand) fail(`missing brand for synthetic ${definition.label} channel`);
   if (!channel) {
     const created = await query(smarttalk, "channels", (table) => table.insert({
       organization_id: organization.id,
       brand_id: brand.id,
       type: definition.type,
-      name: `[QA] ${definition.label} - Canal simulado`,
+      name: `${qaPrefix} ${definition.label} - Canal simulado`,
       status: "active",
       config: {
         qa_seed: true,
@@ -345,9 +363,10 @@ const pendingAgencyInvitations = await query(
 if (agencyUsers.length + pendingAgencyInvitations.length > maxAgencyUsers) {
   fail(`agency user count exceeds limit ${maxAgencyUsers}`);
 }
-if (agencyUsers.length + pendingAgencyInvitations.length < maxAgencyUsers) {
+const currentAgencySeats = agencyUsers.length + pendingAgencyInvitations.length;
+for (let index = currentAgencySeats + 1; index <= maxAgencyUsers; index += 1) {
   await ensureInvitation({
-    email: "qa-agency-user-02@communitymanager.invalid",
+    email: `qa-agency-user-${String(index).padStart(2, "0")}@communitymanager.invalid`,
     role: "agent",
     memberType: "agency_user",
   });
@@ -375,7 +394,7 @@ for (let index = 0; index < maxBrands; index += 1) {
   }));
 }
 
-const qaTemplateName = "[QA] Plantilla Sintética";
+const qaTemplateName = `${qaPrefix} Plantilla Sintética`;
 let templates = await query(
   smarttalk,
   "message_templates",
@@ -395,7 +414,7 @@ if (!qaTemplate) {
 }
 
 for (let index = 1; index <= maxBroadcasts; index += 1) {
-  const name = `[QA] Difusión Sintética ${String(index).padStart(2, "0")}`;
+  const name = `${qaPrefix} Difusión Sintética ${String(index).padStart(2, "0")}`;
   const existing = await query(
     smarttalk,
     "broadcasts",
@@ -413,7 +432,7 @@ for (let index = 1; index <= maxBroadcasts; index += 1) {
 }
 
 for (let index = 1; index <= maxFlows; index += 1) {
-  const name = `[QA] Flujo Sintético ${String(index).padStart(2, "0")}`;
+  const name = `${qaPrefix} Flujo Sintético ${String(index).padStart(2, "0")}`;
   const existing = await query(
     smarttalk,
     "chatbot_flows",

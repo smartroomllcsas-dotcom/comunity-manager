@@ -9,8 +9,12 @@ declare global {
   interface Window {
     ePayco?: {
       checkout: {
-        configure(config: { key: string; test: boolean }): {
-          open(params: Record<string, string>): void;
+        configure(config: {
+          sessionId: string;
+          type: "onpage" | "standard";
+          test: boolean;
+        }): {
+          open(): void;
         };
       };
     };
@@ -27,7 +31,7 @@ async function ensureEpaycoScript() {
   if (window.ePayco) return;
   await new Promise<void>((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>(
-      'script[src="https://checkout.epayco.co/checkout.js"]'
+      'script[src="https://checkout.epayco.co/checkout-v2.js"]'
     );
     if (existing) {
       existing.addEventListener("load", () => resolve(), { once: true });
@@ -39,7 +43,7 @@ async function ensureEpaycoScript() {
       return;
     }
     const script = document.createElement("script");
-    script.src = "https://checkout.epayco.co/checkout.js";
+    script.src = "https://checkout.epayco.co/checkout-v2.js";
     script.onload = () => resolve();
     script.onerror = () => reject(new Error("Error cargando ePayco"));
     document.head.appendChild(script);
@@ -68,15 +72,18 @@ export function PaymentCheckout({
   currency,
   gateway,
   currentPlanId,
+  reactivationPlanId,
 }: {
   planId: string;
   amount: number;
   currency: string;
   gateway: PaymentGatewayCode;
   currentPlanId?: string | null;
+  reactivationPlanId?: string | null;
 }) {
   const [loading, setLoading] = useState(false);
   const isCurrent = currentPlanId === planId;
+  const isReactivation = reactivationPlanId === planId;
   const isEpayco = gateway === "epayco";
 
   async function handleCheckout() {
@@ -108,10 +115,11 @@ export function PaymentCheckout({
       if (checkout.kind === "epayco") {
         await ensureEpaycoScript();
         const handler = window.ePayco?.checkout.configure({
-          key: checkout.publicKey,
+          sessionId: checkout.sessionId,
+          type: "onpage",
           test: checkout.test,
         });
-        handler?.open(checkout.checkoutConfig);
+        handler?.open();
       }
     } catch (error) {
       alert(error instanceof Error ? error.message : "Error iniciando el pago");
@@ -126,7 +134,7 @@ export function PaymentCheckout({
       disabled={loading}
       variant="outline"
       size="sm"
-      aria-label={`${isCurrent ? "Renovar" : "Pagar"} con ${gatewayNames[gateway]}`}
+      aria-label={`${isReactivation ? "Reactivar" : isCurrent ? "Renovar" : "Pagar"} con ${gatewayNames[gateway]}`}
       className={
         isEpayco
           ? "h-11 w-full rounded-xl border-[#ffd08a] bg-gradient-to-r from-[#f59e0b] via-[#f97316] to-[#ea580c] px-4 font-semibold tracking-[0.01em] text-white shadow-[0_10px_28px_-12px_rgba(249,115,22,0.95)] hover:border-[#ffe2ad] hover:from-[#fbbf24] hover:via-[#fb923c] hover:to-[#f97316] hover:text-white focus-visible:border-[#ffe2ad] focus-visible:ring-[#fdba74]/70"
@@ -138,7 +146,9 @@ export function PaymentCheckout({
       ) : (
         <CreditCard className={isEpayco ? "mr-2 h-4 w-4" : "mr-1.5 h-3.5 w-3.5"} />
       )}
-      {isCurrent
+      {isReactivation
+        ? `Reactivar con ${gatewayNames[gateway]}`
+        : isCurrent
         ? `Renovar con ${gatewayNames[gateway]}`
         : `Pagar con ${gatewayNames[gateway]}`}
     </Button>

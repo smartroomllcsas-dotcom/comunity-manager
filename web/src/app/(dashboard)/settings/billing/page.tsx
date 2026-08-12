@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import type { Organization, Plan, Subscription, Payment } from "@/types/database";
 import { PaymentCheckout } from "@/components/billing/PaymentCheckout";
+import { SubscriptionLifecycleCard } from "@/components/billing/SubscriptionLifecycleCard";
+import { classifyPlanChange } from "@/lib/billing/subscription-ui";
 import { useRestrictedLeads } from "@/hooks/useRestrictedLeads";
 import type { PaymentGatewayCode } from "@/lib/payments/types";
 
@@ -45,6 +47,9 @@ export default function BillingSettingsPage() {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [enabledGateways, setEnabledGateways] = useState<PaymentGatewayCode[]>([]);
+  // Se incrementa tras cancelar o mantener la suscripción para releer el estado
+  // desde la base en lugar de adivinarlo en el cliente.
+  const [reloadToken, setReloadToken] = useState(0);
   const [usage, setUsage] = useState({
     agents: 0,
     advisors: 0,
@@ -98,7 +103,9 @@ export default function BillingSettingsPage() {
             .from("subscriptions")
             .select("*, plan:plans!subscriptions_plan_id_fkey(*, entitlements:plan_entitlements(*))")
             .eq("organization_id", orgId)
-            .in("status", ["trial", "active", "past_due", "suspended"])
+            // `cancelled` se incluye para poder ofrecer la reactivación por
+            // pago; sin ella la pantalla mostraba "Sin plan" sin explicación.
+            .in("status", ["trial", "active", "past_due", "suspended", "cancelled"])
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle(),
@@ -134,7 +141,7 @@ export default function BillingSettingsPage() {
       setLoading(false);
     }
     load();
-  }, [currentAgent?.organization_id]);
+  }, [currentAgent?.organization_id, reloadToken]);
 
   // An approved payment creates the subscription first. Prefer that plan and
   // keep organizations.plan_id as a compatibility fallback for legacy data.
@@ -146,9 +153,22 @@ export default function BillingSettingsPage() {
     ["pending_payment", "checkout_started", "payment_rejected", "payment_failed", "payment_expired", "cancelled"].includes(
       org?.onboarding_status || ""
     );
-  const currentPlan = isSuperAdmin
+  const currentPlan = isSuperAdmin || subscription?.status === "cancelled"
     ? null
     : subscription?.plan || (pendingActivation ? null : org?.plan) || null;
+  const reactivationPlanId =
+    subscription?.status === "cancelled"
+      ? subscription.plan?.id || org?.plan?.id || null
+      : null;
+  // D-5: si hay un downgrade programado, se nombra el plan destino en el aviso.
+  const pendingPlanName =
+    plans.find((plan) => plan.id === subscription?.pending_plan_id)?.name ?? null;
+  // Precio mensual vigente en centavos, para clasificar cada plan como subida
+  // o bajada. Sin precio comparable no se afirma nada.
+  const currentAmountMinor =
+    (currentPlan?.prices || []).find(
+      (item) => item.is_active && item.billing_interval === "month",
+    )?.amount_minor ?? null;
   const entitlementLimit = (featureCode: string, fallback: number | null = null) =>
     currentPlan?.entitlements?.find((item) => item.feature_code === featureCode)?.limit_value ?? fallback;
 
@@ -187,6 +207,22 @@ export default function BillingSettingsPage() {
             </div>
           </div>
         )}
+        {!isSuperAdmin && (
+          <SubscriptionLifecycleCard
+            subscription={subscription}
+            // Misma regla que el checkout: quien puede contratar un plan es
+            // quien puede darlo de baja. La API valida lo mismo.
+            isAdmin={currentAgent?.role === "admin"}
+            pendingPlanName={pendingPlanName}
+            onChanged={() => setReloadToken((token) => token + 1)}
+            onRequestPayment={() => {
+              document
+                .getElementById("planes-disponibles")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          />
+        )}
+
         {/* Current Plan Card */}
         <div className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg p-5">
           <div className="flex items-start justify-between mb-4">
@@ -383,11 +419,14 @@ export default function BillingSettingsPage() {
         )}
 
         {/* Available Plans */}
-        {!isSuperAdmin && <div>
-          <h2 className="text-sm font-semibold text-white mb-3">Cambiar plan</h2>
+        {!isSuperAdmin && <div id="planes-disponibles" className="scroll-mt-6">
+          <h2 className="text-sm font-semibold text-white mb-3">
+            {reactivationPlanId ? "Reactivar o cambiar plan" : "Cambiar plan"}
+          </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {plans.map((plan) => {
               const isCurrent = currentPlan?.id === plan.id;
+              const isReactivationPlan = reactivationPlanId === plan.id;
               const advisorLimit = plan.entitlements?.find(
                 (item) => item.feature_code === "brand.advisors_total"
               )?.limit_value;
@@ -407,7 +446,7 @@ export default function BillingSettingsPage() {
                 <div
                   key={plan.id}
                   className={`bg-[#1a1f2e] border rounded-lg p-5 flex flex-col ${
-                    isCurrent
+                    isCurrent || isReactivationPlan
                       ? "border-blue-500/50 ring-1 ring-blue-500/20"
                       : "border-[#2d333b] hover:border-[#3d444d]"
                   } transition-all`}
@@ -476,8 +515,26 @@ export default function BillingSettingsPage() {
                           currency={gatewayPrice.currency}
                           gateway={gatewayPrice.provider as PaymentGatewayCode}
                           currentPlanId={currentPlan?.id}
+                          reactivationPlanId={reactivationPlanId}
                         />
                       ))}
+                      {/* D-5: una bajada de plan no recorta nada al instante. */}
+                      {classifyPlanChange({
+                        currentAmountMinor: currentAmountMinor
+                          ? Number(currentAmountMinor)
+                          : null,
+                        targetAmountMinor: Number(price.amount_minor),
+                        isCurrentPlan: isCurrent,
+                      }) === "downgrade" && (
+                        <p
+                          className="rounded-md border border-blue-500/30 bg-blue-500/10 px-2.5 py-2 text-[11px] leading-snug text-blue-200"
+                          data-testid={`downgrade-notice-${plan.id}`}
+                        >
+                          Al ser un plan de menor precio, el cambio se aplicará
+                          al terminar tu periodo actual. Conservas tu plan y tus
+                          límites hasta esa fecha.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>

@@ -1,0 +1,851 @@
+diff --git a/web/src/app/api/ai-agents/[id]/test/route.ts b/web/src/app/api/ai-agents/[id]/test/route.ts
+index ded3dc6..5fb6bc6 100644
+--- a/web/src/app/api/ai-agents/[id]/test/route.ts
++++ b/web/src/app/api/ai-agents/[id]/test/route.ts
+@@ -4,6 +4,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
+ import { generateAIResponse } from "@/lib/chatbot/ai";
+ import { processAIActions } from "@/lib/ai/actions";
+ import { rateLimit } from "@/lib/rate-limit";
++import { BILLING_FEATURES } from "@/lib/billing/features";
++import {
++  billingDeniedResponse,
++  checkBillingFeature,
++  recordBillingUsage,
++} from "@/lib/billing/service";
++import { randomUUID } from "node:crypto";
+ 
+ // Sprint 22 hardening: 30 req/min por user en endpoints IA (costoso).
+ const AI_RATE_LIMIT = 30;
+@@ -35,6 +42,21 @@ export async function POST(
+     .single();
+   if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
+ 
++  // Billing enforcement (IA).
++  const aiAccess = await checkBillingFeature({
++    organizationId: agent.organization_id,
++    featureCode: BILLING_FEATURES.AI_ACCESS,
++    source: "api/ai-agents/test",
++  });
++  if (!aiAccess.allowed) return billingDeniedResponse(aiAccess);
++  const aiUsage = await checkBillingFeature({
++    organizationId: agent.organization_id,
++    featureCode: BILLING_FEATURES.AI_REQUESTS_MONTH,
++    requestedUnits: 1,
++    source: "api/ai-agents/test",
++  });
++  if (!aiUsage.allowed) return billingDeniedResponse(aiUsage);
++
+   const { data: aiAgent } = await admin
+     .from("ai_agents")
+     .select("*, knowledge_sources(*)")
+@@ -118,6 +140,17 @@ export async function POST(
+ 
+     const { cleanText, actions } = processAIActions(rawResponse);
+ 
++    await recordBillingUsage({
++      organizationId: agent.organization_id,
++      featureCode: BILLING_FEATURES.AI_REQUESTS_MONTH,
++      quantity: 1,
++      idempotencyKey: `ai-agents-test:${randomUUID()}`,
++      sourceType: "ai_agents_test",
++      sourceId: id,
++      periodStart: aiUsage.periodStart,
++      periodEnd: aiUsage.periodEnd,
++    });
++
+     return Response.json({
+       response: cleanText,
+       actions: actions.map((a) => ({
+diff --git a/web/src/app/api/ai/best-time/route.ts b/web/src/app/api/ai/best-time/route.ts
+index 0268c2b..75c81f5 100644
+--- a/web/src/app/api/ai/best-time/route.ts
++++ b/web/src/app/api/ai/best-time/route.ts
+@@ -8,6 +8,9 @@ import { NextRequest } from "next/server";
+ import { createClient } from "@/lib/supabase/server";
+ import { rateLimit } from "@/lib/rate-limit";
+ import { suggestBestTime } from "@/lib/ai/best-time";
++import { getCmClientAccess } from "@/lib/cm-client-access";
++import { BILLING_FEATURES } from "@/lib/billing/features";
++import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
+ 
+ const AI_RATE_LIMIT = 30;
+ const AI_RATE_WINDOW_MS = 60 * 1000;
+@@ -35,6 +38,19 @@ export async function GET(request: NextRequest) {
+   if (!clientId) return Response.json({ error: "clientId requerido" }, { status: 400 });
+   if (!platform) return Response.json({ error: "platform requerido" }, { status: 400 });
+ 
++  // Billing enforcement (IA): sugerencia de hora óptima requiere acceso a IA
++  // con suscripción activa. No consume cupo mensual (es una lectura ligera).
++  const access = await getCmClientAccess(request, clientId);
++  const orgId = access?.organizationId ?? null;
++  const aiAccess = orgId
++    ? await checkBillingFeature({
++        organizationId: orgId,
++        featureCode: BILLING_FEATURES.AI_ACCESS,
++        source: "api/ai/best-time",
++      })
++    : null;
++  if (aiAccess && !aiAccess.allowed) return billingDeniedResponse(aiAccess);
++
+   let dayOfWeek: number | undefined;
+   if (dayOfWeekRaw !== null) {
+     const parsed = Number(dayOfWeekRaw);
+diff --git a/web/src/app/api/ai/draft-response/route.ts b/web/src/app/api/ai/draft-response/route.ts
+index 62e72c2..8d6377f 100644
+--- a/web/src/app/api/ai/draft-response/route.ts
++++ b/web/src/app/api/ai/draft-response/route.ts
+@@ -12,6 +12,14 @@ import {
+   type ResponseDraftInput,
+   type ConversationTurn,
+ } from "@/lib/ai/response-drafting";
++import { getCmClientAccess } from "@/lib/cm-client-access";
++import { BILLING_FEATURES } from "@/lib/billing/features";
++import {
++  billingDeniedResponse,
++  checkBillingFeature,
++  recordBillingUsage,
++} from "@/lib/billing/service";
++import { randomUUID } from "node:crypto";
+ 
+ const AI_RATE_LIMIT = 30;
+ const AI_RATE_WINDOW_MS = 60 * 1000;
+@@ -79,6 +87,27 @@ export async function POST(request: NextRequest) {
+   const { input, error } = validateInput(body);
+   if (!input) return Response.json({ error }, { status: 400 });
+ 
++  // Billing enforcement (IA).
++  const access = await getCmClientAccess(request, input.clientId);
++  const orgId = access?.organizationId ?? null;
++  const aiAccess = orgId
++    ? await checkBillingFeature({
++        organizationId: orgId,
++        featureCode: BILLING_FEATURES.AI_ACCESS,
++        source: "api/ai/draft-response",
++      })
++    : null;
++  if (aiAccess && !aiAccess.allowed) return billingDeniedResponse(aiAccess);
++  const aiUsage = orgId
++    ? await checkBillingFeature({
++        organizationId: orgId,
++        featureCode: BILLING_FEATURES.AI_REQUESTS_MONTH,
++        requestedUnits: 1,
++        source: "api/ai/draft-response",
++      })
++    : null;
++  if (aiUsage && !aiUsage.allowed) return billingDeniedResponse(aiUsage);
++
+   const apiKey = process.env.ANTHROPIC_API_KEY;
+   if (!apiKey) {
+     return Response.json({ error: "AI no configurada. Falta ANTHROPIC_API_KEY." }, { status: 500 });
+@@ -87,6 +116,18 @@ export async function POST(request: NextRequest) {
+   try {
+     const client = new Anthropic({ apiKey });
+     const result = await draftResponse(input, client);
++    if (orgId && aiUsage) {
++      await recordBillingUsage({
++        organizationId: orgId,
++        featureCode: BILLING_FEATURES.AI_REQUESTS_MONTH,
++        quantity: 1,
++        idempotencyKey: `ai-draft:${randomUUID()}`,
++        sourceType: "ai_draft",
++        sourceId: input.clientId,
++        periodStart: aiUsage.periodStart,
++        periodEnd: aiUsage.periodEnd,
++      });
++    }
+     return Response.json(result);
+   } catch (err) {
+     const msg = err instanceof Error ? err.message : String(err);
+diff --git a/web/src/app/api/ai/generate/route.ts b/web/src/app/api/ai/generate/route.ts
+index 36c29b3..2a82ac9 100644
+--- a/web/src/app/api/ai/generate/route.ts
++++ b/web/src/app/api/ai/generate/route.ts
+@@ -8,6 +8,14 @@ import { NextRequest } from "next/server";
+ import { createClient } from "@/lib/supabase/server";
+ import { rateLimit } from "@/lib/rate-limit";
+ import { generateContent, type ContentGenBrief } from "@/lib/ai/content-generator";
++import { getCmClientAccess } from "@/lib/cm-client-access";
++import { BILLING_FEATURES } from "@/lib/billing/features";
++import {
++  billingDeniedResponse,
++  checkBillingFeature,
++  recordBillingUsage,
++} from "@/lib/billing/service";
++import { randomUUID } from "node:crypto";
+ 
+ const AI_RATE_LIMIT = 30;
+ const AI_RATE_WINDOW_MS = 60 * 1000;
+@@ -87,6 +95,30 @@ export async function POST(request: NextRequest) {
+   const { brief, error } = validateBrief(body);
+   if (!brief) return Response.json({ error }, { status: 400 });
+ 
++  // Billing enforcement (IA): requiere suscripción activa + acceso a IA y no
++  // haber alcanzado el cupo mensual de requests. El superadmin queda sin límites
++  // (checkBillingFeature lo resuelve). Si no se puede resolver la organización
++  // del cliente, se procede sin cobro (mismo criterio que /api/social/publish).
++  const access = await getCmClientAccess(request, brief.clientId);
++  const orgId = access?.organizationId ?? null;
++  const aiAccess = orgId
++    ? await checkBillingFeature({
++        organizationId: orgId,
++        featureCode: BILLING_FEATURES.AI_ACCESS,
++        source: "api/ai/generate",
++      })
++    : null;
++  if (aiAccess && !aiAccess.allowed) return billingDeniedResponse(aiAccess);
++  const aiUsage = orgId
++    ? await checkBillingFeature({
++        organizationId: orgId,
++        featureCode: BILLING_FEATURES.AI_REQUESTS_MONTH,
++        requestedUnits: 1,
++        source: "api/ai/generate",
++      })
++    : null;
++  if (aiUsage && !aiUsage.allowed) return billingDeniedResponse(aiUsage);
++
+   const apiKey = process.env.ANTHROPIC_API_KEY;
+   if (!apiKey) {
+     return Response.json({ error: "AI no configurada. Falta ANTHROPIC_API_KEY." }, { status: 500 });
+@@ -95,6 +127,18 @@ export async function POST(request: NextRequest) {
+   try {
+     const client = new Anthropic({ apiKey });
+     const result = await generateContent(brief, client);
++    if (orgId && aiUsage) {
++      await recordBillingUsage({
++        organizationId: orgId,
++        featureCode: BILLING_FEATURES.AI_REQUESTS_MONTH,
++        quantity: 1,
++        idempotencyKey: `ai-generate:${randomUUID()}`,
++        sourceType: "ai_generate",
++        sourceId: brief.clientId,
++        periodStart: aiUsage.periodStart,
++        periodEnd: aiUsage.periodEnd,
++      });
++    }
+     return Response.json(result);
+   } catch (err) {
+     const msg = err instanceof Error ? err.message : String(err);
+diff --git a/web/src/app/api/ai/repurpose/route.ts b/web/src/app/api/ai/repurpose/route.ts
+index 3fd3910..7afa0b1 100644
+--- a/web/src/app/api/ai/repurpose/route.ts
++++ b/web/src/app/api/ai/repurpose/route.ts
+@@ -8,6 +8,13 @@ import { NextRequest } from "next/server";
+ import { createClient } from "@/lib/supabase/server";
+ import { rateLimit } from "@/lib/rate-limit";
+ import { repurpose, type RepurposeSource } from "@/lib/ai/repurposing";
++import { BILLING_FEATURES } from "@/lib/billing/features";
++import {
++  billingDeniedResponse,
++  checkBillingFeature,
++  recordBillingUsage,
++} from "@/lib/billing/service";
++import { randomUUID } from "node:crypto";
+ 
+ const AI_RATE_LIMIT = 30;
+ const AI_RATE_WINDOW_MS = 60 * 1000;
+@@ -66,6 +73,32 @@ export async function POST(request: NextRequest) {
+   const { src, error } = validateSource(body);
+   if (!src) return Response.json({ error }, { status: 400 });
+ 
++  // Billing enforcement (IA). Este endpoint no recibe clientId, así que la
++  // organización se resuelve a partir del agente autenticado.
++  const { data: agent } = await supabase
++    .from("agents")
++    .select("id, organization_id")
++    .eq("id", user.id)
++    .maybeSingle();
++  const orgId = agent?.organization_id ?? null;
++  const aiAccess = orgId
++    ? await checkBillingFeature({
++        organizationId: orgId,
++        featureCode: BILLING_FEATURES.AI_ACCESS,
++        source: "api/ai/repurpose",
++      })
++    : null;
++  if (aiAccess && !aiAccess.allowed) return billingDeniedResponse(aiAccess);
++  const aiUsage = orgId
++    ? await checkBillingFeature({
++        organizationId: orgId,
++        featureCode: BILLING_FEATURES.AI_REQUESTS_MONTH,
++        requestedUnits: 1,
++        source: "api/ai/repurpose",
++      })
++    : null;
++  if (aiUsage && !aiUsage.allowed) return billingDeniedResponse(aiUsage);
++
+   const apiKey = process.env.ANTHROPIC_API_KEY;
+   if (!apiKey) {
+     return Response.json({ error: "AI no configurada. Falta ANTHROPIC_API_KEY." }, { status: 500 });
+@@ -74,6 +107,18 @@ export async function POST(request: NextRequest) {
+   try {
+     const client = new Anthropic({ apiKey });
+     const result = await repurpose(src, client);
++    if (orgId && aiUsage) {
++      await recordBillingUsage({
++        organizationId: orgId,
++        featureCode: BILLING_FEATURES.AI_REQUESTS_MONTH,
++        quantity: 1,
++        idempotencyKey: `ai-repurpose:${randomUUID()}`,
++        sourceType: "ai_repurpose",
++        sourceId: agent?.id ?? user.id,
++        periodStart: aiUsage.periodStart,
++        periodEnd: aiUsage.periodEnd,
++      });
++    }
+     return Response.json(result);
+   } catch (err) {
+     const msg = err instanceof Error ? err.message : String(err);
+diff --git a/web/src/app/api/media/generate/route.ts b/web/src/app/api/media/generate/route.ts
+index 56cdb4a..fcad96a 100644
+--- a/web/src/app/api/media/generate/route.ts
++++ b/web/src/app/api/media/generate/route.ts
+@@ -35,6 +35,12 @@ import {
+   DEFAULT_VIDEO_MODEL,
+ } from "@/lib/media/fal";
+ import { uploadAsset, downloadRemoteAsset } from "@/lib/media/storage";
++import { BILLING_FEATURES } from "@/lib/billing/features";
++import {
++  billingDeniedResponse,
++  checkBillingFeature,
++  recordBillingUsage,
++} from "@/lib/billing/service";
+ 
+ export const maxDuration = 300; // Vercel: subir a 300s para dar margen a kling
+ export const runtime = "nodejs";
+@@ -127,6 +133,17 @@ export async function POST(req: NextRequest) {
+     );
+   }
+ 
++  // Billing enforcement (almacenamiento): valida suscripción activa y que la
++  // organización no haya agotado su cupo antes de gastar en generación. El
++  // tamaño real del asset se registra tras subirlo al Storage.
++  const storageDecision = await checkBillingFeature({
++    organizationId: access.organizationId,
++    featureCode: BILLING_FEATURES.STORAGE_BYTES,
++    requestedUnits: 1,
++    source: "api/media/generate",
++  });
++  if (!storageDecision.allowed) return billingDeniedResponse(storageDecision);
++
+   const start = Date.now();
+   const model = v.model || (v.type === "image" ? DEFAULT_IMAGE_MODEL : DEFAULT_VIDEO_MODEL);
+ 
+@@ -214,6 +231,18 @@ export async function POST(req: NextRequest) {
+     );
+   }
+ 
++  await recordBillingUsage({
++    organizationId: access.organizationId,
++    featureCode: BILLING_FEATURES.STORAGE_BYTES,
++    quantity: uploaded.size,
++    idempotencyKey: `storage:${uploaded.path}`,
++    sourceType: "media_generate",
++    sourceId: inserted.id,
++    periodStart: storageDecision.periodStart,
++    periodEnd: storageDecision.periodEnd,
++    metadata: { origin, mime_type: uploaded.mimeType },
++  });
++
+   return Response.json({
+     ok: true,
+     id: inserted.id,
+diff --git a/web/src/app/api/media/upload/route.ts b/web/src/app/api/media/upload/route.ts
+index 8ca39d3..b74dbd8 100644
+--- a/web/src/app/api/media/upload/route.ts
++++ b/web/src/app/api/media/upload/route.ts
+@@ -21,6 +21,12 @@ import {
+   isAllowedMime,
+   MAX_UPLOAD_BYTES,
+ } from "@/lib/media/storage";
++import { BILLING_FEATURES } from "@/lib/billing/features";
++import {
++  billingDeniedResponse,
++  checkBillingFeature,
++  recordBillingUsage,
++} from "@/lib/billing/service";
+ 
+ export const maxDuration = 60; // Vercel serverless: 60s max
+ export const runtime = "nodejs"; // needs Buffer/crypto
+@@ -87,6 +93,16 @@ export async function POST(req: NextRequest) {
+     );
+   }
+ 
++  // Billing enforcement (almacenamiento): valida suscripción activa y cupo de
++  // bytes disponible antes de subir. El superadmin queda sin límites.
++  const storageDecision = await checkBillingFeature({
++    organizationId: access.organizationId,
++    featureCode: BILLING_FEATURES.STORAGE_BYTES,
++    requestedUnits: file.size,
++    source: "api/media/upload",
++  });
++  if (!storageDecision.allowed) return billingDeniedResponse(storageDecision);
++
+   // Sube al Storage
+   const uploaded = await uploadAsset({
+     file,
+@@ -136,6 +152,18 @@ export async function POST(req: NextRequest) {
+     );
+   }
+ 
++  await recordBillingUsage({
++    organizationId: access.organizationId,
++    featureCode: BILLING_FEATURES.STORAGE_BYTES,
++    quantity: uploaded.size,
++    idempotencyKey: `storage:${inserted.storage_path}`,
++    sourceType: "media_upload",
++    sourceId: inserted.id,
++    periodStart: storageDecision.periodStart,
++    periodEnd: storageDecision.periodEnd,
++    metadata: { mime_type: uploaded.mimeType },
++  });
++
+   return Response.json({
+     ok: true,
+     id: inserted.id,
+diff --git a/web/src/app/api/posts/route.ts b/web/src/app/api/posts/route.ts
+index 6bc361d..0ca66da 100644
+--- a/web/src/app/api/posts/route.ts
++++ b/web/src/app/api/posts/route.ts
+@@ -14,6 +14,9 @@ import { createClient as createServerSupabase } from "@/lib/supabase/server";
+ import { createClient as createSbClient } from "@supabase/supabase-js";
+ import { inngest, INNGEST_EVENTS } from "@/lib/inngest/client";
+ import { rateLimit } from "@/lib/rate-limit";
++import { getCmClientAccess } from "@/lib/cm-client-access";
++import { BILLING_FEATURES } from "@/lib/billing/features";
++import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
+ 
+ // -- shared helpers -----------------------------------------------------------
+ 
+@@ -185,6 +188,27 @@ export async function POST(req: NextRequest) {
+   if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
+   const v = parsed.value;
+ 
++  // Billing enforcement (posts): sólo al CREAR un post nuevo (draft o
++  // programado). La edición de un post existente (v.id presente) no consume
++  // cupo. El conteo mensual real de posts.month se registra al publicar
++  // (ver /api/social/publish y el worker publish-scheduled-post). El superadmin
++  // queda sin límites (checkBillingFeature lo resuelve).
++  if (!v.id) {
++    const access = await getCmClientAccess(req, v.client_id);
++    const orgId = access?.organizationId ?? null;
++    const postsDecision = orgId
++      ? await checkBillingFeature({
++          organizationId: orgId,
++          featureCode: BILLING_FEATURES.POSTS_MONTH,
++          requestedUnits: Math.max(1, v.platforms.length),
++          source: "api/posts",
++        })
++      : null;
++    if (postsDecision && !postsDecision.allowed) {
++      return billingDeniedResponse(postsDecision);
++    }
++  }
++
+   const supabase = getPublicAdmin();
+ 
+   const row = {
+diff --git a/web/src/app/api/reports/route.ts b/web/src/app/api/reports/route.ts
+index 3c327d5..e438742 100644
+--- a/web/src/app/api/reports/route.ts
++++ b/web/src/app/api/reports/route.ts
+@@ -33,6 +33,8 @@ import Anthropic from "@anthropic-ai/sdk";
+ import { rateLimit } from "@/lib/rate-limit";
+ import { buildReportPdf, type ReportData, type ReportBranding } from "@/lib/reports/pdf-builder";
+ import { generateReportInsights } from "@/lib/reports/insights-generator";
++import { BILLING_FEATURES } from "@/lib/billing/features";
++import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
+ 
+ // @react-pdf/renderer requiere Node runtime (no edge).
+ export const runtime = "nodejs";
+@@ -303,6 +305,22 @@ export async function POST(req: NextRequest) {
+     return NextResponse.json({ error: "Cliente no encontrado" }, { status: 404 });
+   }
+ 
++  // 1.b) Billing enforcement (reportes): reports.access requiere suscripción
++  // activa y que el plan habilite la generación de reportes. El superadmin
++  // queda sin límites (checkBillingFeature lo resuelve).
++  const reportsOrgId =
++    (client as { organization_id: string | null }).organization_id ?? null;
++  const reportsDecision = reportsOrgId
++    ? await checkBillingFeature({
++        organizationId: reportsOrgId,
++        featureCode: BILLING_FEATURES.REPORTS_ACCESS,
++        source: "api/reports",
++      })
++    : null;
++  if (reportsDecision && !reportsDecision.allowed) {
++    return billingDeniedResponse(reportsDecision);
++  }
++
+   // 2) Branding — merge request → defaults
+   const branding: ReportBranding = {
+     logoUrl: request.branding?.logo_url,
+diff --git a/web/src/app/api/uploads/chat-media/route.ts b/web/src/app/api/uploads/chat-media/route.ts
+index 5bf5e8b..07a2f41 100644
+--- a/web/src/app/api/uploads/chat-media/route.ts
++++ b/web/src/app/api/uploads/chat-media/route.ts
+@@ -9,6 +9,12 @@ import { tmpdir } from "os";
+ import path from "path";
+ import { promisify } from "util";
+ import { fileTypeFromBuffer } from "file-type";
++import { BILLING_FEATURES } from "@/lib/billing/features";
++import {
++  billingDeniedResponse,
++  checkBillingFeature,
++  recordBillingUsage,
++} from "@/lib/billing/service";
+ 
+ const MEDIA_BUCKET = "chat-media";
+ const MAX_FILE_SIZE = 25 * 1024 * 1024;
+@@ -169,6 +175,16 @@ export async function POST(request: NextRequest) {
+     return NextResponse.json({ error: "El archivo supera el límite de 25MB" }, { status: 400 });
+   }
+ 
++  // Billing enforcement (almacenamiento): valida suscripción activa y cupo de
++  // bytes disponible antes de subir el adjunto. El superadmin queda sin límites.
++  const storageDecision = await checkBillingFeature({
++    organizationId: agent.organization_id,
++    featureCode: BILLING_FEATURES.STORAGE_BYTES,
++    requestedUnits: file.size,
++    source: "api/uploads/chat-media",
++  });
++  if (!storageDecision.allowed) return billingDeniedResponse(storageDecision);
++
+   const allowed = [
+     "image/",
+     "video/",
+@@ -261,6 +277,18 @@ export async function POST(request: NextRequest) {
+     );
+   }
+ 
++  await recordBillingUsage({
++    organizationId: agent.organization_id,
++    featureCode: BILLING_FEATURES.STORAGE_BYTES,
++    quantity: uploadBuffer.byteLength,
++    idempotencyKey: `storage:${MEDIA_BUCKET}:${storagePath}`,
++    sourceType: "chat_media_upload",
++    sourceId: storagePath,
++    periodStart: storageDecision.periodStart,
++    periodEnd: storageDecision.periodEnd,
++    metadata: { bucket: MEDIA_BUCKET, mime_type: uploadMimeType },
++  });
++
+   return NextResponse.json({
+     url: signed.signedUrl,
+     path: storagePath,
+diff --git a/web/src/components/chatbot/FlowEditor.tsx b/web/src/components/chatbot/FlowEditor.tsx
+index d418d24..1476a45 100644
+--- a/web/src/components/chatbot/FlowEditor.tsx
++++ b/web/src/components/chatbot/FlowEditor.tsx
+@@ -35,11 +35,18 @@ export function FlowEditor({ flow }: FlowEditorProps) {
+       if (flow) {
+         await supabase.from("chatbot_flows").update(data).eq("id", flow.id);
+       } else {
+-        const { data: { user } } = await supabase.auth.getUser();
+-        if (!user) return;
+-        const { data: agent } = await supabase.from("agents").select("organization_id").eq("id", user.id).single();
+-        if (!agent) return;
+-        await supabase.from("chatbot_flows").insert({ ...data, organization_id: agent.organization_id });
++        // La creación pasa por el backend para aplicar billing enforcement
++        // (automations.flows). Un 402 significa plan sin cupo / sin suscripción.
++        const res = await fetch("/api/chatbot/flows", {
++          method: "POST",
++          headers: { "Content-Type": "application/json" },
++          body: JSON.stringify(data),
++        });
++        if (!res.ok) {
++          const payload = await res.json().catch(() => ({}));
++          alert(payload?.error || "No se pudo crear el flujo");
++          return;
++        }
+       }
+       router.push("/chatbot");
+     } finally { setSaving(false); }
+diff --git a/web/src/app/api/chatbot/flows/route.ts b/web/src/app/api/chatbot/flows/route.ts
+new file mode 100644
+index 0000000..dc94b72
+--- /dev/null
++++ b/web/src/app/api/chatbot/flows/route.ts
+@@ -0,0 +1,111 @@
++// Enforcement backend · POST /api/chatbot/flows
++// ---------------------------------------------------------------------------
++// Creación server-side de flujos de chatbot con billing enforcement.
++// Antes, FlowEditor.tsx insertaba directamente en `chatbot_flows` desde el
++// navegador, saltándose cualquier control de plan. Este endpoint centraliza la
++// creación para poder aplicar checkBillingFeature(AUTOMATION_FLOWS) y devolver
++// 402 cuando no hay suscripción activa o se alcanzó el límite de flujos.
++//
++// El superadmin queda sin límites (lo resuelve checkBillingFeature).
++// automations.flows se contabiliza como COUNT de filas en `chatbot_flows`
++// (ver getCurrentUsage en lib/billing/service.ts), por lo que el propio INSERT
++// es el registro de uso: no se llama a recordBillingUsage aquí.
++
++import { NextRequest } from "next/server";
++import { createClient } from "@/lib/supabase/server";
++import { createAdminClient } from "@/lib/supabase/admin";
++import { rateLimit } from "@/lib/rate-limit";
++import { BILLING_FEATURES } from "@/lib/billing/features";
++import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
++
++const ALLOWED_TRIGGER_TYPES = new Set(["keyword", "first_message", "menu_option"]);
++
++interface FlowPayload {
++  name: string;
++  trigger_type: string;
++  trigger_value: string;
++  is_active: boolean;
++  flow_data: { nodes: unknown[] };
++}
++
++function validate(body: unknown): { ok: true; value: FlowPayload } | { ok: false; error: string } {
++  if (!body || typeof body !== "object") return { ok: false, error: "Body inválido" };
++  const b = body as Record<string, unknown>;
++
++  const name = typeof b.name === "string" ? b.name.trim() : "";
++  if (!name) return { ok: false, error: "El nombre del flujo es requerido" };
++
++  const trigger_type = typeof b.trigger_type === "string" ? b.trigger_type : "keyword";
++  if (!ALLOWED_TRIGGER_TYPES.has(trigger_type)) {
++    return { ok: false, error: `trigger_type inválido: ${trigger_type}` };
++  }
++
++  const trigger_value = typeof b.trigger_value === "string" ? b.trigger_value : "";
++  const is_active = b.is_active === true;
++
++  const rawFlow = b.flow_data as { nodes?: unknown } | undefined;
++  const nodes = Array.isArray(rawFlow?.nodes) ? (rawFlow!.nodes as unknown[]) : [];
++
++  return {
++    ok: true,
++    value: { name, trigger_type, trigger_value, is_active, flow_data: { nodes } },
++  };
++}
++
++export async function POST(request: NextRequest) {
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user) return Response.json({ error: "No autorizado" }, { status: 401 });
++
++  const rl = await rateLimit(`chatbot-flows:create:${user.id}`, 30, 60_000);
++  if (!rl.ok) {
++    return Response.json(
++      { error: "Demasiadas solicitudes. Intenta más tarde.", retry_after_seconds: rl.retryAfterSeconds },
++      { status: 429, headers: { "Retry-After": String(rl.retryAfterSeconds) } },
++    );
++  }
++
++  const { data: agent } = await supabase
++    .from("agents")
++    .select("id, organization_id")
++    .eq("id", user.id)
++    .single();
++  if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
++
++  let body: unknown;
++  try {
++    body = await request.json();
++  } catch {
++    return Response.json({ error: "JSON inválido" }, { status: 400 });
++  }
++
++  const parsed = validate(body);
++  if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
++
++  // Billing enforcement (flujos/chatbot): automations.flows.
++  const decision = await checkBillingFeature({
++    organizationId: agent.organization_id,
++    featureCode: BILLING_FEATURES.AUTOMATION_FLOWS,
++    requestedUnits: 1,
++    source: "api/chatbot/flows",
++  });
++  if (!decision.allowed) return billingDeniedResponse(decision);
++
++  const admin = createAdminClient();
++  const { data: inserted, error } = await admin
++    .from("chatbot_flows")
++    .insert({ ...parsed.value, organization_id: agent.organization_id })
++    .select("id")
++    .single();
++
++  if (error || !inserted) {
++    return Response.json(
++      { error: error?.message || "No se pudo crear el flujo" },
++      { status: 500 },
++    );
++  }
++
++  return Response.json({ id: inserted.id }, { status: 201 });
++}
+diff --git a/web/src/lib/billing/enforcement.test.ts b/web/src/lib/billing/enforcement.test.ts
+new file mode 100644
+index 0000000..0cad88f
+--- /dev/null
++++ b/web/src/lib/billing/enforcement.test.ts
+@@ -0,0 +1,165 @@
++// Pruebas de enforcement de billing (motor compartido por todas las superficies:
++// posts, flujos/chatbot, reportes, almacenamiento, IA, broadcasts).
++//
++// Cubre los escenarios de borde pedidos, usando POSTS_MONTH como feature
++// representativa con límite numérico (todas las superficies con cupo usan la
++// misma ruta de decisión en checkBillingFeature):
++//   - límite -1  → uso justo por debajo del límite  → PERMITIDO
++//   - límite exacto → uso == límite (la siguiente unidad excede) → BLOQUEADO (402)
++//   - límite +1  → uso por encima del límite → BLOQUEADO (402)
++//   - superadmin → sin límites → PERMITIDO
++//   - sin suscripción activa → BLOQUEADO (402, BILLING_SUBSCRIPTION_REQUIRED)
++//
++// Supabase (admin + server) está mockeado; no se toca la base de datos real.
++
++import { describe, it, expect, beforeEach, vi } from "vitest";
++
++const h = vi.hoisted(() => {
++  const cfg: { tables: Record<string, { data: unknown; error: unknown }> } = { tables: {} };
++
++  function makeBuilder(table: string) {
++    const result = () => cfg.tables[table] ?? { data: null, error: null };
++    // eslint-disable-next-line @typescript-eslint/no-explicit-any
++    const builder: any = {};
++    const chain = () => builder;
++    for (const m of [
++      "select", "eq", "neq", "in", "order", "limit",
++      "gte", "lt", "lte", "contains", "overlaps",
++    ]) {
++      builder[m] = chain;
++    }
++    builder.maybeSingle = async () => result();
++    builder.single = async () => result();
++    // insert(...) se usa como `await from(t).insert(row)` (thenable) y también
++    // como `from(t).insert(row).select(...).single()`.
++    builder.insert = () => ({
++      select: () => ({ single: async () => result() }),
++      // eslint-disable-next-line @typescript-eslint/no-explicit-any
++      then: (res: any, rej: any) => Promise.resolve(result()).then(res, rej),
++    });
++    return builder;
++  }
++
++  const admin = {
++    from: (t: string) => makeBuilder(t),
++    rpc: async () => ({ data: true, error: null }),
++  };
++  const server = {
++    auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
++  };
++  return { cfg, admin, server };
++});
++
++vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => h.admin }));
++vi.mock("@/lib/supabase/server", () => ({ createClient: async () => h.server }));
++
++import { checkBillingFeature, billingDeniedResponse } from "@/lib/billing/service";
++import { BILLING_FEATURES } from "@/lib/billing/features";
++
++const LIMIT = 10;
++
++function setupTables(opts: {
++  superAdmin?: boolean;
++  usage?: number;
++  hasSubscription?: boolean;
++}) {
++  const subscription = opts.hasSubscription === false
++    ? { data: null, error: null }
++    : {
++        data: {
++          id: "sub-1",
++          status: "active",
++          current_period_start: "2026-08-01T00:00:00.000Z",
++          current_period_end: "2026-09-01T00:00:00.000Z",
++          trial_ends_at: null,
++          grace_ends_at: null,
++        },
++        error: null,
++      };
++
++  h.cfg.tables = {
++    agents: { data: { is_super_admin: opts.superAdmin ?? false }, error: null },
++    organizations: {
++      data: {
++        id: "org-1",
++        is_active: true,
++        plan_id: "plan-1",
++        billing_enforcement_mode: "hard",
++        trial_ends_at: null,
++        onboarding_status: "active",
++        plan: { price_monthly: 0 },
++      },
++      error: null,
++    },
++    subscriptions: subscription,
++    plan_entitlements: {
++      data: { enabled: true, limit_value: LIMIT, reset_interval: "month", overage_policy: "block" },
++      error: null,
++    },
++    usage_counters: { data: { quantity: opts.usage ?? 0 }, error: null },
++    billing_decision_events: { data: null, error: null },
++  };
++}
++
++function check() {
++  return checkBillingFeature({
++    organizationId: "org-1",
++    featureCode: BILLING_FEATURES.POSTS_MONTH,
++    requestedUnits: 1,
++    source: "test",
++  });
++}
++
++describe("checkBillingFeature enforcement", () => {
++  beforeEach(() => {
++    process.env.BILLING_ENFORCEMENT_MODE = "hard";
++  });
++
++  it("límite -1: uso 9/10 permite la acción (llega justo al límite)", async () => {
++    setupTables({ usage: LIMIT - 1 });
++    const decision = await check();
++    expect(decision.allowed).toBe(true);
++    expect(decision.wouldBlock).toBe(false);
++    expect(decision.reason).toBe("within_limit");
++    expect(decision.currentUsage).toBe(LIMIT - 1);
++    expect(decision.limitValue).toBe(LIMIT);
++  });
++
++  it("límite exacto: uso 10/10 bloquea la siguiente acción (402)", async () => {
++    setupTables({ usage: LIMIT });
++    const decision = await check();
++    expect(decision.allowed).toBe(false);
++    expect(decision.wouldBlock).toBe(true);
++    expect(decision.reason).toBe("limit_reached");
++    const res = billingDeniedResponse(decision);
++    expect(res.status).toBe(402);
++  });
++
++  it("límite +1: uso 11/10 bloquea la acción (402)", async () => {
++    setupTables({ usage: LIMIT + 1 });
++    const decision = await check();
++    expect(decision.allowed).toBe(false);
++    expect(decision.reason).toBe("limit_reached");
++    const res = billingDeniedResponse(decision);
++    expect(res.status).toBe(402);
++  });
++
++  it("superadmin: sin límites aunque el uso supere el límite", async () => {
++    setupTables({ superAdmin: true, usage: LIMIT * 100 });
++    const decision = await check();
++    expect(decision.allowed).toBe(true);
++    expect(decision.reason).toBe("unlimited");
++    expect(decision.mode).toBe("off");
++  });
++
++  it("sin suscripción activa: bloquea y responde 402 con BILLING_SUBSCRIPTION_REQUIRED", async () => {
++    setupTables({ hasSubscription: false, usage: 0 });
++    const decision = await check();
++    expect(decision.allowed).toBe(false);
++    expect(decision.reason).toBe("subscription_inactive");
++    const res = billingDeniedResponse(decision);
++    expect(res.status).toBe(402);
++    const payload = (await res.json()) as { code: string };
++    expect(payload.code).toBe("BILLING_SUBSCRIPTION_REQUIRED");
++  });
++});

@@ -51,6 +51,8 @@ function getTagColor(index: number) {
 export default function ContactsPage() {
   const [brands, setBrands] = useState<Array<{ id: string; name: string }>>([]);
   const [brandId, setBrandId] = useState("");
+  const [brandsLoading, setBrandsLoading] = useState(true);
+  const [brandLoadError, setBrandLoadError] = useState("");
   const [search, setSearch] = useState("");
   const [activeSegment, setActiveSegment] = useState("all");
   const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set());
@@ -64,13 +66,59 @@ export default function ContactsPage() {
   const { data: restrictedLeads } = useRestrictedLeads(brandId || undefined);
 
   useEffect(() => {
-    void fetch("/api/cm/clients")
-      .then((response) => response.json())
-      .then((payload) => {
-        const rows = Array.isArray(payload.clients) ? payload.clients : [];
-        setBrands(rows);
-        setBrandId((current) => current || rows[0]?.id || "");
-      });
+    let cancelled = false;
+
+    async function loadBrands() {
+      setBrandsLoading(true);
+      setBrandLoadError("");
+
+      try {
+        const response = await fetch("/api/cm/clients", { cache: "no-store" });
+        const payload = (await response.json().catch(() => null)) as {
+          clients?: unknown;
+          error?: string;
+        } | null;
+
+        if (!response.ok) {
+          throw new Error(payload?.error || "No fue posible cargar las marcas.");
+        }
+
+        const rows = Array.isArray(payload?.clients)
+          ? payload.clients.filter(
+              (client): client is { id: string; name: string } =>
+                Boolean(client) &&
+                typeof client === "object" &&
+                typeof (client as { id?: unknown }).id === "string" &&
+                typeof (client as { name?: unknown }).name === "string"
+            )
+          : [];
+
+        if (!cancelled) {
+          setBrands(rows);
+          setBrandId((current) => current || rows[0]?.id || "");
+          if (rows.length === 0) {
+            setBrandLoadError("No hay una marca disponible para crear contactos.");
+          }
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setBrands([]);
+          setBrandId("");
+          setBrandLoadError(
+            error instanceof Error
+              ? error.message
+              : "No fue posible cargar las marcas."
+          );
+        }
+      } finally {
+        if (!cancelled) setBrandsLoading(false);
+      }
+    }
+
+    void loadBrands();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Reset to page 0 when search changes
@@ -270,7 +318,8 @@ export default function ContactsPage() {
           <Button
             size="sm"
             onClick={() => setAddContactDialogOpen(true)}
-            disabled={!brandId}
+            disabled={brandsLoading}
+            title={brandLoadError || undefined}
             className="bg-blue-600 hover:bg-blue-700 text-white"
           >
             <Plus className="h-4 w-4 mr-1.5" />

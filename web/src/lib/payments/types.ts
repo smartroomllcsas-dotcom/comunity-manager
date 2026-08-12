@@ -20,6 +20,8 @@ export interface HostedCheckoutInput {
   amountMinor: number;
   currency: string;
   customerEmail: string;
+  customerName?: string;
+  customerPhone?: string | null;
   expiresAt: string;
 }
 
@@ -29,7 +31,7 @@ export type HostedCheckoutResult =
       gateway: "epayco";
       publicKey: string;
       test: boolean;
-      checkoutConfig: Record<string, string>;
+      sessionId: string;
     }
   | {
       kind: "redirect";

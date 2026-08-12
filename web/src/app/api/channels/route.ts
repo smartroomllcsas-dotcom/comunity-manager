@@ -1,15 +1,22 @@
 import { NextRequest } from "next/server";
+import { isPausedBrandStatus } from "@/lib/smarttalk/brand-status";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   billingDeniedResponse,
+  billingCapacityDeniedResponse,
+  billingCapacityErrorResponse,
   checkBillingFeature,
+  consumeBillingCapacity,
+  releaseBillingCapacity,
+  reserveBillingCapacity,
 } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import {
   getAgentBrandIds,
   getBrandInOrganization,
 } from "@/lib/smarttalk/brand-scope";
+import { CHANNEL_PUBLIC_COLUMNS } from "@/lib/smarttalk/channel-public";
 
 function canManageChannels(agent: {
   role: string;
@@ -39,7 +46,7 @@ export async function GET() {
 
   const { data: channels, error } = await admin
     .from("channels")
-    .select("*")
+    .select(CHANNEL_PUBLIC_COLUMNS)
     .eq("organization_id", agent.organization_id)
     .order("created_at", { ascending: false });
 
@@ -95,10 +102,31 @@ export async function POST(request: NextRequest) {
   if (!brand) {
     return Response.json({ error: "La marca no pertenece a esta organización" }, { status: 403 });
   }
+  if (isPausedBrandStatus((brand as { status?: string | null }).status)) {
+    return Response.json(
+      {
+        error: "inactive_brand",
+        message: "Esta marca está inactiva. Reactívala antes de conectar canales.",
+      },
+      { status: 409 }
+    );
+  }
+
   const assignedBrandIds = await getAgentBrandIds(agent);
   if (assignedBrandIds && !assignedBrandIds.includes(brand.id)) {
     return Response.json({ error: "No autorizado para esta marca" }, { status: 403 });
   }
+
+  const capacity = await reserveBillingCapacity({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.CHANNELS_ACTIVE,
+    requestedUnits: 1,
+  });
+  if (capacity.status === "denied") {
+    return billingCapacityDeniedResponse(billingDecision, capacity);
+  }
+  if (capacity.status === "error") return billingCapacityErrorResponse();
+  const reservationId = capacity.status === "reserved" ? capacity.reservationId : null;
 
   const { data: channel, error } = await admin
     .from("channels")
@@ -110,10 +138,17 @@ export async function POST(request: NextRequest) {
       status: "pending",
       config: config || {},
     })
-    .select()
+    .select(CHANNEL_PUBLIC_COLUMNS)
     .single();
 
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) {
+    if (reservationId) await releaseBillingCapacity(reservationId);
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+
+  if (reservationId && !(await consumeBillingCapacity(reservationId, channel.id))) {
+    await releaseBillingCapacity(reservationId);
+  }
 
   return Response.json({ channel }, { status: 201 });
 }

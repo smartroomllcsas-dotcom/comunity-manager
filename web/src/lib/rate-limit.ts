@@ -10,7 +10,38 @@ export type RateLimitResult = {
   remaining: number;
   retryAfterSeconds: number;
   backend: "db" | "memory-fallback";
+  /**
+   * True cuando la ventana persistida no estuvo disponible y el resultado sale
+   * del contador en memoria. En serverless ese contador es **por instancia**,
+   * así que el límite efectivo se multiplica por el número de workers vivos.
+   */
+  degraded: boolean;
 };
+
+/**
+ * Divisor aplicado al límite mientras el contador está degradado (H-09).
+ *
+ * El problema: el fallback en memoria es por worker. Con N instancias, un
+ * límite de 200/min se convierte en 200·N, y eso ocurre precisamente cuando la
+ * base está caída — es decir, cuando más falta hace contener el tráfico.
+ *
+ * La mitigación no es cerrar el paso (eso tiraría cobros y webhooks legítimos
+ * durante un incidente de base), sino **endurecer** el límite mientras dura la
+ * degradación, de modo que N·(límite/divisor) se aproxime al límite pretendido.
+ * Con el valor por defecto, 4 instancias reproducen aproximadamente el límite
+ * original.
+ *
+ * No elimina el problema: sin estado compartido no se puede. Lo acota.
+ */
+export function degradedLimitDivisor() {
+  const parsed = Number.parseInt(process.env.RATE_LIMIT_DEGRADED_DIVISOR || "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 4;
+}
+
+/** Límite efectivo mientras el contador está degradado. Nunca baja de 1. */
+export function degradedLimit(limit: number) {
+  return Math.max(1, Math.floor(limit / degradedLimitDivisor()));
+}
 
 /** Chequea rate limit via DB. Registra el hit atómicamente antes del check. Fail-open a memoria si DB falla. */
 export async function rateLimit(
@@ -50,16 +81,30 @@ export async function rateLimit(
         .maybeSingle();
       const oldestTime = oldest?.hit_at ? new Date(oldest.hit_at as string).getTime() : now.getTime();
       const retryAfterSeconds = Math.max(1, Math.ceil((oldestTime + windowMs - now.getTime()) / 1000));
-      return { ok: false, remaining: 0, retryAfterSeconds, backend: "db" };
+      return { ok: false, remaining: 0, retryAfterSeconds, backend: "db", degraded: false };
     }
 
-    return { ok: true, remaining: Math.max(0, limit - totalHits), retryAfterSeconds: 0, backend: "db" };
+    return {
+      ok: true,
+      remaining: Math.max(0, limit - totalHits),
+      retryAfterSeconds: 0,
+      backend: "db",
+      degraded: false,
+    };
   } catch (error) {
+    // H-09: la degradación deja de ser invisible. Un `console.warn` suelto no
+    // se puede alertar; una línea estructurada sí, y lleva la clave afectada.
     console.warn(
-      "[rate-limit] DB unavailable, cayendo a memoria local:",
-      error instanceof Error ? error.message : String(error)
+      `[rate-limit] degraded ${JSON.stringify({
+        event: "rate_limit.degraded",
+        key,
+        limit,
+        degradedLimit: degradedLimit(limit),
+        reason: error instanceof Error ? error.message : String(error),
+      })}`,
     );
-    return memoryRateLimit(key, limit, windowMs);
+    // Se endurece el límite mientras dura la degradación: ver degradedLimitDivisor.
+    return memoryRateLimit(key, degradedLimit(limit), windowMs);
   }
 }
 
@@ -74,7 +119,13 @@ function memoryRateLimit(key: string, limit: number, windowMs: number): RateLimi
     const oldest = bucket.hits[0];
     const retryAfterSeconds = Math.max(1, Math.ceil((oldest + windowMs - now) / 1000));
     memoryBuckets.set(key, bucket);
-    return { ok: false, remaining: 0, retryAfterSeconds, backend: "memory-fallback" };
+    return {
+      ok: false,
+      remaining: 0,
+      retryAfterSeconds,
+      backend: "memory-fallback",
+      degraded: true,
+    };
   }
 
   bucket.hits.push(now);
@@ -84,7 +135,46 @@ function memoryRateLimit(key: string, limit: number, windowMs: number): RateLimi
     remaining: limit - bucket.hits.length,
     retryAfterSeconds: 0,
     backend: "memory-fallback",
+    degraded: true,
   };
+}
+
+/**
+ * Retención por defecto de `rate_limit_hits`: 1 hora.
+ *
+ * La ventana más larga en uso es de 60 s, así que una hora deja margen de sobra
+ * para cualquier consulta en vuelo.
+ */
+export const RATE_LIMIT_RETENTION_MS = 60 * 60 * 1000;
+
+/**
+ * Borra hits fuera de la ventana de retención (H-09).
+ *
+ * `smarttalk.rate_limit_hits` **no la purgaba nadie**. La migración 013 creó el
+ * índice `idx_rate_limit_hit_at` con el comentario «para la limpieza periódica»,
+ * pero esa limpieza nunca se implementó.
+ *
+ * Importa más de lo que parece: cada comprobación hace un `COUNT` sobre la
+ * tabla, así que cuanto más crece, más tarda; y cuanto más tarda, más probable
+ * es que falle y active el fail-open. Es un bucle que se realimenta.
+ *
+ * No se invoca desde `rateLimit`: añadir un DELETE a cada petición empeoraría
+ * justo lo que se quiere aliviar. Está pensada para un cron.
+ */
+export async function purgeRateLimitHits(retentionMs = RATE_LIMIT_RETENTION_MS) {
+  const admin = createAdminClient("smarttalk");
+  const cutoff = new Date(Date.now() - retentionMs).toISOString();
+
+  const { data, error } = await admin
+    .from("rate_limit_hits")
+    .delete()
+    .lt("hit_at", cutoff)
+    .select("id");
+
+  if (error) {
+    return { purged: 0, ok: false as const, error: error.message };
+  }
+  return { purged: Array.isArray(data) ? data.length : 0, ok: true as const };
 }
 
 export function clientIp(headers: Headers): string {
@@ -121,7 +211,7 @@ export async function rateLimitWithWhitelist(
   windowMs: number
 ): Promise<RateLimitResult> {
   if (isWhitelistedIp(ip)) {
-    return { ok: true, remaining: limit, retryAfterSeconds: 0, backend: "db" };
+    return { ok: true, remaining: limit, retryAfterSeconds: 0, backend: "db", degraded: false };
   }
   return rateLimit(key, limit, windowMs);
 }

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { createHmac, randomUUID, timingSafeEqual } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { filterPausedBrandIds } from "./intake-guard";
+import { INACTIVE_BRAND_INTAKE_RESPONSE } from "./brand-status";
 import { findReusableConversation } from "@/lib/smarttalk/conversation-dedupe";
 import { resolveToken } from "@/lib/auth/token-crypto";
 import { checkBillingFeature } from "@/lib/billing/service";
@@ -186,7 +188,19 @@ async function findMatchingChannel(
     return null;
   }
 
-  const channels = (data || []) as SmarttalkChannel[];
+  // Los canales de una marca pausada quedan fuera antes de intentar la
+  // coincidencia. En la práctica la pausa ya los dejó `disconnected` y el
+  // filtro de arriba bastaría; esto cubre el caso de un canal que siguiera
+  // activo pese a la pausa, y hace que un evento pendiente **anterior** a la
+  // pausa tampoco encuentre destino al reprocesarse después.
+  const allChannels = (data || []) as SmarttalkChannel[];
+  const pausedBrands = await filterPausedBrandIds(
+    allChannels.map((channel) => channel.brand_id).filter((id): id is string => Boolean(id))
+  );
+  const channels = allChannels.filter(
+    (channel) => !channel.brand_id || !pausedBrands.has(channel.brand_id)
+  );
+  const matches: SmarttalkChannel[] = [];
   for (const channel of channels) {
     const config = (channel.config || {}) as Record<string, unknown>;
     const legacyId = typeof config.legacy_id === "string" ? config.legacy_id : null;
@@ -199,11 +213,76 @@ async function findMatchingChannel(
       .filter(Boolean)
       .map((value) => normalizeId(value as string));
 
-    if (candidates.some((candidate) => metaIds.includes(normalizeId(candidate)))) {
-      return channel;
-    }
+    if (candidates.some((candidate) => metaIds.includes(normalizeId(candidate)))) matches.push(channel);
   }
-  return null;
+
+  // A provider asset must resolve to exactly one tenant/brand. Never select
+  // the first row when a misconfigured duplicate channel makes the routing
+  // ambiguous, otherwise one brand could receive another brand's messages.
+  const uniqueMatches = [...new Map(matches.map((channel) => [channel.id, channel])).values()];
+  if (uniqueMatches.length > 1) {
+    console.error("[meta-webhook] ambiguous channel routing; refusing event", {
+      channelKind,
+      candidates,
+      channelIds: uniqueMatches.map((channel) => channel.id),
+      brandIds: uniqueMatches.map((channel) => channel.brand_id),
+      organizationIds: uniqueMatches.map((channel) => channel.organization_id),
+    });
+    return null;
+  }
+  return uniqueMatches[0] || null;
+}
+
+/**
+ * ¿Este payload va dirigido, en su totalidad, a marcas inactivas?
+ *
+ * A diferencia de `findMatchingChannel`, aquí se buscan los canales **sin
+ * filtrar por estado**: tras una pausa están `disconnected`, y un filtro por
+ * `active` los haría invisibles justo cuando hay que reconocerlos para poder
+ * responder «marca inactiva» en vez de encolar un evento que nadie procesará.
+ *
+ * Sólo devuelve `true` si hay coincidencias y **todas** pertenecen a marcas
+ * pausadas. Un payload sin coincidencia alguna sigue su camino normal.
+ */
+export async function isPayloadForInactiveBrand(
+  channelKind: MetaChannelKind,
+  payload: MetaWebhookPayload
+): Promise<boolean> {
+  const entries = Array.isArray(payload.entry) ? payload.entry : [];
+  const candidates = [...new Set(entries.flatMap((entry) => pickChannelCandidates(entry)))];
+  if (candidates.length === 0) return false;
+
+  const admin = createAdminClient("smarttalk");
+  const { data, error } = await admin
+    .from("channels")
+    .select("id, brand_id, meta_business_id, whatsapp_business_account_id, whatsapp_phone_number_id, config")
+    .eq("type", normalizeChannelKind(channelKind));
+
+  if (error || !data) return false;
+
+  const matches = (data as SmarttalkChannel[]).filter((channel) => {
+    const config = (channel.config || {}) as Record<string, unknown>;
+    const legacyId = typeof config.legacy_id === "string" ? config.legacy_id : null;
+    const metaIds = [
+      channel.meta_business_id,
+      channel.whatsapp_business_account_id,
+      channel.whatsapp_phone_number_id,
+      legacyId,
+    ]
+      .filter(Boolean)
+      .map((value) => normalizeId(value as string));
+    return candidates.some((candidate) => metaIds.includes(normalizeId(candidate)));
+  });
+
+  if (matches.length === 0) return false;
+
+  const brandIds = matches
+    .map((channel) => channel.brand_id)
+    .filter((id): id is string => Boolean(id));
+  if (brandIds.length !== matches.length) return false;
+
+  const paused = await filterPausedBrandIds(brandIds);
+  return brandIds.every((id) => paused.has(id));
 }
 
 async function upsertContactAndConversation(
@@ -724,6 +803,14 @@ export async function receiveMetaWebhook(
 
   if (channel === "whatsapp") {
     return NextResponse.json({ received: true, channel });
+  }
+
+  // Marca inactiva: ni siquiera se encola. Descartar aquí es mejor que dejar
+  // el evento pendiente y que el procesador lo ignore después: la cola no
+  // acumula trabajo que jamás producirá nada, y el motivo queda en la
+  // respuesta en lugar de en un log.
+  if (await isPayloadForInactiveBrand(channel, payload)) {
+    return NextResponse.json(INACTIVE_BRAND_INTAKE_RESPONSE);
   }
 
   // Queue persistente: guardamos el evento antes de responder. Si after() falla

@@ -205,14 +205,26 @@ export async function processIncomingMessage(
 
     // If not handled, assign via round-robin
     if (!handled) {
-      const { data: availableAgent } = await admin
+      const { data: onlineAgents } = await admin
         .from("agents")
-        .select("id")
+        .select("id, member_type, is_super_admin")
         .eq("organization_id", org.id)
         .eq("status", "online")
-        .order("created_at")
-        .limit(1)
-        .single();
+        .order("created_at");
+
+      const { data: brandAssignments } = await admin
+        .from("brand_advisor_assignments")
+        .select("agent_id")
+        .eq("organization_id", org.id)
+        .eq("brand_id", channel.brand_id);
+
+      const assignedAgentIds = new Set((brandAssignments || []).map((row) => row.agent_id as string));
+      const eligibleAgents = (onlineAgents || []).filter((candidate) =>
+        candidate.is_super_admin === true ||
+        (candidate.member_type !== "brand_admin" && candidate.member_type !== "brand_advisor") ||
+        assignedAgentIds.has(candidate.id as string)
+      );
+      const availableAgent = eligibleAgents[0];
 
       if (availableAgent) {
         await admin

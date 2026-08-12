@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useRef } from "react";
 import { useInboxStore } from "@/stores/inbox";
 import { ConversationFilters } from "./ConversationFilters";
 import { ConversationItem } from "./ConversationItem";
@@ -9,18 +10,46 @@ import type { Conversation } from "@/types/database";
 interface ConversationListProps {
   conversations?: Conversation[];
   isLoading?: boolean;
+  hasNextPage?: boolean;
+  isFetchingNextPage?: boolean;
+  onLoadMore?: () => void;
 }
 
-export function ConversationList({ conversations = [], isLoading = false }: ConversationListProps) {
+export function ConversationList({
+  conversations = [],
+  isLoading = false,
+  hasNextPage = false,
+  isFetchingNextPage = false,
+  onLoadMore,
+}: ConversationListProps) {
   const selectedId = useInboxStore((s) => s.selectedConversationId);
   const setSelected = useInboxStore((s) => s.setSelectedConversation);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
   const openCount = conversations?.filter((c) => c.status === "open").length || 0;
 
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    const scrollContainer = sentinel?.parentElement;
+    if (!sentinel || !scrollContainer || !onLoadMore) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && hasNextPage && !isFetchingNextPage) {
+          onLoadMore();
+        }
+      },
+      { root: scrollContainer, rootMargin: "240px 0px" },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, onLoadMore]);
+
   return (
-    <>
+    <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
-      <div className="h-12 min-h-[48px] flex items-center justify-between px-4 border-b border-border">
+      <div className="h-12 min-h-[48px] shrink-0 flex items-center justify-between px-4 border-b border-border">
         <h2 className="text-sm font-semibold text-foreground">Bandeja de entrada</h2>
         {openCount > 0 && (
           <span
@@ -36,7 +65,7 @@ export function ConversationList({ conversations = [], isLoading = false }: Conv
       <ConversationFilters />
 
       {/* Conversation List */}
-      <div className="flex-1 overflow-y-auto scrollbar-thin">
+      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
         {isLoading ? (
           <div className="flex items-center justify-center py-8" role="status" aria-live="polite">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-label="Cargando conversaciones" />
@@ -58,7 +87,16 @@ export function ConversationList({ conversations = [], isLoading = false }: Conv
             />
           ))
         )}
+        {hasNextPage && (
+          <div ref={loadMoreRef} className="flex min-h-10 items-center justify-center px-3 py-2">
+            {isFetchingNextPage ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-label="Cargando más leads" />
+            ) : (
+              <span className="text-[10px] text-muted-foreground">Desplaza para cargar más leads</span>
+            )}
+          </div>
+        )}
       </div>
-    </>
+    </div>
   );
 }

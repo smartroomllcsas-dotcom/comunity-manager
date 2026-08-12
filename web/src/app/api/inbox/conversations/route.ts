@@ -124,8 +124,16 @@ export async function GET(request: NextRequest) {
   const brandParam = searchParams.get("brandId");
   const search = (searchParams.get("search") || "").trim();
   const cursor = parseCursor(searchParams.get("cursor"));
-  const rawLimit = Number(searchParams.get("limit"));
-  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 30;
+  // `searchParams.get` devuelve null cuando el parámetro no viene, y Number(null)
+  // es 0 —no NaN—, así que la versión anterior caía a Math.max(0, 1) = 1 y la
+  // ruta respondía una sola conversación por página en vez de las 30 del
+  // contrato. Sólo no se notaba porque el único cliente manda limit=50.
+  const rawLimitParam = searchParams.get("limit");
+  const rawLimit = Number(rawLimitParam);
+  const limit =
+    rawLimitParam !== null && Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(rawLimit, 100)
+      : 30;
   const assignedBrandIds = await getAgentBrandIds(agent);
 
   if (assignedBrandIds && assignedBrandIds.length === 0) {

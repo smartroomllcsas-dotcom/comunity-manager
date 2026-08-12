@@ -1,5 +1,5 @@
 import {
-  createCheckoutConfig,
+  createEpaycoV2Session,
   getEpaycoPublicKey,
 } from "@/lib/epayco/client";
 import type {
@@ -22,6 +22,7 @@ export class EpaycoGateway implements PaymentGatewayInterface {
   private missingVariables(): string[] {
     return [
       ["NEXT_PUBLIC_EPAYCO_PUBLIC_KEY", process.env.NEXT_PUBLIC_EPAYCO_PUBLIC_KEY],
+      ["EPAYCO_PRIVATE_KEY", process.env.EPAYCO_PRIVATE_KEY],
       ["EPAYCO_CUSTOMER_ID", process.env.EPAYCO_CUSTOMER_ID],
       ["EPAYCO_P_KEY", process.env.EPAYCO_P_KEY],
       ["NEXT_PUBLIC_APP_URL", process.env.NEXT_PUBLIC_APP_URL],
@@ -44,20 +45,23 @@ export class EpaycoGateway implements PaymentGatewayInterface {
       throw new PaymentGatewayConfigurationError(this.code, missing);
     }
 
+    const sessionId = await createEpaycoV2Session({
+      description: input.description,
+      amountMinor: input.amountMinor,
+      currency: input.currency,
+      email: input.customerEmail,
+      customerName: input.customerName,
+      customerPhone: input.customerPhone,
+      checkoutSessionId: input.checkoutSessionId,
+      internalReference: input.reference,
+    });
+
     return {
       kind: "epayco" as const,
       gateway: this.code,
       publicKey: getEpaycoPublicKey(),
       test: process.env.EPAYCO_TEST === "true",
-      checkoutConfig: createCheckoutConfig({
-        name: input.description,
-        description: input.description,
-        amountMinor: input.amountMinor,
-        currency: input.currency,
-        email: input.customerEmail,
-        checkoutSessionId: input.checkoutSessionId,
-        internalReference: input.reference,
-      }),
+      sessionId,
     };
   }
 }

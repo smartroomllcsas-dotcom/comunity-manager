@@ -1,0 +1,168 @@
+# Plan de trabajo conjunto: Codex + agente
+
+Fecha: 2026-08-09
+Proyecto: CommunityManager
+
+## Fase siguiente — ciclo de vida y pruebas de contrato (2026-08-10)
+
+- [x] Claude entregó cancelación al final del periodo, reversión, estados
+  vencido/gracia/suspendido/cancelado y rutas autenticadas para
+  `/settings/billing`.
+- [x] Codex revisó el diff, ejecutó 334 pruebas Vitest, 6 pruebas Node, lint y
+  build; no hay errores nuevos en `src`.
+- [x] Se añadieron pruebas locales de ciclo de vida, pasarelas, webhooks,
+  outbox y resiliencia; el informe queda en
+  `web/AGENT_NEXT_PHASE_IMPLEMENTATION.md`.
+- [x] La vista de facturación ya no muestra un plan activo cuando la
+  suscripción está `cancelled`; la reactivación sigue pasando por checkout.
+- [x] El propietario confirmó `Success. No rows returned` al aplicar la
+  migración `033_subscription_reactivation.sql` en la instancia Supabase
+  conectada.
+- [x] Se corrigió el formato del teléfono de facturación QA enviado a ePayco
+  (`+57 300 000 0000` → `3000000000`) y se publicó en Production en el
+  deployment `dpl_CKYjsRQJw22krASqqJyE8bLMW5v3`.
+- [x] Se reemplazó el checkout legacy por ePayco Smart Checkout v2: sesión
+  creada en backend, `checkout-v2.js` en frontend y extras vinculados al
+  webhook. Deployment Production `dpl_3fc8tcYvbrcL34F6fSM6SbUGbWCd` en estado
+  `READY`.
+- [x] Ejecutar y verificar el flujo completo de reactivación en QA mediante una
+  compra sandbox real. Demo Inicial fue aprobado por ePayco (ref. `380694488`)
+  y la misma suscripción quedó `active` hasta el 2026-09-10.
+- [ ] Ejecutar el flujo real cancelar → periodo vencido → gracia → suspensión
+  → checkout de reactivación en QA antes de desplegarlo a Production.
+
+Este bloque está implementado, revisado y validado con una compra sandbox real
+en Production. La prueba correcta usa el mismo plan cancelado (Demo Inicial,
+$59.000); seleccionar Demo Crecimiento inicia un cambio de plan y no prueba la
+reactivación.
+
+## Estado de ejecución
+
+### Aplicado y validado — 2026-08-10
+
+- [x] Reactivación real en sandbox: Demo Inicial ($59.000 COP), referencia
+  ePayco `380694488`, resultado aprobado.
+- [x] La cuenta QA volvió a `active` y la interfaz mostró acceso hasta el
+  2026-09-10.
+- [x] La interfaz distingue `Reactivar con ePayco` del cambio de plan; Demo
+  Crecimiento ($149.000) no se usa para validar reactivación.
+- [x] Evidencia y checklist actualizados, commit `b3afd40` subido a la rama
+  `codex/add-manual-contact`.
+
+- [x] B1 — Reservas atómicas implementadas para contactos, canales, marcas y
+  flujos; migraciones `031` y `032` aplicadas y deployment manual Production
+  listo.
+- [x] B2 — Outbox, leases, reintentos, backoff, cron y notificaciones
+  preparados y desplegados.
+- [x] B3 — Tests, lint, build, documentación, commit y deployment manual
+  completados.
+- [x] Evidencia operativa — `/contacts` abre el modal de alta y una cuenta en
+  el límite recibe el rechazo esperado del plan al intentar guardar.
+- [x] Evidencia QA — La prueba directa de reservas atómicas y el outbox quedó
+  ejecutada con resultado PASS; evidencia en
+  `web/QA_BILLING_EVIDENCE_CLAUDE.md`.
+- [x] API — Dos solicitudes simultáneas reales a `POST /api/contacts` en QA
+  devolvieron `201` y `402`; el contacto, reserva y plan temporal fueron
+  limpiados/restaurados.
+- [x] Notificación sandbox — Resend procesó un job real de `send_notification`
+  mediante el cron desplegado; el job terminó `completed` y el registro terminó
+  `sent`, con evidencia en `web/QA_BILLING_EVIDENCE_CLAUDE.md`.
+- [x] UI — Dos formularios simultáneos en QA produjeron una alta y un rechazo
+  visual por límite; el estado temporal fue limpiado y restaurado.
+
+## Regla de integración
+
+Codex es el responsable único de la integración final y de subir los cambios.
+El agente puede revisar, proponer, implementar en su rama o generar evidencias,
+pero no debe publicar directamente en `master`, Production, Vercel ni Supabase.
+
+Antes de subir cualquier cambio, Codex debe revisar el diff completo, ejecutar
+las pruebas, confirmar que no se sobrescribieron cambios locales y aprobar la
+migración o despliegue correspondiente.
+
+## Frente A — agente
+
+### A1. Auditoría independiente
+
+- Revisar los límites actuales y señalar cada ruta que todavía haga
+  `check -> insert/update` fuera de una operación atómica.
+- Revisar `billing_outbox_jobs`, `notification_logs` y las transiciones de
+  suscripción.
+- Entregar una lista de hallazgos con archivo, línea, riesgo y prueba sugerida.
+
+### A2. Evidencia operativa
+
+- Organizar las referencias de las compras sandbox de los tres planes.
+- Asociar cada compra con organización, plan, pago, suscripción, deployment y
+  límites observados.
+- Confirmar capturas de `/admin/plans`, `/admin/payment-gateways` y
+  `/settings/billing`.
+- Preparar la matriz de cambio de plan, vencimiento, gracia, suspensión y
+  reactivación en una cuenta no productiva.
+
+### A3. Restricciones
+
+- No cambiar secretos ni variables de Production.
+- No ejecutar `db push`, deploy ni publicar ramas.
+- No marcar un pendiente como cerrado sin evidencia reproducible.
+
+### A4. Próximas tareas delegables — agente
+
+Estas tareas pueden ejecutarse sin publicar ni modificar Production:
+
+- [ ] Crear un script reproducible de verificación PostgreSQL/RLS para las 7
+  pruebas omitidas, usando variables de entorno y una base QA desechable; no
+  ejecutar el script contra Production.
+- [ ] Completar contract tests locales para ePayco: pendiente, rechazado,
+  firma inválida, monto/moneda/referencia alterados, webhook duplicado y dos
+  webhooks concurrentes.
+- [ ] Preparar fixtures y pruebas de ciclo de vida para `active`, `past_due`,
+  `grace_period`, `suspended` y `cancelled`, verificando que no se creen
+  suscripciones duplicadas.
+- [ ] Revisar las rutas de Facebook, Instagram y WhatsApp y entregar una
+  matriz E2E con mocks, casos cubiertos y casos faltantes; no usar tokens de
+  Production.
+- [ ] Revisar backup, restauración y rollback; entregar un runbook y scripts
+  de comprobación sin ejecutar acciones destructivas.
+- [ ] Auditar logs, correlation IDs, firma del webhook, datos PCI y rate
+  limiting; reportar hallazgos con archivo, línea, riesgo y prueba sugerida.
+- [ ] Actualizar `CHECKLIST_PRUEBAS_PENDIENTES.md` únicamente con evidencias
+  reproducibles y entregar un resumen final sin hacer commit ni push.
+
+## Frente B — Codex
+
+### B1. Concurrencia atómica — prioridad P0
+
+- Diseñar la operación PostgreSQL que serialice la decisión y el alta del
+  recurso.
+- Cubrir como mínimo contactos, canales, marcas y flujos.
+- Añadir pruebas de dos solicitudes simultáneas en el límite.
+- Crear migración nueva, actualizar rutas y documentar rollback.
+
+### B2. Outbox y notificaciones — prioridad P0
+
+- Implementar reclamación con lease, reintentos y backoff.
+- Procesar `billing_outbox_jobs` de forma idempotente.
+- Conectar los eventos de billing con `notification_logs` sin duplicar envíos.
+- Añadir cron protegido y pruebas de éxito, fallo, reintento y duplicado.
+
+### B3. Validación e integración
+
+- Ejecutar tests, lint, build y `git diff --check`.
+- Revisar los cambios del agente antes de incorporarlos.
+- Actualizar checklist y guía operativa solo con evidencia confirmada.
+- Crear commit, subir la rama y preparar el despliegue cuando corresponda.
+
+## Orden de entrega
+
+1. Auditoría del agente y diseño técnico de concurrencia.
+2. Migración/RPC y rutas atómicas.
+3. Pruebas de concurrencia y regresión.
+4. Outbox y notificaciones.
+5. QA operacional, revisión final y publicación por Codex.
+
+## Criterio de terminado
+
+Un bloque solo se considera terminado cuando tiene código, pruebas aprobadas,
+diff revisado, documentación actualizada y evidencia reproducible. La salida
+comercial seguirá bloqueada hasta cerrar los P0 restantes.

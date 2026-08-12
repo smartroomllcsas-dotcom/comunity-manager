@@ -3,7 +3,12 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   billingDeniedResponse,
+  billingCapacityDeniedResponse,
+  billingCapacityErrorResponse,
   checkBillingFeature,
+  consumeBillingCapacity,
+  releaseBillingCapacity,
+  reserveBillingCapacity,
 } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import {
@@ -110,11 +115,12 @@ export async function POST(request: NextRequest) {
     .from("contacts")
     .select("id")
     .eq("organization_id", agent.organization_id)
+    .eq("brand_id", input.brandId)
     .eq("wa_id", input.waId)
     .maybeSingle();
   if (existingError) return Response.json({ error: "No fue posible validar el contacto." }, { status: 500 });
   if (existingContact) {
-    return Response.json({ error: "Ya existe un contacto con este teléfono." }, { status: 409 });
+    return Response.json({ error: "Ya existe un contacto con este teléfono en esta marca." }, { status: 409 });
   }
 
   const billingDecision = await checkBillingFeature({
@@ -124,6 +130,17 @@ export async function POST(request: NextRequest) {
     source: "api/contacts",
   });
   if (!billingDecision.allowed) return billingDeniedResponse(billingDecision);
+
+  const capacity = await reserveBillingCapacity({
+    organizationId: agent.organization_id,
+    featureCode: BILLING_FEATURES.CONTACTS_TOTAL,
+    requestedUnits: 1,
+  });
+  if (capacity.status === "denied") {
+    return billingCapacityDeniedResponse(billingDecision, capacity);
+  }
+  if (capacity.status === "error") return billingCapacityErrorResponse();
+  const reservationId = capacity.status === "reserved" ? capacity.reservationId : null;
 
   const { data: contact, error } = await admin
     .from("contacts")
@@ -139,6 +156,7 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) {
+    if (reservationId) await releaseBillingCapacity(reservationId);
     if (error.code === "23505") {
       return Response.json({ error: "Ya existe un contacto con este teléfono." }, { status: 409 });
     }
@@ -148,6 +166,10 @@ export async function POST(request: NextRequest) {
       brandId: input.brandId,
     });
     return Response.json({ error: "No fue posible crear el contacto." }, { status: 500 });
+  }
+
+  if (reservationId && !(await consumeBillingCapacity(reservationId, contact.id))) {
+    await releaseBillingCapacity(reservationId);
   }
 
   return Response.json({ contact }, { status: 201 });

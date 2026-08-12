@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { filterPausedBrandIds } from "./intake-guard";
 import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { findReusableConversation } from "@/lib/smarttalk/conversation-dedupe";
@@ -562,7 +563,18 @@ export async function syncInstagramInboxForOrganization(organizationId: string):
     return result;
   }
 
+  // La sincronización de Instagram no corre para marcas inactivas. En la
+  // práctica la pausa ya dejó el canal `disconnected` y el filtro de arriba
+  // basta; esto lo deja escrito donde se decide, y cubre un canal que hubiera
+  // quedado activo.
+  const pausedBrandIds = await filterPausedBrandIds(
+    ((channels || []) as { brand_id?: string | null }[])
+      .map((channel) => channel.brand_id)
+      .filter((id): id is string => Boolean(id))
+  );
+
   for (const channel of (channels || []) as SmarttalkChannel[]) {
+    if (channel.brand_id && pausedBrandIds.has(channel.brand_id)) continue;
     result.channels += 1;
 
     try {

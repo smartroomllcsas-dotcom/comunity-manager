@@ -7,8 +7,12 @@ declare global {
   interface Window {
     ePayco?: {
       checkout: {
-        configure(config: { key: string; test: boolean }): {
-          open(params: Record<string, string>): void;
+        configure(config: {
+          sessionId: string;
+          type: "onpage" | "standard";
+          test: boolean;
+        }): {
+          open(): void;
         };
       };
     };
@@ -42,35 +46,51 @@ export function EpaycoCheckout({
       if (!window.ePayco) {
         await new Promise<void>((resolve, reject) => {
           const script = document.createElement("script");
-          script.src = "https://checkout.epayco.co/checkout.js";
+          script.src = "https://checkout.epayco.co/checkout-v2.js";
           script.onload = () => resolve();
           script.onerror = () => reject(new Error("Error cargando ePayco"));
           document.head.appendChild(script);
         });
       }
 
-      // Get checkout config from server
+      // Get checkout config from server.
+      // La Idempotency-Key la genera el cliente una vez por intento: si la red
+      // reintenta el POST, el servidor devuelve la misma sesión en lugar de
+      // crear una segunda.
       const res = await fetch("/api/epayco/checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": crypto.randomUUID(),
+        },
         body: JSON.stringify({ planId, currency }),
       });
 
-      if (!res.ok) throw new Error("Error al crear checkout");
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // El servidor distingue timeout de pasarela caída y de conflicto de
+        // idempotencia; mostrar su mensaje evita el "Error" genérico.
+        throw new Error(payload.error || "Error al crear checkout");
+      }
 
-      const { checkoutConfig, publicKey, test } = await res.json();
+      const { sessionId, test } = payload;
 
       // Open ePayco checkout
       if (window.ePayco) {
         const handler = window.ePayco.checkout.configure({
-          key: publicKey,
+          sessionId,
+          type: "onpage",
           test: test,
         });
-        handler.open(checkoutConfig);
+        handler.open();
       }
     } catch (error) {
       console.error("Checkout error:", error);
-      alert("Error al iniciar el pago. Intenta nuevamente.");
+      alert(
+        error instanceof Error && error.message
+          ? error.message
+          : "Error al iniciar el pago. Intenta nuevamente.",
+      );
     } finally {
       setLoading(false);
     }

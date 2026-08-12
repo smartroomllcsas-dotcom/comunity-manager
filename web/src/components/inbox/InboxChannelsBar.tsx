@@ -4,6 +4,9 @@ import type { Channel } from "@/types/database";
 import { cn } from "@/lib/utils";
 import { MessageCircle, Send, Music2, Globe2, Wifi } from "lucide-react";
 import { useInboxStore } from "@/stores/inbox";
+import { useInboxBrands } from "@/hooks/useInboxBrands";
+import { indexBrands } from "@/lib/inbox/brand-display";
+import { BrandTag } from "./BrandTag";
 
 function WhatsAppIcon({ className }: { className?: string }) {
   return <MessageCircle className={className} />;
@@ -48,6 +51,8 @@ function channelMeta(type: string) {
 export function InboxChannelsBar({ channels }: { channels: Channel[] }) {
   const activeChannels = channels.filter((channel) => channel.status === "active");
   const channelFilter = useInboxStore((s) => s.channelFilter);
+  const { data: brands } = useInboxBrands();
+  const brandsById = indexBrands(brands);
   const setChannelFilter = useInboxStore((s) => s.setChannelFilter);
 
   const filterOptions = [
@@ -91,6 +96,10 @@ export function InboxChannelsBar({ channels }: { channels: Channel[] }) {
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-white truncate">{channel.name}</p>
                     <p className="text-[11px] text-[#8b949e] truncate">{meta.label}</p>
+                    {/* La marca sale de channel.brand_id, no del nombre del canal. */}
+                    <div className="mt-1">
+                      <BrandTag brandId={channel.brand_id} brandsById={brandsById} />
+                    </div>
                   </div>
                 </div>
               );

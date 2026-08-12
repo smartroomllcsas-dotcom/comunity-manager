@@ -9,6 +9,9 @@ import { InternalNotes } from "./InternalNotes";
 import { SnoozeDropdown } from "./SnoozeDropdown";
 import { ClosingDialog } from "./ClosingDialog";
 import { ChannelBadge } from "./ChannelBadge";
+import { BrandTag } from "./BrandTag";
+import { useInboxBrands } from "@/hooks/useInboxBrands";
+import { indexBrands } from "@/lib/inbox/brand-display";
 import { useState, useEffect, useRef } from "react";
 import type { Conversation } from "@/types/database";
 import type { MessageContent } from "@/types/database";
@@ -173,6 +176,10 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
   }
 
   const contact = conversation.contact;
+
+  const { data: brands } = useInboxBrands();
+
+  const brandsById = indexBrands(brands);
   const assignedAgent = conversation.assigned_agent;
   const displayName = contact?.name || contact?.wa_id || "Desconocido";
   const isSnoozed = !!conversation.snoozed_until;
@@ -216,6 +223,8 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
             <div className="flex items-center gap-2">
               <p className="font-semibold text-sm text-white truncate">{displayName}</p>
               <ChannelBadge conversation={conversation} compact />
+              {/* Marca del chat abierto: siempre desde brand_id. */}
+              <BrandTag brandId={conversation.brand_id} brandsById={brandsById} />
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${statusColors[conversation.status] || statusColors.open}`}>
                 {statusLabels[conversation.status] || conversation.status}
               </span>

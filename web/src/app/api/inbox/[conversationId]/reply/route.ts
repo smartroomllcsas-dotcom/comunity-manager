@@ -36,6 +36,7 @@ import {
   getAccessibleConversation,
   getBrandScopeAgent,
 } from "@/lib/smarttalk/brand-scope";
+import { isBrandPaused } from "@/lib/smarttalk/brand-lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -105,6 +106,16 @@ export async function POST(
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
+  // Marca inactiva: no se responde desde el Inbox. Se comprueba antes de
+  // resolver la conversación porque la regla es la misma para las dos fuentes
+  // (menciones legacy y SmartTalk) y no depende de cuál sea.
+  if (await isBrandPaused(clientId)) {
+    return NextResponse.json(
+      { error: "inactive_brand", message: "Esta marca está inactiva y no puede responder mensajes." },
+      { status: 409 },
+    );
+  }
+
   // --- Recuperar contexto del grupo (última mention + plataforma) ---
   let platform = "";
   let incomingMessage = "";
@@ -153,6 +164,15 @@ export async function POST(
       const conv = await getAccessibleConversation(agent, parsed.ref);
       if (!conv) {
         return NextResponse.json({ error: "not_found" }, { status: 404 });
+      }
+      if (conv.brand_id !== clientId) {
+        return NextResponse.json({ error: "not_found" }, { status: 404 });
+      }
+      if (!conv.channel_type) {
+        return NextResponse.json(
+          { error: "channel_type_unavailable" },
+          { status: 422 },
+        );
       }
       platform = conv.channel_type;
       recipientHandle = conv.contact_id;

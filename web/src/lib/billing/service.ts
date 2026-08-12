@@ -1,6 +1,8 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { BILLING_FEATURES } from "@/lib/billing/features";
+import { BRAND_STATUS_PAUSED } from "@/lib/smarttalk/brand-status";
+import { billingError, billingWarn } from "@/lib/billing/log";
 import type {
   BillingEnforcementMode,
   BillingFeatureCode,
@@ -193,9 +195,12 @@ async function logDecision(
     source: source || null,
   });
   if (error) {
-    console.warn("[billing] could not record decision", {
+    billingWarn("decision_not_recorded", {
+      correlationId: `decision:${organizationId}:${decision.featureCode}`,
+      organizationId,
       code: error.code,
       featureCode: decision.featureCode,
+      source: source || null,
     });
   }
 }
@@ -309,11 +314,20 @@ async function getCurrentUsage(
   }
 
   if (featureCode === BILLING_FEATURES.BRANDS_TOTAL) {
+    // Las marcas pausadas no ocupan cupo: desactivar una marca debe permitir
+    // crear otra. Este filtro tiene que ser **idéntico** al de la rama
+    // 'brands.total' de smarttalk.reserve_billing_capacity (migración 036); si
+    // divergen, la comprobación previa y la reserva atómica darían veredictos
+    // distintos y el cliente vería un error contradictorio.
     const publicAdmin = createAdminClient("public");
     const { count } = await publicAdmin
       .from("cm_clients")
       .select("id", { count: "exact", head: true })
-      .eq("smarttalk_organization_id", organizationId);
+      .eq("smarttalk_organization_id", organizationId)
+      // `neq` por sí solo descartaría también las filas con status NULL, porque
+      // en SQL `NULL <> 'paused'` no es TRUE. El SQL usa `IS DISTINCT FROM`,
+      // que sí las cuenta; esta cláusula reproduce esa semántica exacta.
+      .or(`status.is.null,status.neq.${BRAND_STATUS_PAUSED}`);
     return count || 0;
   }
 
@@ -588,7 +602,9 @@ export async function recordBillingUsage(input: {
   });
 
   if (error) {
-    console.warn("[billing] could not record usage", {
+    billingWarn("usage_not_recorded", {
+      correlationId: `usage:${input.idempotencyKey}`,
+      organizationId: input.organizationId,
       code: error.code,
       featureCode: input.featureCode,
     });
@@ -596,6 +612,130 @@ export async function recordBillingUsage(input: {
   }
 
   return { recorded: Boolean(data), reason: "ok" as const };
+}
+
+export type BillingCapacityResult =
+  | { status: "disabled" }
+  | { status: "reserved"; reservationId: string }
+  | { status: "unlimited" }
+  | {
+      status: "denied";
+      reason: "limit_reached" | "feature_disabled";
+      currentUsage: number;
+      limitValue: number;
+    }
+  | { status: "error" };
+
+/**
+ * Atomically reserves capacity for count-based resources.
+ *
+ * The feature flag keeps existing deployments safe until migration 031 is
+ * applied. Once enabled, callers must consume or release the reservation after
+ * the resource write completes.
+ */
+export async function reserveBillingCapacity(input: {
+  organizationId: string;
+  featureCode: BillingFeatureCode;
+  requestedUnits?: number;
+}): Promise<BillingCapacityResult> {
+  if (process.env.BILLING_ATOMIC_QUOTA_MODE !== "on") {
+    return { status: "disabled" };
+  }
+
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("reserve_billing_capacity", {
+    p_organization_id: input.organizationId,
+    p_feature_code: input.featureCode,
+    p_quantity: Math.max(1, Math.floor(input.requestedUnits ?? 1)),
+  });
+  if (error || !data) {
+    billingError("quota_reservation_failed", {
+      correlationId: `quota:${input.organizationId}:${input.featureCode}`,
+      organizationId: input.organizationId,
+      code: error?.code,
+      featureCode: input.featureCode,
+    });
+    return { status: "error" };
+  }
+
+  const row = (Array.isArray(data) ? data[0] : data) as {
+    allowed?: boolean;
+    reservation_id?: string | null;
+    reason?: string;
+    current_usage?: number | null;
+    limit_value?: number | null;
+  };
+  if (row.reason === "unlimited") return { status: "unlimited" };
+  if (!row.allowed && (row.reason === "limit_reached" || row.reason === "feature_disabled")) {
+    return {
+      status: "denied",
+      reason: row.reason,
+      currentUsage: Number(row.current_usage || 0),
+      limitValue: Number(row.limit_value || 0),
+    };
+  }
+  if (!row.allowed || !row.reservation_id) return { status: "error" };
+  return { status: "reserved", reservationId: row.reservation_id };
+}
+
+export async function consumeBillingCapacity(
+  reservationId: string,
+  resourceId?: string,
+) {
+  if (process.env.BILLING_ATOMIC_QUOTA_MODE !== "on") return true;
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("consume_billing_capacity", {
+    p_reservation_id: reservationId,
+    p_resource_id: resourceId || null,
+  });
+  if (error) {
+    billingError("quota_consumption_failed", {
+      correlationId: `reservation:${reservationId}`,
+      code: error.code,
+    });
+    return false;
+  }
+  return Boolean(data);
+}
+
+export async function releaseBillingCapacity(reservationId: string) {
+  if (process.env.BILLING_ATOMIC_QUOTA_MODE !== "on") return true;
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("release_billing_capacity", {
+    p_reservation_id: reservationId,
+  });
+  if (error) {
+    billingError("quota_release_failed", {
+      correlationId: `reservation:${reservationId}`,
+      code: error.code,
+    });
+    return false;
+  }
+  return Boolean(data);
+}
+
+export function billingCapacityErrorResponse() {
+  return Response.json(
+    {
+      error: "No fue posible reservar el límite contratado. Intenta nuevamente.",
+      code: "BILLING_QUOTA_UNAVAILABLE",
+    },
+    { status: 503 },
+  );
+}
+
+export function billingCapacityDeniedResponse(
+  decision: BillingDecision,
+  result: Extract<BillingCapacityResult, { status: "denied" }>,
+) {
+  return billingDeniedResponse({
+    ...decision,
+    allowed: false,
+    wouldBlock: true,
+    reason: result.reason,
+    currentUsage: result.currentUsage,
+    limitValue: result.limitValue,
+  });
 }
 
 export function billingDeniedResponse(decision: BillingDecision) {

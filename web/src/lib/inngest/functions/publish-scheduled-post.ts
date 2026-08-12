@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { filterPausedBrandIds } from "@/lib/smarttalk/intake-guard";
 import { inngest, INNGEST_EVENTS } from "@/lib/inngest/client";
 import { decryptToken } from "@/lib/crypto";
 import { publishToInstagram, publishToFacebook } from "@/lib/meta";
@@ -107,6 +108,20 @@ export const publishScheduledPost = inngest.createFunction(
       if (!data) throw new Error(`load-post: post ${post_id} not found`);
       return data;
     });
+
+    // Marca inactiva: no se publica. El post conserva su fila, su contenido y
+    // su programación; se podrá publicar cuando la marca vuelva. Se omite en
+    // vez de fallar para que Inngest no lo reintente indefinidamente.
+    const postClientId = (post as { client_id?: string }).client_id ?? null;
+    if (postClientId) {
+      const paused = await step.run("check-brand-paused", async () =>
+        (await filterPausedBrandIds([postClientId])).has(postClientId),
+      );
+      if (paused) {
+        logger.warn(`publish-scheduled-post: marca ${postClientId} inactiva; post ${post_id} omitido`);
+        return { skipped: "inactive_brand", post_id };
+      }
+    }
 
     // Best-effort lookup; account may be missing during early rollout.
     const socialAccount = await step.run("load-social-account", async () => {

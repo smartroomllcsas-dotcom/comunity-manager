@@ -34,7 +34,10 @@ export async function getBrandInOrganization(brandId: string, organizationId: st
   const admin = createAdminClient("public");
   const { data, error } = await admin
     .from("cm_clients")
-    .select("id, name, smarttalk_organization_id")
+    // `status` viaja para que quien conecte un canal pueda rechazar una marca
+    // inactiva. La lectura NO se filtra por estado: una marca pausada sigue
+    // siendo accesible para consultar su historial.
+    .select("id, name, status, smarttalk_organization_id")
     .eq("id", brandId)
     .eq("smarttalk_organization_id", organizationId)
     .maybeSingle();
@@ -79,7 +82,10 @@ export async function getAccessibleConversation(
 
   let query = admin
     .from("conversations")
-    .select("id, organization_id, brand_id, channel_id, contact_id, channel_type, assigned_agent_id, status, contact:contacts(visibility_status)")
+    // `conversations` no tiene una columna channel_type. El tipo vive en la
+    // tabla relacionada channels; lo normalizamos abajo para los consumidores
+    // antiguos que todavía leen conv.channel_type.
+    .select("id, organization_id, brand_id, channel_id, contact_id, assigned_agent_id, status, channel:channels(type), contact:contacts(visibility_status)")
     .eq("id", conversationId)
     .eq("organization_id", agent.organization_id);
 
@@ -87,5 +93,10 @@ export async function getAccessibleConversation(
 
   const { data, error } = await query.maybeSingle();
   if (error) throw error;
-  return data;
+  if (!data) return data;
+
+  return {
+    ...data,
+    channel_type: (data.channel as { type?: string } | null)?.type ?? null,
+  };
 }

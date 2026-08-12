@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { checkBillingFeature } from '@/lib/billing/service'
 import { BILLING_FEATURES } from '@/lib/billing/features'
+import { isBrandPaused } from '@/lib/smarttalk/brand-lifecycle'
 
 function getVerifyToken() {
   return process.env.META_WEBHOOK_VERIFY_TOKEN || ''
@@ -162,6 +163,14 @@ export async function persistWhatsAppWebhook(payload: unknown) {
 
       if (!account) {
         console.warn(`[meta-webhook:whatsapp] cuenta no encontrada para ${phoneNumberId}`)
+        continue
+      }
+
+      // El historial legacy escribe en cm_chat_history y cm_activity_log a
+      // partir de `account.client_id`, que ES la marca. Sin esta comprobación
+      // una marca pausada seguiría acumulando actividad por este camino,
+      // porque aquí no se mira el estado del canal SmartTalk.
+      if (account.client_id && (await isBrandPaused(account.client_id))) {
         continue
       }
 
