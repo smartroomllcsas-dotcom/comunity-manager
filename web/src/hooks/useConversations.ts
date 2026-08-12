@@ -1,5 +1,5 @@
 "use client";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useCurrentAgent } from "./useCurrentAgent";
 import { useInboxStore } from "@/stores/inbox";
 import type { Conversation } from "@/types/database";
@@ -126,20 +126,29 @@ export function useConversations(initialData: Conversation[] = []) {
     };
   }, [agent?.organization_id, queryClient]);
 
-  return useQuery<Conversation[]>({
+  const query = useInfiniteQuery({
     queryKey: ["conversations", filter, searchQuery, statusFilter, channelFilter, brandFilter],
     // Do not seed a brand-specific query with conversations from all brands.
     // The API remains the authorization boundary; this prevents stale visual
     // data while the request for the selected brand is loading.
-    initialData: filterInboxConversations(initialData, {
-      filter,
-      searchQuery,
-      statusFilter,
-      channelFilter,
-      brandFilter,
-      agentId: agent?.id,
-    }),
-    queryFn: async () => {
+    initialData: {
+      pages: [
+        {
+          conversations: filterInboxConversations(initialData, {
+            filter,
+            searchQuery,
+            statusFilter,
+            channelFilter,
+            brandFilter,
+            agentId: agent?.id,
+          }),
+          nextCursor: null,
+        },
+      ],
+      pageParams: [null],
+    },
+    initialPageParam: null as string | null,
+    queryFn: async ({ pageParam }) => {
       const params = new URLSearchParams();
       if (filter && filter !== "all") params.set("filter", filter);
       if (statusFilter && statusFilter !== "all") params.set("status", statusFilter);
@@ -149,6 +158,7 @@ export function useConversations(initialData: Conversation[] = []) {
       if (brandFilter && brandFilter !== "all") params.set("brandId", brandFilter);
       if (searchQuery) params.set("search", searchQuery);
       params.set("limit", "50");
+      if (pageParam) params.set("cursor", pageParam);
       const qs = params.toString();
       const response = await fetch(`/api/inbox/conversations${qs ? `?${qs}` : ""}`, { cache: "no-store" });
       if (!response.ok) {
@@ -156,20 +166,32 @@ export function useConversations(initialData: Conversation[] = []) {
         throw new Error(error.error || "No se pudieron cargar las conversaciones");
       }
 
-      const { conversations } = (await response.json()) as { conversations: Conversation[] };
-      return filterInboxConversations(conversations || [], {
-        filter,
-        searchQuery,
-        statusFilter,
-        channelFilter,
-        brandFilter,
-        agentId: agent?.id,
-      });
+      const { conversations, nextCursor } = (await response.json()) as {
+        conversations: Conversation[];
+        nextCursor: string | null;
+      };
+      return {
+        conversations: filterInboxConversations(conversations || [], {
+          filter,
+          searchQuery,
+          statusFilter,
+          channelFilter,
+          brandFilter,
+          agentId: agent?.id,
+        }),
+        nextCursor: nextCursor || null,
+      };
     },
+    getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
     // La autorización vive en la ruta API y usa la sesión del servidor. El
     // login local no siempre hidrata una sesión Supabase en el navegador; si
     // dependemos de `useCurrentAgent` aquí, el filtro por marca nunca dispara
     // la consulta y se queda mostrando sólo el `initialData` del servidor.
     enabled: true,
   });
+
+  return {
+    ...query,
+    data: query.data?.pages.flatMap((page) => page.conversations) || [],
+  };
 }

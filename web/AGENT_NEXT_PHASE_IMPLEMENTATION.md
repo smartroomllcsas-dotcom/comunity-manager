@@ -4174,3 +4174,20 @@ los elementos cargados sin mover el encabezado ni los filtros.
 Publicada por Codex en producción como `dpl_E93k3J9zE47UDeTnuPoeXjVq2sXn`;
 alias `https://www.comunitymanager.io`; `GET /api/health` respondió `200` con
 base de datos operativa el 12 de agosto de 2026.
+
+### 98. Scroll infinito de conversaciones
+
+La API de conversaciones ya entregaba `nextCursor`, pero el cliente sólo
+consultaba y renderizaba la primera página de 50 registros. Ahora:
+
+- `useConversations` usa `useInfiniteQuery`, conserva las páginas cargadas y
+  envía el cursor al solicitar la siguiente.
+- La lista observa el final de su área de scroll y carga automáticamente el
+  siguiente bloque de 50 leads.
+- Los filtros de marca, estado, canal, asignación y búsqueda se mantienen en
+  cada página; la autorización continúa resolviéndose en el backend.
+- Se muestra un indicador mientras llega el siguiente bloque y se evita lanzar
+  solicitudes duplicadas.
+
+No requiere migración. La bandeja queda limitada sólo por la cantidad real de
+conversaciones y la capacidad de la API, no por una única página fija.

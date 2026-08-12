@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { MessageSquare, Sparkles, RefreshCw, GaugeCircle, Users2, Radio, PanelTopClose, PanelTopOpen } from "lucide-react";
 import { ConversationList } from "@/components/inbox/ConversationList";
 import { ChatWindow } from "@/components/inbox/ChatWindow";
@@ -25,7 +25,13 @@ export function InboxClient({ initialConversations, initialChannels, initialBran
   const selectedId = useInboxStore((s) => s.selectedConversationId);
   const contactPanelOpen = useInboxStore((s) => s.contactPanelOpen);
   const setSelectedConversation = useInboxStore((s) => s.setSelectedConversation);
-  const { data: conversations, isLoading } = useConversations(initialConversations);
+  const {
+    data: conversations,
+    isLoading,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  } = useConversations(initialConversations);
   const { data: channels } = useChannels(initialChannels);
   // Seed the shared query cache before the child filters and rows render. The
   // server already resolved the authorized catalog, so labels are available
@@ -47,6 +53,12 @@ export function InboxClient({ initialConversations, initialChannels, initialBran
   const unassignedCount = conversations?.filter((c) => c.status === "open" && !c.assigned_agent_id).length || 0;
 
   void brands;
+
+  const loadMoreConversations = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) {
+      void fetchNextPage();
+    }
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
   return (
     <div className="relative flex flex-col h-[calc(100vh-48px)] overflow-hidden bg-[#0b1020]">
@@ -137,7 +149,13 @@ export function InboxClient({ initialConversations, initialChannels, initialBran
 
         <div className={cn("flex min-h-0 flex-1 gap-4 overflow-hidden p-4", !showTopPanel && "pt-3")}>
           <div className="flex min-h-0 w-[320px] min-w-[320px] flex-col overflow-hidden rounded-3xl border border-white/6 bg-[#11172a]/85 shadow-2xl shadow-black/20 backdrop-blur-sm">
-            <ConversationList conversations={conversations || []} isLoading={isLoading} />
+            <ConversationList
+              conversations={conversations || []}
+              isLoading={isLoading}
+              hasNextPage={hasNextPage}
+              isFetchingNextPage={isFetchingNextPage}
+              onLoadMore={loadMoreConversations}
+            />
           </div>
 
           <div className="min-w-0 flex-1 overflow-hidden rounded-3xl border border-white/6 bg-[#0f1526]/90 shadow-2xl shadow-black/20 backdrop-blur-sm">

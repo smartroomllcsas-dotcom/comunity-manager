@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useRef } from "react";
 import { useInboxStore } from "@/stores/inbox";
 import { ConversationFilters } from "./ConversationFilters";
 import { ConversationItem } from "./ConversationItem";
@@ -9,13 +10,41 @@ import type { Conversation } from "@/types/database";
 interface ConversationListProps {
   conversations?: Conversation[];
   isLoading?: boolean;
+  hasNextPage?: boolean;
+  isFetchingNextPage?: boolean;
+  onLoadMore?: () => void;
 }
 
-export function ConversationList({ conversations = [], isLoading = false }: ConversationListProps) {
+export function ConversationList({
+  conversations = [],
+  isLoading = false,
+  hasNextPage = false,
+  isFetchingNextPage = false,
+  onLoadMore,
+}: ConversationListProps) {
   const selectedId = useInboxStore((s) => s.selectedConversationId);
   const setSelected = useInboxStore((s) => s.setSelectedConversation);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
   const openCount = conversations?.filter((c) => c.status === "open").length || 0;
+
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    const scrollContainer = sentinel?.parentElement;
+    if (!sentinel || !scrollContainer || !onLoadMore) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && hasNextPage && !isFetchingNextPage) {
+          onLoadMore();
+        }
+      },
+      { root: scrollContainer, rootMargin: "240px 0px" },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, onLoadMore]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -57,6 +86,15 @@ export function ConversationList({ conversations = [], isLoading = false }: Conv
               onClick={() => setSelected(conv.id)}
             />
           ))
+        )}
+        {hasNextPage && (
+          <div ref={loadMoreRef} className="flex min-h-10 items-center justify-center px-3 py-2">
+            {isFetchingNextPage ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-label="Cargando más leads" />
+            ) : (
+              <span className="text-[10px] text-muted-foreground">Desplaza para cargar más leads</span>
+            )}
+          </div>
         )}
       </div>
     </div>
