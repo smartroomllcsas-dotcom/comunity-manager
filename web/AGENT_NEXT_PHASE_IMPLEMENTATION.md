@@ -4191,3 +4191,7 @@ consultaba y renderizaba la primera página de 50 registros. Ahora:
 
 No requiere migración. La bandeja queda limitada sólo por la cantidad real de
 conversaciones y la capacidad de la API, no por una única página fija.
+
+Publicada por Codex en producción como `dpl_6QSAS1VRvadpL15DwecD6vWHDw8m`;
+alias `https://www.comunitymanager.io`; `GET /api/health` respondió `200` con
+base de datos operativa el 12 de agosto de 2026.
