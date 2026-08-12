@@ -88,6 +88,9 @@ export default function ClientsPage() {
   const [billingStatus, setBillingStatus] = useState<BillingStatusPayload | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [editingClientId, setEditingClientId] = useState<string | null>(null)
+  const [editingClientName, setEditingClientName] = useState('')
+  const [renamingClientId, setRenamingClientId] = useState<string | null>(null)
   const [form, setForm] = useState({ name: '', industry: '', platforms: [] as string[], language: 'es' })
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [metaTrace, setMetaTrace] = useState<{
@@ -274,6 +277,50 @@ export default function ClientsPage() {
       })
     } finally {
       setSaving(false)
+    }
+  }
+
+  function startEditingClient(client: CMClient) {
+    setEditingClientId(client.id)
+    setEditingClientName(client.name)
+    setNotification(null)
+  }
+
+  function cancelEditingClient() {
+    setEditingClientId(null)
+    setEditingClientName('')
+  }
+
+  async function saveClientName(clientId: string) {
+    const name = editingClientName.trim()
+    if (!name || name.length > 120) {
+      setNotification({ type: 'error', message: 'El nombre debe tener entre 1 y 120 caracteres.' })
+      return
+    }
+
+    setRenamingClientId(clientId)
+    setNotification(null)
+    try {
+      const response = await fetch('/api/cm/clients', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId, name }),
+      })
+      const payload = await response.json()
+      if (!response.ok) {
+        setNotification({ type: 'error', message: payload.error || 'No fue posible actualizar el nombre.' })
+        return
+      }
+
+      setClients(current => current.map(client =>
+        client.id === clientId ? { ...client, name: payload.client?.name || name } : client,
+      ))
+      cancelEditingClient()
+      setNotification({ type: 'success', message: 'Nombre de la empresa actualizado.' })
+    } catch {
+      setNotification({ type: 'error', message: 'No fue posible conectar con el servidor.' })
+    } finally {
+      setRenamingClientId(null)
     }
   }
 
@@ -520,8 +567,51 @@ export default function ClientsPage() {
                 className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-slate-700 transition-colors"
               >
                 <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <h3 className="text-sm font-semibold text-slate-100">{client.name}</h3>
+                  <div className="min-w-0 flex-1">
+                    {editingClientId === client.id ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          autoFocus
+                          value={editingClientName}
+                          maxLength={120}
+                          onChange={event => setEditingClientName(event.target.value)}
+                          onKeyDown={event => {
+                            if (event.key === 'Enter') void saveClientName(client.id)
+                            if (event.key === 'Escape') cancelEditingClient()
+                          }}
+                          className="min-w-0 flex-1 rounded-md border border-violet-500/60 bg-slate-800 px-2 py-1 text-sm font-semibold text-slate-100 outline-none focus:border-violet-400"
+                          aria-label="Nombre de la empresa"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void saveClientName(client.id)}
+                          disabled={renamingClientId === client.id}
+                          className="text-[11px] font-medium text-emerald-300 hover:text-emerald-200 disabled:opacity-50"
+                        >
+                          {renamingClientId === client.id ? '...' : 'Guardar'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelEditingClient}
+                          disabled={renamingClientId === client.id}
+                          className="text-[11px] text-slate-400 hover:text-slate-200 disabled:opacity-50"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <h3 className="truncate text-sm font-semibold text-slate-100">{client.name}</h3>
+                        <button
+                          type="button"
+                          onClick={() => startEditingClient(client)}
+                          className="shrink-0 text-[11px] text-violet-300 hover:text-violet-200"
+                          aria-label={`Editar nombre de ${client.name}`}
+                        >
+                          Editar
+                        </button>
+                      </div>
+                    )}
                     <p className="text-xs text-slate-500 mt-0.5">{client.industry || 'Sin industria'}</p>
                   </div>
                   <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${statusStyles[client.status]}`}>

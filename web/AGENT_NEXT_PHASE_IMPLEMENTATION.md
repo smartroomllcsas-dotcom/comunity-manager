@@ -4251,3 +4251,11 @@ No requiere migración adicional porque usa las columnas y restricciones de las
 migraciones de aislamiento y cifrado ya aplicadas. Para operar correctamente:
 seleccionar la marca propietaria antes de conectar, conectar cada cuenta en su
 propia marca y configurar un `webhookSecret` distinto por canal de Respond.io.
+
+### 101. Edición del nombre de la empresa/marca
+
+La tarjeta de cada empresa en `/clients` ahora permite pulsar «Editar», cambiar
+el nombre y guardarlo sin desconectar sus cuentas ni alterar sus canales,
+contactos o conversaciones. El endpoint `PATCH /api/cm/clients` valida sesión,
+organización y asignación de marca; también soporta el proveedor local MySQL.
+No requiere migración.

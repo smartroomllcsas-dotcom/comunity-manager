@@ -239,3 +239,82 @@ export async function POST(request: NextRequest) {
 
   return Response.json({ client }, { status: 201 });
 }
+
+export async function PATCH(request: NextRequest) {
+  const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
+  const clientId = typeof payload?.clientId === "string"
+    ? payload.clientId.trim()
+    : typeof payload?.id === "string"
+      ? payload.id.trim()
+      : "";
+  const name = typeof payload?.name === "string" ? payload.name.trim() : "";
+
+  if (!clientId || !name || name.length > 120) {
+    return Response.json(
+      { error: "clientId e name son requeridos; el nombre debe tener entre 1 y 120 caracteres." },
+      { status: 400 },
+    );
+  }
+
+  if (isLocalMysql()) {
+    const cmUserId = request.cookies.get("cm_user_id")?.value;
+    if (!cmUserId) return Response.json({ error: "No autorizado." }, { status: 401 });
+
+    const rows = await mysqlQuery<Array<{ id: string }>>(
+      `SELECT ${quoteId("id")} FROM ${quoteId("cm_clients")} WHERE ${quoteId("id")} = ? AND ${quoteId("user_id")} = ? LIMIT 1`,
+      [clientId, cmUserId],
+    );
+    if (!rows[0]) return Response.json({ error: "Marca no encontrada." }, { status: 404 });
+
+    await mysqlQuery(
+      `UPDATE ${quoteId("cm_clients")} SET ${quoteId("name")} = ? WHERE ${quoteId("id")} = ? AND ${quoteId("user_id")} = ?`,
+      [name, clientId, cmUserId],
+    );
+    return Response.json({ client: { id: clientId, name } });
+  }
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return Response.json({ error: "No autorizado." }, { status: 401 });
+
+  const smarttalkAdmin = createAdminClient();
+  const publicAdmin = createAdminClient("public");
+  const { data: agent } = await smarttalkAdmin
+    .from("agents")
+    .select("id, organization_id, role, member_type, is_super_admin")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (!agent) return Response.json({ error: "Agente no encontrado." }, { status: 404 });
+  if (agent.role !== "admin" && agent.is_super_admin !== true) {
+    return Response.json({ error: "Solo un administrador puede editar marcas." }, { status: 403 });
+  }
+
+  const { data: brand } = await publicAdmin
+    .from("cm_clients")
+    .select("id")
+    .eq("id", clientId)
+    .eq("smarttalk_organization_id", agent.organization_id)
+    .maybeSingle();
+  if (!brand) return Response.json({ error: "Marca no encontrada." }, { status: 404 });
+
+  const assignedBrandIds = await getAgentBrandIds(agent);
+  if (assignedBrandIds && !assignedBrandIds.includes(clientId)) {
+    return Response.json({ error: "No autorizado para esta marca." }, { status: 403 });
+  }
+
+  const { data: updated, error } = await publicAdmin
+    .from("cm_clients")
+    .update({ name, updated_at: new Date().toISOString() })
+    .eq("id", clientId)
+    .eq("smarttalk_organization_id", agent.organization_id)
+    .select("id, name, industry, platforms, status, smarttalk_organization_id, user_id, posts_this_month, brand_voice, language, created_at, updated_at")
+    .single();
+
+  if (error) {
+    console.error("[cm/clients] rename failed", { code: error.code, clientId });
+    return Response.json({ error: "No fue posible actualizar el nombre de la marca." }, { status: 500 });
+  }
+
+  return Response.json({ client: updated });
+}
