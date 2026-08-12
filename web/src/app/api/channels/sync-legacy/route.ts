@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
+import { toPublicChannel } from "@/lib/smarttalk/channel-public";
 
 type LegacySocialAccount = {
   id: string;
@@ -122,7 +123,7 @@ export async function POST(_request: NextRequest) {
       success: true,
       synced: 0,
       organization_id: org.organizationId,
-      channels: currentChannels,
+      channels: currentChannels.map((channel) => toPublicChannel(channel as unknown as Record<string, unknown>)),
       results,
     });
   }
@@ -279,7 +280,9 @@ export async function POST(_request: NextRequest) {
     success: true,
     synced,
     organization_id: org.organizationId,
-    channels: postSyncChannels || [],
+    channels: (postSyncChannels || []).map((channel) =>
+      toPublicChannel(channel as unknown as Record<string, unknown>),
+    ),
     results,
   });
 }

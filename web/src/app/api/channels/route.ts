@@ -15,6 +15,7 @@ import {
   getAgentBrandIds,
   getBrandInOrganization,
 } from "@/lib/smarttalk/brand-scope";
+import { CHANNEL_PUBLIC_COLUMNS } from "@/lib/smarttalk/channel-public";
 
 function canManageChannels(agent: {
   role: string;
@@ -44,7 +45,7 @@ export async function GET() {
 
   const { data: channels, error } = await admin
     .from("channels")
-    .select("*")
+    .select(CHANNEL_PUBLIC_COLUMNS)
     .eq("organization_id", agent.organization_id)
     .order("created_at", { ascending: false });
 
@@ -126,7 +127,7 @@ export async function POST(request: NextRequest) {
       status: "pending",
       config: config || {},
     })
-    .select()
+    .select(CHANNEL_PUBLIC_COLUMNS)
     .single();
 
   if (error) {

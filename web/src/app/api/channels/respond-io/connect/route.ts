@@ -4,6 +4,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { verifyRespondIoToken } from "@/lib/respond-io/api";
 import type { RespondIoChannelSource } from "@/lib/respond-io/types";
 import { getBrandInOrganization } from "@/lib/smarttalk/brand-scope";
+import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
+import { CHANNEL_PUBLIC_COLUMNS } from "@/lib/smarttalk/channel-public";
+import { encryptToken } from "@/lib/auth/token-crypto";
 import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 
@@ -53,6 +56,10 @@ export async function POST(request: NextRequest) {
   if (!brand) {
     return NextResponse.json({ error: "La marca no pertenece a esta organización" }, { status: 403 });
   }
+  const assignedBrandIds = await getAgentBrandIds(agent);
+  if (assignedBrandIds && !assignedBrandIds.includes(brand.id)) {
+    return NextResponse.json({ error: "No autorizado para esta marca" }, { status: 403 });
+  }
 
   const billingDecision = await checkBillingFeature({
     organizationId: agent.organization_id,
@@ -71,7 +78,6 @@ export async function POST(request: NextRequest) {
   }
 
   const config = {
-    apiToken,
     respondChannelId,
     respondChannelType,
     workspaceId,
@@ -87,12 +93,13 @@ export async function POST(request: NextRequest) {
       type: "respond_io",
       name,
       status: "active",
-      access_token: apiToken,
+      access_token: null,
+      access_token_ciphertext: encryptToken(apiToken),
       respond_io_channel_id: respondChannelId,
       config,
       connected_at: new Date().toISOString(),
     })
-    .select()
+    .select(CHANNEL_PUBLIC_COLUMNS)
     .single();
 
   if (error) {

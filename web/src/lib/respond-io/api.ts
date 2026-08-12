@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveToken } from "@/lib/auth/token-crypto";
 import type {
   RespondIoConfig,
   RespondIoSendResponse,
@@ -148,7 +149,7 @@ export async function getRespondIoCredentials(channelId: string): Promise<Respon
   const admin = createAdminClient();
   const { data: channel, error } = await admin
     .from("channels")
-    .select("type, status, config, respond_io_channel_id, access_token")
+    .select("type, status, config, respond_io_channel_id, access_token, access_token_ciphertext")
     .eq("id", channelId)
     .single();
 
@@ -157,7 +158,7 @@ export async function getRespondIoCredentials(channelId: string): Promise<Respon
   if (channel.status !== "active") throw new Error("Channel is not active");
 
   const config = (channel.config || {}) as Partial<RespondIoConfig>;
-  const apiToken = config.apiToken || channel.access_token;
+  const apiToken = resolveToken(channel.access_token_ciphertext, config.apiToken || channel.access_token);
   const respondChannelId = config.respondChannelId || channel.respond_io_channel_id;
   const respondChannelType = config.respondChannelType;
 

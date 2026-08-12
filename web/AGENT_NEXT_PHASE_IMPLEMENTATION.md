@@ -4225,3 +4225,29 @@ Validación: suite de aislamiento `31/31` y build de producción aprobados. No
 requiere migración. Para Respond.io queda una acción de configuración: cada
 canal debe tener `webhookSecret` para que su firma sea obligatoria; la ruta
 actual mantiene compatibilidad con canales existentes sin ese secreto.
+
+### 100. Revisión de conexión de cuentas y canales
+
+La conexión queda vinculada explícitamente a una marca seleccionada en la
+interfaz. El backend deriva la organización de la sesión autenticada y valida
+que la marca pertenezca a esa organización antes de insertar el canal. Un
+asesor o administrador limitado a marcas no puede conectar ni modificar un
+canal de otra marca.
+
+Aplicado en esta iteración:
+
+- WhatsApp y Respond.io validan organización y asignación de marca antes de
+  conectar.
+- Un `whatsapp_phone_number_id` no puede quedar conectado en dos canales: la
+  restricción única devuelve conflicto controlado.
+- Las APIs administrativas y de Inbox devuelven sólo columnas públicas; nunca
+  `access_token`, ciphertext ni la configuración completa del canal.
+- Los tokens nuevos de Respond.io se almacenan cifrados en
+  `access_token_ciphertext`; la lectura interna los descifra sólo en servidor.
+- La sincronización de cuentas Meta heredadas conserva `brand_id` y no expone
+  credenciales en su respuesta.
+
+No requiere migración adicional porque usa las columnas y restricciones de las
+migraciones de aislamiento y cifrado ya aplicadas. Para operar correctamente:
+seleccionar la marca propietaria antes de conectar, conectar cada cuenta en su
+propia marca y configurar un `webhookSecret` distinto por canal de Respond.io.

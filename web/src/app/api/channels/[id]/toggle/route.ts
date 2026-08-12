@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
 import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
+import { CHANNEL_PUBLIC_COLUMNS } from "@/lib/smarttalk/channel-public";
 
 function canManageChannels(agent: {
   role: string;
@@ -42,7 +43,7 @@ export async function PATCH(
   // Verify channel belongs to same org
   const { data: channel } = await admin
     .from("channels")
-    .select("*")
+    .select("id, organization_id, brand_id, status")
     .eq("id", id)
     .eq("organization_id", agent.organization_id)
     .single();
@@ -74,7 +75,7 @@ export async function PATCH(
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
-    .select()
+    .select(CHANNEL_PUBLIC_COLUMNS)
     .single();
 
   if (error) return Response.json({ error: error.message }, { status: 500 });

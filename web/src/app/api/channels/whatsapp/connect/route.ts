@@ -8,6 +8,8 @@ import {
 } from "@/lib/whatsapp/token-manager";
 import { encryptToken } from "@/lib/auth/token-crypto";
 import { getBrandInOrganization } from "@/lib/smarttalk/brand-scope";
+import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
+import { CHANNEL_PUBLIC_COLUMNS } from "@/lib/smarttalk/channel-public";
 import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 
@@ -42,6 +44,10 @@ export async function POST(request: NextRequest) {
   const brand = await getBrandInOrganization(brandId, agent.organization_id);
   if (!brand) {
     return Response.json({ error: "La marca no pertenece a esta organización" }, { status: 403 });
+  }
+  const assignedBrandIds = await getAgentBrandIds(agent);
+  if (assignedBrandIds && !assignedBrandIds.includes(brand.id)) {
+    return Response.json({ error: "No autorizado para esta marca" }, { status: 403 });
   }
 
   const { data: existingChannel } = await admin
@@ -193,10 +199,16 @@ export async function POST(request: NextRequest) {
         },
         connected_at: new Date().toISOString(),
       })
-      .select()
+      .select(CHANNEL_PUBLIC_COLUMNS)
       .single();
 
     if (error) {
+      if (error.code === "23505") {
+        return Response.json(
+          { error: "Este número de WhatsApp ya está conectado a otro canal." },
+          { status: 409 },
+        );
+      }
       return Response.json({ error: error.message }, { status: 500 });
     }
 
