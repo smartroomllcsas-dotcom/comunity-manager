@@ -1,4 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { buildAttachmentContent, type AttachmentContent } from "@/lib/inbox/attachments";
+import { scheduleAttachmentResolution } from "@/lib/inbox/media-resolver";
 import type { WebhookMessage, WebhookContact, WebhookStatus } from "./types";
 import type { MessageContent, MessageType } from "@/types/database";
 import { processIncomingWithChatbot } from "@/lib/chatbot/engine";
@@ -174,9 +176,24 @@ export async function processIncomingMessage(
     })
     .select("id");
 
+  // El 23505 es el reenvío del mismo webhook por parte de Meta: el mensaje ya
+  // existe y no hay que duplicarlo ni volver a descargar su medio.
   if (messageError?.code === "23505") return;
   if (messageError) throw messageError;
   if (!insertedMessage?.length) return;
+
+  // El mensaje ya está guardado; ahora —y sin bloquear— se intenta el medio.
+  // Si falla, el mensaje conserva su `provider_media_id` y el endpoint
+  // /api/inbox/messages/[id]/media lo reintentará al abrirlo.
+  if (content.type !== "text" && "provider_media_id" in content) {
+    scheduleAttachmentResolution({
+      messageId: insertedMessage[0].id as string,
+      organizationId: org.id,
+      brandId: channel.brand_id,
+      channelId: channel.id,
+      content: content as AttachmentContent,
+    });
+  }
 
   // 6. Update conversation
   const preview = content.type === "text" ? content.text.slice(0, 100) : `[${type}]`;
@@ -260,22 +277,63 @@ export async function processStatusUpdate(status: WebhookStatus, phoneNumberId: 
     .in("conversation_id", conversationIds);
 }
 
+/**
+ * Contenido de un adjunto de WhatsApp a partir de su media id.
+ *
+ * `url` queda vacía a propósito: se rellena cuando el medio se descarga y se
+ * guarda. Hasta entonces la interfaz usa el endpoint seguro, que sabe resolver
+ * el id.
+ */
+function mediaContent(
+  providerType: string,
+  mediaId: string,
+  extra: { caption?: string; filename?: string; mimeType?: string } = {},
+): { type: MessageType; content: MessageContent } {
+  const content = buildAttachmentContent({
+    providerType,
+    providerMediaId: mediaId,
+    filename: extra.filename || null,
+    caption: extra.caption || null,
+    mimeType: extra.mimeType || null,
+    source: "whatsapp",
+  });
+  return { type: content.type, content: content as MessageContent };
+}
+
 function parseMessageContent(message: WebhookMessage): { type: MessageType; content: MessageContent } {
   switch (message.type) {
     case "text":
       return { type: "text", content: { type: "text", text: message.text!.body } };
+    // Los cinco tipos con medio comparten tratamiento: WhatsApp entrega un
+    // **media id**, no una URL. Ponerlo en `url` —lo que se hacía— generaba
+    // `<img src="1234567890">`. Ahora viaja como `provider_media_id` y el medio
+    // se resuelve aparte, contra Graph y con el token del canal.
     case "image":
-      return { type: "image", content: { type: "image", url: message.image!.id, caption: message.image!.caption } };
+      return mediaContent("image", message.image!.id, {
+        caption: message.image!.caption,
+        mimeType: message.image!.mime_type,
+      });
     case "video":
-      return { type: "video", content: { type: "video", url: message.video!.id, caption: message.video!.caption } };
+      return mediaContent("video", message.video!.id, {
+        caption: message.video!.caption,
+        mimeType: message.video!.mime_type,
+      });
     case "audio":
-      return { type: "audio", content: { type: "audio", url: message.audio!.id } };
+      return mediaContent("audio", message.audio!.id, {
+        mimeType: message.audio!.mime_type,
+      });
     case "document":
-      return { type: "document", content: { type: "document", url: message.document!.id, filename: message.document!.filename, caption: message.document!.caption } };
+      return mediaContent("document", message.document!.id, {
+        caption: message.document!.caption,
+        filename: message.document!.filename,
+        mimeType: message.document!.mime_type,
+      });
     case "location":
       return { type: "location", content: { type: "location", latitude: message.location!.latitude, longitude: message.location!.longitude, name: message.location!.name } };
     case "sticker":
-      return { type: "sticker", content: { type: "sticker", url: message.sticker!.id } };
+      return mediaContent("sticker", message.sticker!.id, {
+        mimeType: message.sticker!.mime_type,
+      });
     default:
       return { type: "text", content: { type: "text", text: `[Mensaje tipo: ${message.type}]` } };
   }

@@ -1,7 +1,8 @@
 "use client";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/types/database";
-import { Check, CheckCheck, Bot, Image as ImageIcon, FileText, MapPin, Music2, Sticker, FileCheck2 } from "lucide-react";
+import { Check, CheckCheck, Bot, Image as ImageIcon, FileText, MapPin, Music2, Sticker, FileCheck2, ExternalLink, Download } from "lucide-react";
+import { ATTACHMENT_TYPES, extensionFromName, formatBytes } from "@/lib/inbox/attachments";
 import { format } from "date-fns";
 
 interface MessageBubbleProps {
@@ -25,6 +26,82 @@ function looksLikeAudio(value: string | null | undefined) {
   );
 }
 
+
+/**
+ * URL desde la que el navegador puede pedir el adjunto.
+ *
+ * **Siempre** el endpoint interno, nunca `content.url` ni `provider_url`: el
+ * primero puede ser un media id de WhatsApp y el segundo puede llevar el token
+ * del canal en la query. Devuelve null cuando no hay nada que resolver, para
+ * poder mostrar «Archivo no disponible» en vez de un enlace roto.
+ */
+function mediaUrl(
+  messageId: string,
+  content: { type?: string; storage_path?: string; provider_media_id?: string; provider_url?: string; url?: string },
+): string | null {
+  const resolvable =
+    (content.type && (ATTACHMENT_TYPES as string[]).includes(content.type)) ||
+    content.storage_path ||
+    content.provider_media_id ||
+    content.provider_url ||
+    (content.url && /^https?:\/\//i.test(content.url));
+  return resolvable ? `/api/inbox/messages/${messageId}/media` : null;
+}
+
+function Unavailable({ label, icon }: { label: string; icon: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-center gap-2 p-6 text-[#484f58]">
+      {icon}
+      <span className="text-xs">{label} no disponible</span>
+    </div>
+  );
+}
+
+/**
+ * Abrir y Descargar.
+ *
+ * Son enlaces `<a>`, no botones con `onClick`: así funcionan con teclado, con
+ * clic central y con «abrir en pestaña nueva» sin escribir un solo manejador.
+ */
+function AttachmentActions({
+  url,
+  filename,
+  className,
+}: {
+  url: string;
+  filename?: string;
+  className?: string;
+}) {
+  const linkClass =
+    "inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-[#58a6ff] " +
+    "hover:bg-[#1f6feb]/15 hover:text-[#79c0ff] focus-visible:outline-none " +
+    "focus-visible:ring-2 focus-visible:ring-[#388bfd] focus-visible:ring-offset-1 focus-visible:ring-offset-[#0d1117]";
+
+  return (
+    <div className={cn("flex items-center gap-1", className)} data-testid="attachment-actions">
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={linkClass}
+        aria-label={filename ? `Abrir ${filename}` : "Abrir archivo"}
+      >
+        <ExternalLink className="h-3 w-3" />
+        Abrir
+      </a>
+      <a
+        href={`${url}?download=1`}
+        download={filename || true}
+        className={linkClass}
+        aria-label={filename ? `Descargar ${filename}` : "Descargar archivo"}
+      >
+        <Download className="h-3 w-3" />
+        Descargar
+      </a>
+    </div>
+  );
+}
+
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isOutbound = message.direction === "outbound";
   const isBot = message.is_bot;
@@ -34,99 +111,134 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     switch (content.type) {
       case "text":
         return <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words">{content.text}</p>;
-      case "image":
+      case "image": {
+        const media = mediaUrl(message.id, content);
         return (
           <div>
             <div className="rounded-md overflow-hidden bg-[#0d1117] border border-[#2d333b] mb-1">
-              {content.url ? (
-                <img src={content.url} alt="Imagen" className="max-w-[240px] max-h-[200px] object-cover" />
+              {media ? (
+                <a href={media} target="_blank" rel="noopener noreferrer" aria-label={`Abrir ${content.filename || "imagen"}`}>
+                  <img src={media} alt={content.filename || "Imagen"} className="max-w-[240px] max-h-[200px] object-cover" />
+                </a>
               ) : (
-                <div className="flex items-center justify-center gap-2 p-6 text-[#484f58]">
-                  <ImageIcon className="h-5 w-5" />
-                  <span className="text-xs">Imagen</span>
-                </div>
+                <Unavailable label="Imagen" icon={<ImageIcon className="h-5 w-5" />} />
               )}
             </div>
+            {media && <AttachmentActions url={media} filename={content.filename} />}
             {content.caption && (
               <p className="text-[13px] leading-relaxed mt-1">{content.caption}</p>
             )}
           </div>
         );
-      case "video":
+      }
+      case "video": {
+        const media = mediaUrl(message.id, content);
         return (
           <div>
             <div className="rounded-md overflow-hidden bg-[#0d1117] border border-[#2d333b] mb-1">
-              {content.url ? (
-                <video src={content.url} controls className="max-w-[260px] max-h-[220px] bg-black" />
+              {media ? (
+                <video src={media} controls className="max-w-[260px] max-h-[220px] bg-black" />
               ) : (
-                <div className="flex items-center justify-center gap-2 p-6 text-[#484f58]">
-                  <ImageIcon className="h-5 w-5" />
-                  <span className="text-xs">Video</span>
-                </div>
+                <Unavailable label="Video" icon={<ImageIcon className="h-5 w-5" />} />
               )}
             </div>
+            {media && <AttachmentActions url={media} filename={content.filename} />}
             {content.caption && (
               <p className="text-[13px] leading-relaxed mt-1">{content.caption}</p>
             )}
           </div>
         );
-      case "audio":
+      }
+      case "audio": {
+        const media = mediaUrl(message.id, content);
         return (
-          <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2 min-w-[220px]">
-            <Music2 className="h-4 w-4 text-[#58a6ff] shrink-0" />
-            {content.url ? (
-              <audio controls className="w-full h-8">
-                <source src={content.url} />
-              </audio>
-            ) : (
-              <span className="text-xs text-[#c9d1d9]">Audio</span>
-            )}
-          </div>
-        );
-      case "document":
-        if (looksLikeAudio(content.url) || looksLikeAudio(content.filename)) {
-          return (
-            <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2 min-w-[220px]">
+          <div className="min-w-[220px]">
+            <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2">
               <Music2 className="h-4 w-4 text-[#58a6ff] shrink-0" />
-              {content.url ? (
+              {media ? (
                 <audio controls className="w-full h-8">
-                  <source src={content.url} />
+                  <source src={media} type={content.mime_type || undefined} />
                 </audio>
               ) : (
-                <span className="text-xs text-[#c9d1d9]">Audio</span>
+                <span className="text-xs text-[#8b949e]">Archivo no disponible</span>
               )}
+            </div>
+            {media && <AttachmentActions url={media} filename={content.filename} />}
+            {content.caption && (
+              <p className="text-[13px] leading-relaxed mt-1">{content.caption}</p>
+            )}
+          </div>
+        );
+      }
+      case "document": {
+        const media = mediaUrl(message.id, content);
+        // Algunos proveedores mandan notas de voz como documento; si el mime o
+        // la extensión lo delatan, se reproduce en vez de ofrecer descarga.
+        if (looksLikeAudio(content.mime_type) || looksLikeAudio(content.filename) || looksLikeAudio(content.url)) {
+          return (
+            <div className="min-w-[220px]">
+              <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2">
+                <Music2 className="h-4 w-4 text-[#58a6ff] shrink-0" />
+                {media ? (
+                  <audio controls className="w-full h-8">
+                    <source src={media} type={content.mime_type || undefined} />
+                  </audio>
+                ) : (
+                  <span className="text-xs text-[#8b949e]">Archivo no disponible</span>
+                )}
+              </div>
+              {media && <AttachmentActions url={media} filename={content.filename} />}
             </div>
           );
         }
 
+        const size = formatBytes(content.size_bytes);
+        const extension = extensionFromName(content.filename)?.toUpperCase();
+        const detail = [extension, size].filter(Boolean).join(" · ");
+
         return (
           <div>
-            <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2">
-              <FileText className="h-4 w-4 text-[#58a6ff] shrink-0" />
-              <span className="text-xs text-[#c9d1d9] truncate">{content.filename}</span>
+            <div className="bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2 min-w-[220px]">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-[#58a6ff] shrink-0" />
+                <div className="min-w-0 flex-1">
+                  {/* Nunca sólo «archivo»: `resolveFilename` ya garantiza un
+                      nombre con extensión deducida del mime o del tipo. */}
+                  <p className="text-xs text-[#c9d1d9] truncate" title={content.filename}>
+                    {content.filename || "Documento"}
+                  </p>
+                  {detail && <p className="text-[10px] text-[#8b949e] mt-0.5">{detail}</p>}
+                </div>
+              </div>
+              {media ? (
+                <AttachmentActions url={media} filename={content.filename} className="mt-2" />
+              ) : (
+                <p className="mt-2 text-[11px] text-[#8b949e]">Archivo no disponible</p>
+              )}
             </div>
             {content.caption && (
               <p className="text-[13px] leading-relaxed mt-1">{content.caption}</p>
             )}
           </div>
         );
-      case "sticker":
-        return (
-          typeof content.url === "string" && /^https?:\/\//.test(content.url) ? (
-            <div className="rounded-md overflow-hidden bg-[#0d1117] border border-[#2d333b]">
-              <img
-                src={content.url}
-                alt="Sticker"
-                className="max-w-[180px] max-h-[180px] object-contain bg-transparent"
-              />
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2">
-              <Sticker className="h-4 w-4 text-[#a371f7] shrink-0" />
-              <span className="text-xs text-[#c9d1d9] truncate">Sticker</span>
-            </div>
-          )
+      }
+      case "sticker": {
+        const media = mediaUrl(message.id, content);
+        return media ? (
+          <div className="rounded-md overflow-hidden bg-[#0d1117] border border-[#2d333b]">
+            <img
+              src={media}
+              alt="Sticker"
+              className="max-w-[180px] max-h-[180px] object-contain bg-transparent"
+            />
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2">
+            <Sticker className="h-4 w-4 text-[#a371f7] shrink-0" />
+            <span className="text-xs text-[#c9d1d9] truncate">Sticker</span>
+          </div>
         );
+      }
       case "location":
         return (
           <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2">

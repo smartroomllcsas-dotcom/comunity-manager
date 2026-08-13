@@ -41,7 +41,7 @@ describe("Messenger fixtures", () => {
     expect(parsed.type).toBe("text");
   });
 
-  it("postback: cae a document con url del mid (el caller wrappea mid+postback)", () => {
+  it("postback: cae a document y conserva el mid como provider_media_id", () => {
     const entry = messengerPostback.entry![0];
     const event = entry.messaging![0];
     expect(extractContactId(event)).toBe("USER_PSID_2");
@@ -53,7 +53,11 @@ describe("Messenger fixtures", () => {
     };
     const parsed = parseMetaMessage(wrapped);
     expect(parsed.type).toBe("document"); // sin text/attachment/quick_reply cae a document
-    expect(parsed.content).toMatchObject({ type: "document", url: "mid_wrapped_1" });
+    expect(parsed.content).toMatchObject({
+      type: "document",
+      url: "",
+      provider_media_id: "mid_wrapped_1",
+    });
   });
 
   it("candidatos de canal: entry.id se usa cuando no hay changes", () => {
@@ -77,9 +81,10 @@ describe("Instagram fixtures", () => {
     const event = entry.messaging![0];
     const parsed = parseMetaMessage(event.message as MetaMessagePayload);
     expect(parsed.type).toBe("sticker");
-    expect(parsed.content).toEqual({
+    expect(parsed.content).toMatchObject({
       type: "sticker",
-      url: "https://scontent.cdninstagram.com/sticker.png",
+      url: "",
+      provider_url: "https://scontent.cdninstagram.com/sticker.png",
     });
   });
 
@@ -90,7 +95,8 @@ describe("Instagram fixtures", () => {
     expect(parsed.type).toBe("image");
     expect(parsed.content).toMatchObject({
       type: "image",
-      url: "https://scontent.cdninstagram.com/photo.jpg",
+      url: "",
+      provider_url: "https://scontent.cdninstagram.com/photo.jpg",
     });
   });
 });

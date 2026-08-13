@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAccessibleConversation } from "@/lib/smarttalk/brand-scope";
+import { sanitizeAttachmentForClient } from "@/lib/inbox/attachments";
 
 export async function GET(
   _request: NextRequest,
@@ -52,5 +53,10 @@ export async function GET(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ messages: data ?? [] });
+  return NextResponse.json({
+    messages: (data ?? []).map((message) => ({
+      ...message,
+      content: sanitizeAttachmentForClient(message.content),
+    })),
+  });
 }

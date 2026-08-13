@@ -155,7 +155,16 @@ describe("parseMetaMessage", () => {
       image: { caption: "mira" },
     });
     expect(parsed.type).toBe("image");
-    expect(parsed.content).toEqual({ type: "image", url: "https://cdn/x.jpg", caption: "mira" });
+    // La URL del proveedor ya NO se publica como `url`: puede caducar o llevar
+    // credenciales. Viaja como `provider_url` y la interfaz pide el archivo al
+    // endpoint interno.
+    expect(parsed.content).toMatchObject({
+      type: "image",
+      url: "",
+      provider_url: "https://cdn/x.jpg",
+      caption: "mira",
+      source: "meta",
+    });
   });
 
   it("video con caption desde attachments[0]", () => {
@@ -164,7 +173,12 @@ describe("parseMetaMessage", () => {
       video: { caption: "clip" },
     });
     expect(parsed.type).toBe("video");
-    expect(parsed.content).toEqual({ type: "video", url: "https://cdn/v.mp4", caption: "clip" });
+    expect(parsed.content).toMatchObject({
+      type: "video",
+      url: "",
+      provider_url: "https://cdn/v.mp4",
+      caption: "clip",
+    });
   });
 
   it("audio detectado por type explícito", () => {
@@ -172,7 +186,11 @@ describe("parseMetaMessage", () => {
       attachment: { type: "audio", payload: { url: "https://cdn/a.mp3" } },
     });
     expect(parsed.type).toBe("audio");
-    expect(parsed.content).toEqual({ type: "audio", url: "https://cdn/a.mp3" });
+    expect(parsed.content).toMatchObject({
+      type: "audio",
+      url: "",
+      provider_url: "https://cdn/a.mp3",
+    });
   });
 
   it("audio detectado por mime type aunque el type sea genérico", () => {
@@ -187,7 +205,11 @@ describe("parseMetaMessage", () => {
       attachment: { type: "sticker", payload: { url: "https://cdn/s.png" } },
     });
     expect(parsed.type).toBe("sticker");
-    expect(parsed.content).toEqual({ type: "sticker", url: "https://cdn/s.png" });
+    expect(parsed.content).toMatchObject({
+      type: "sticker",
+      url: "",
+      provider_url: "https://cdn/s.png",
+    });
   });
 
   it("document fallback cuando no reconoce el tipo", () => {
@@ -197,14 +219,17 @@ describe("parseMetaMessage", () => {
     expect(parsed.type).toBe("document");
     expect(parsed.content).toMatchObject({
       type: "document",
-      url: "https://cdn/doc.pdf",
+      url: "",
+      provider_url: "https://cdn/doc.pdf",
     });
   });
 
   it("payload sin nada produce document con url vacío", () => {
     const parsed = parseMetaMessage({});
     expect(parsed.type).toBe("document");
-    expect(parsed.content).toMatchObject({ type: "document", url: "", filename: "archivo" });
+    // Antes esto daba `filename: "archivo"`, que no decía nada. Ahora se deduce
+    // un nombre útil del tipo aunque el proveedor no mande ninguno.
+    expect(parsed.content).toMatchObject({ type: "document", url: "", filename: "documento.pdf" });
   });
 });
 
@@ -220,6 +245,11 @@ describe("integración: postback simulado (persistMessengerLikeWebhook lo convie
     });
     // Sin text/attachment/quick_reply, cae a document con url = mid.
     expect(parsed.type).toBe("document");
-    expect(parsed.content).toMatchObject({ type: "document", url: "wamid-1" });
+    // El identificador del mensaje ya no se cuela en `url`: es un id, no una URL.
+    expect(parsed.content).toMatchObject({
+      type: "document",
+      url: "",
+      provider_media_id: "wamid-1",
+    });
   });
 });

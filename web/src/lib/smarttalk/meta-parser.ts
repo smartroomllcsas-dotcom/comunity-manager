@@ -1,6 +1,7 @@
 // Funciones puras de parseo de payloads Meta (FB/IG/Messenger).
 // Aisladas del acceso a DB para permitir tests unitarios rápidos.
 import type { MessageContent, MessageType } from "@/types/database";
+import { buildAttachmentContent } from "@/lib/inbox/attachments";
 
 export type MetaChannelKind = "facebook" | "messenger" | "instagram";
 
@@ -164,31 +165,31 @@ export function parseMetaMessage(message: MetaMessagePayload): { type: MessageTy
   }
 
   const attachment = message.attachment || message.attachments?.[0];
-  const url = attachment?.payload?.url || message.file?.url || message.mid || message.id || "";
-  const type = (attachment?.type || "document").toLowerCase();
-  const fileName = attachment?.name || message.file?.name || "";
-  const mimeType = attachment?.mime_type || "";
 
-  if (type === "image") {
-    return { type: "image", content: { type: "image", url, caption: message.image?.caption } };
-  }
-  if (type === "video") {
-    return { type: "video", content: { type: "video", url, caption: message.video?.caption } };
-  }
-  if (type === "audio" || looksLikeAudio(mimeType) || looksLikeAudio(fileName) || looksLikeAudio(url)) {
-    return { type: "audio", content: { type: "audio", url } };
-  }
-  if (type === "sticker") {
-    return { type: "sticker", content: { type: "sticker", url } };
-  }
+  // `payload.url` es lo único servible que puede venir; `mid`/`id` son
+  // identificadores del mensaje, no del medio, y ponerlos en `url` era lo que
+  // producía enlaces rotos. Se conservan aparte como `provider_media_id` para
+  // poder reintentar la descarga.
+  const providerUrl = attachment?.payload?.url || message.file?.url || null;
+  const providerMediaId =
+    (attachment?.payload as { attachment_id?: string } | undefined)?.attachment_id ||
+    message.mid ||
+    message.id ||
+    null;
 
-  return {
-    type: "document",
-    content: {
-      type: "document",
-      url,
-      filename: message.file?.name || "archivo",
-      caption: message.file?.caption,
-    },
-  };
+  const content = buildAttachmentContent({
+    providerType: attachment?.type || null,
+    mimeType: attachment?.mime_type || null,
+    filename: attachment?.name || message.file?.name || null,
+    caption:
+      message.image?.caption || message.video?.caption || message.file?.caption || null,
+    // La URL del proveedor NO se publica como `url`: puede llevar el token en
+    // la query. La interfaz siempre pasa por /api/inbox/messages/[id]/media.
+    url: null,
+    providerUrl,
+    providerMediaId,
+    source: "meta",
+  });
+
+  return { type: content.type, content: content as MessageContent };
 }

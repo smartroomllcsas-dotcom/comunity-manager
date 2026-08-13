@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { buildAttachmentContent } from "@/lib/inbox/attachments";
+import { scheduleAttachmentResolution } from "@/lib/inbox/media-resolver";
 import { evaluateChannelIntake } from "@/lib/smarttalk/intake-guard";
 import { INACTIVE_BRAND_INTAKE_RESPONSE } from "@/lib/smarttalk/brand-status";
 import crypto from "node:crypto";
@@ -201,27 +203,64 @@ export async function POST(request: NextRequest) {
   }
 
   const direction = msg.traffic === "outgoing" ? "outbound" : "inbound";
-  const msgType = msg.message.type === "text" ? "text" : msg.message.type;
-  const content =
-    msg.message.type === "text"
-      ? { type: "text", text: msg.message.text || "" }
-      : {
-          type: msg.message.attachment?.type || "unknown",
-          url: msg.message.attachment?.url,
-          caption: msg.message.attachment?.description,
-        };
 
-  await admin.from("messages").insert({
-    conversation_id: conversationId,
-    direction,
-    type: msgType,
-    content,
-    wa_message_id: msg.channelMessageId || msg.messageId,
-    respond_io_contact_id: contact.id,
-    channel: "respond_io",
-    channel_id: channel.id,
-    status: direction === "inbound" ? "received" : "sent",
-  });
+  // Respond.io manda `message.type = "attachment"` y dentro `attachment.type`
+  // puede ser "file". Ninguno de los dos es un MessageType válido: insertarlos
+  // tal cual —lo que se hacía— metía "attachment" y "unknown" en la columna.
+  const isText = msg.message.type === "text";
+  const attachment = msg.message.attachment;
+
+  const attachmentContent = isText
+    ? null
+    : buildAttachmentContent({
+        // Si `message.type` es el genérico "attachment", manda el tipo interno
+        // del adjunto; si no, el propio `message.type` ya es específico.
+        providerType:
+          msg.message.type === "attachment" ? attachment?.type || null : msg.message.type,
+        providerUrl: attachment?.url || null,
+        filename:
+          (attachment as { fileName?: string; filename?: string } | undefined)?.fileName ||
+          (attachment as { filename?: string } | undefined)?.filename ||
+          null,
+        mimeType:
+          (attachment as { mimeType?: string; mime_type?: string } | undefined)?.mimeType ||
+          (attachment as { mime_type?: string } | undefined)?.mime_type ||
+          null,
+        caption: attachment?.description || null,
+        source: "respond_io",
+      });
+
+  const msgType = isText ? "text" : attachmentContent!.type;
+  const content = isText
+    ? { type: "text", text: msg.message.text || "" }
+    : attachmentContent!;
+
+  const { data: insertedMessage } = await admin
+    .from("messages")
+    .insert({
+      conversation_id: conversationId,
+      direction,
+      type: msgType,
+      content,
+      wa_message_id: msg.channelMessageId || msg.messageId,
+      respond_io_contact_id: contact.id,
+      channel: "respond_io",
+      channel_id: channel.id,
+      status: direction === "inbound" ? "received" : "sent",
+    })
+    .select("id");
+
+  // Mensaje guardado; el adjunto se descarga después. Las URLs de Respond.io
+  // pueden ser temporales, así que se copia a `cm-assets` sin bloquear.
+  if (attachmentContent && insertedMessage?.[0]?.id) {
+    scheduleAttachmentResolution({
+      messageId: insertedMessage[0].id as string,
+      organizationId: channel.organization_id,
+      brandId: channel.brand_id,
+      channelId: channel.id,
+      content: attachmentContent,
+    });
+  }
 
   const preview = msg.message.type === "text"
     ? (msg.message.text || "").slice(0, 100)

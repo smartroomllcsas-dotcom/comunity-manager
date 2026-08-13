@@ -5007,3 +5007,265 @@ web/src/app/(dashboard)/settings/page.tsx    # entrada «Mi perfil»
    más lenta que validar al escribir.
 
 Sin commit, push ni deploy.
+
+---
+
+# Iteración 17 · Adjuntos del Inbox en los cinco canales
+
+**Estado: pendiente publicar.**
+
+## 123. El defecto, y por qué no era sólo de Instagram
+
+El síntoma reportado —un documento recibido por Instagram que aparece como
+«archivo» y no se puede abrir— era la punta de tres fallos independientes que
+afectaban a canales distintos:
+
+| Capa | Qué pasaba | Canales afectados |
+|---|---|---|
+| **Tipo** | `attachment`, `file` y `unknown` se escribían tal cual en `messages.type`, que sólo admite el conjunto interno | Respond.io, Meta |
+| **URL** | Se guardaba en `content.url` algo que no era una URL: un media id de WhatsApp o el `mid` del mensaje de Meta | WhatsApp, Meta |
+| **Nombre** | `filename: message.file?.name \|\| "archivo"` | Meta |
+
+Y una cuarta, en la interfaz: `MessageBubble` pintaba los documentos como
+**texto plano**. No había enlace que abrir, ni con una URL correcta.
+
+Las tres primeras se veían en el código así:
+
+```ts
+// meta-parser.ts — el «archivo» del síntoma
+filename: message.file?.name || "archivo",
+// …y el identificador del mensaje usado como URL
+const url = attachment?.payload?.url || message.file?.url || message.mid || message.id || "";
+
+// whatsapp/webhook.ts — un media id no es una URL
+{ type: "image", url: message.image!.id }
+
+// webhook/respond-io — tipos crudos del proveedor a la columna
+type: msg.message.attachment?.type || "unknown",
+```
+
+## 124. Normalización común
+
+`src/lib/inbox/attachments.ts` — puro, sin red ni base de datos.
+
+| Entrada del proveedor | Tipo interno |
+|---|---|
+| `image` / `video` / `audio` / `document` / `sticker` | se conserva |
+| `photo`, `gif`, `animated_image` | `image` |
+| `voice`, `ptt` | `audio` |
+| `file`, `attachment`, `unknown`, `fallback` | se deduce; si no hay pistas, `document` |
+
+**Una desviación consciente del enunciado.** El requisito dice `file → document`.
+Se cumple, pero **sólo cuando no hay mime**: si el mime dice `image/png`, el
+adjunto se trata como imagen aunque el proveedor lo etiquete `file`. Una foto
+enviada «como archivo» sigue siendo una foto, y degradarla a enlace de descarga
+sería peor para quien la recibe. El requisito de fondo —que `file` nunca llegue
+a la columna— se mantiene intacto y hay prueba de ello.
+
+### Nombre visible
+
+Orden de preferencia: nombre del proveedor → nombre deducido de la URL →
+extensión del mime → nombre por defecto del tipo (`imagen.jpg`, `video.mp4`,
+`audio.ogg`, `documento.pdf`, `sticker.webp`). **Nunca «archivo».** Si el
+nombre del proveedor viene sin extensión, se completa con la del mime.
+
+### Contenido guardado — se reutiliza el JSONB, sin tabla nueva
+
+```jsonc
+{
+  "type": "document",              // ya normalizado
+  "url": "",                       // sólo si es una URL servible de verdad
+  "filename": "cotizacion.pdf",
+  "mime_type": "application/pdf",
+  "caption": "…",
+  "provider_media_id": "…",        // para reintentar
+  "provider_url": "https://…",     // nunca se sirve al navegador
+  "storage_path": "org/brand/inbox/2026-08/uuid.pdf",
+  "size_bytes": 20481,
+  "source": "meta",                // meta | whatsapp | respond_io
+  "media_error": "…"               // por qué falló, si falló
+}
+```
+
+`buildAttachmentContent` **no acepta tokens en su firma**. No es una convención
+que haya que recordar: no hay parámetro por el que colar uno.
+
+## 125. Resolución de medios por canal
+
+`src/lib/inbox/media-resolver.ts` — sólo servidor.
+
+| Canal | Qué entrega | Cómo se resuelve |
+|---|---|---|
+| WhatsApp | media id | `GET /{id}` en Graph con Bearer → URL de un uso → descarga con Bearer |
+| Meta (IG/FB/Messenger) | `payload.url` firmada, o sólo un id | Se intenta la URL; si falla, el id por Graph |
+| Respond.io | URL externa, posiblemente temporal | Descarga directa y copia a `cm-assets` |
+
+Dos detalles que importan:
+
+- **Graph exige `Authorization: Bearer` incluso en la URL de descarga.** Sin esa
+  cabecera responde 401 aunque la URL sea correcta.
+- Un `Content-Type: application/octet-stream` no dice nada, así que se prefiere
+  lo que indique la extensión del nombre o de la URL.
+
+### Nada de esto puede perder un mensaje
+
+El orden es **guardar el mensaje primero, resolver el medio después**, y la
+resolución se dispara sin `await`. Si la descarga falla, el mensaje queda con
+`provider_media_id` y un `media_error`, y el endpoint lo reintenta cuando
+alguien abre el archivo. Un reenvío duplicado de Meta (`23505`) no vuelve a
+descargar nada.
+
+### Secretos fuera de los logs
+
+`redactSecrets()` recorta `access_token=…`, `Bearer …` y tokens `EAA…` antes de
+registrar cualquier fallo. Las URLs de Meta llevan el token en la query y los
+mensajes de error de `fetch` suelen incluir la URL completa: sin esto, un fallo
+de descarga dejaría el token del canal escrito en el log.
+
+## 126. Almacenamiento
+
+Se reutiliza el bucket **`cm-assets`** y `uploadAsset`, con la ruta
+`organization_id/brand_id/inbox/aaaa-mm/uuid.ext`. Límite de 100 MB intacto.
+
+Tipos añadidos: video `webm`, audio (`mpeg`, `ogg`, `opus`, `wav`, `mp4`, `aac`,
+`amr`), PDF, Office y `text/plain` / `text/csv`.
+
+**Lista de denegación nueva, por encima de la de permisos.** `image/svg+xml`
+encajaba en el prefijo `image/` y habría entrado: un SVG se ejecuta en el
+navegador y aquí no hay sanitización. Se bloquean también HTML, XHTML,
+ejecutables y JavaScript.
+
+## 127. Endpoint seguro
+
+```
+GET /api/inbox/messages/[messageId]/media[?download=1]
+```
+
+1. Sin sesión → **401**.
+2. El mensaje se resuelve con `getAccessibleConversation`, que ya aplica
+   organización y marca. Cualquier fallo → **404**, nunca 403: un 403
+   confirmaría que ese identificador existe en otra organización.
+3. Si hay `storage_path`, redirige a una URL firmada de 5 minutos. Es más
+   barato que hacer de proxy y la firma caduca sola.
+4. Si sólo hay `provider_media_id` / `provider_url` —mensajes anteriores a esta
+   corrección— **lo resuelve en ese momento** y guarda el resultado, para que la
+   próxima vez sea directo.
+5. Si el proveedor ya no lo tiene → **410** con un JSON explicando el motivo, ya
+   redactado. Nunca un enlace roto.
+
+`?download=1` fuerza `Content-Disposition: attachment`; como una redirección no
+permite imponer esa cabecera, en ese caso el archivo se transmite desde el
+servidor. Los nombres con acentos viajan en `filename*=UTF-8''…` (RFC 5987).
+
+## 128. Interfaz
+
+`MessageBubble` deja de pintar los documentos como texto:
+
+| Tipo | Qué muestra |
+|---|---|
+| Imagen | Vista previa enlazada + Abrir / Descargar |
+| Video | Reproductor + Abrir / Descargar |
+| Audio | Reproductor + Abrir / Descargar |
+| Documento | Nombre, extensión y tamaño si se conocen + Abrir / Descargar |
+| Irresoluble | «Archivo no disponible», sin enlace |
+
+Abrir y Descargar son `<a>`, no botones con `onClick`: así funcionan con
+teclado, con clic central y con «abrir en pestaña nueva» sin escribir un solo
+manejador. Llevan `aria-label` con el nombre del archivo, anillo de foco
+visible, `target="_blank"` y `rel="noopener noreferrer"`.
+
+**El `href` siempre es el endpoint interno.** Nunca `content.url` (puede ser un
+media id) ni `provider_url` (puede llevar el token en la query).
+
+## 129. Pruebas
+
+`src/qa-e2e/inbox-attachments.test.ts` — **47 pruebas, 47 en verde**.
+
+| Bloque | Cubre |
+|---|---|
+| Normalización (5) | `file`/`attachment`/`unknown`/`fallback` nunca pasan; tipos válidos se conservan; deducción por mime y por extensión |
+| Nombre (8) | Nunca «archivo»; nombres útiles por tipo; extensión real del mime; se conserva el original; se completa la extensión; se saca de la URL; la query no contamina; saneo de `../../etc/passwd` |
+| Contenido (4) | El media id nunca se publica como `url`; se guardan los ocho campos; sin tokens; `formatBytes` no inventa tamaños |
+| Meta (6) | Instagram `type=file` con `payload.url`; Instagram `type=image`; Messenger documento sin nombre; el `mid` ya no acaba en `url`; audio; texto |
+| WhatsApp (4) | media id de image, audio y document; sticker |
+| Respond.io (2) | `attachment` + `file` → document; la ruta ya no inserta tipos crudos |
+| Almacenamiento (3) | Los tipos de los canales se admiten; SVG/HTML/ejecutables se rechazan; mime con parámetros |
+| Endpoint (5) | 401 sin sesión; **404 para otra organización, idéntico a inexistente**; redirección firmada; histórico con sólo id → 410 controlado; sin tokens en la respuesta |
+| Redacción (1) | `access_token`, `Bearer` y `EAA…` recortados |
+| Interfaz (6) | Abrir/Descargar; enlaces al endpoint interno; nombre y detalle; «Archivo no disponible»; accesibilidad; captions |
+| Resiliencia (3) | Los tres canales guardan antes de resolver; el duplicado no redescarga; la resolución no bloquea |
+
+### Dos defectos que encontraron las propias pruebas
+
+1. `normalizeAttachmentType({providerType: "file", mimeType: "image/png"})`
+   devolvía `document`: el alias genérico se evaluaba antes que el mime. Es el
+   caso descrito en §124.
+2. `formatBytes(2048)` devolvía `"2.0 KB"`. Ahora el decimal sólo aparece cuando
+   aporta algo.
+
+### Pruebas existentes actualizadas
+
+`meta-parser.test.ts` y `meta-fixtures.test.ts` fijaban el comportamiento
+anterior (`url: "https://cdn/x.jpg"`, `filename: "archivo"`, `url: "wamid-1"`).
+Se **actualizaron al contrato nuevo**, no se borraron: ahora comprueban que la
+URL del proveedor va en `provider_url`, que el `mid` va en `provider_media_id` y
+que el nombre deducido es `documento.pdf` y no «archivo».
+
+### Verificación
+
+```
+npm test        → Test Files 34 passed | 1 skipped (35)
+                  Tests 699 passed | 4 skipped (703)
+                  node --test: 25 tests, 0 fail
+npm run build   → ✓ Compiled successfully
+                  ƒ /api/inbox/messages/[messageId]/media
+npm run lint    → 0 errors
+git diff --check → limpio
+```
+
+## 130. Archivos
+
+**Nuevos**
+
+```
+web/src/lib/inbox/attachments.ts                                  # normalización pura
+web/src/lib/inbox/media-resolver.ts                               # descarga, persistencia y reintento
+web/src/app/api/inbox/messages/[messageId]/media/route.ts         # endpoint seguro
+web/src/qa-e2e/inbox-attachments.test.ts                          # 47 pruebas
+```
+
+**Modificados**
+
+```
+web/src/lib/media/storage.ts                    # mimes de audio/documento; SVG y HTML bloqueados
+web/src/types/database.ts                       # AttachmentMeta en MessageContent
+web/src/lib/smarttalk/meta-parser.ts            # fin de «archivo» y del mid como URL
+web/src/lib/smarttalk/meta-webhook.ts           # resolución diferida en sus dos inserts
+web/src/lib/whatsapp/webhook.ts                 # media id como provider_media_id
+web/src/app/api/webhook/respond-io/route.ts     # normalización de attachment/file
+web/src/components/inbox/MessageBubble.tsx      # Abrir/Descargar y estados vacíos
+web/src/lib/smarttalk/meta-parser.test.ts       # actualizadas al contrato nuevo
+web/src/lib/smarttalk/meta-fixtures.test.ts     # actualizadas al contrato nuevo
+```
+
+**Migraciones SQL: ninguna.** La referencia al archivo cabe en el JSONB de
+`messages.content`, que ya existía, y el bucket `cm-assets` también. No se creó
+tabla ni columna.
+
+## 131. Qué falta comprobar
+
+1. **Un adjunto real de cada canal.** Todo está probado con cargas útiles
+   sintéticas; nadie ha visto todavía un PDF real de Instagram recorrer el
+   camino completo hasta `cm-assets`.
+2. **Mensajes históricos.** El endpoint sabe resolver un `provider_media_id`
+   antiguo, pero eso depende de que el token del canal siga siendo válido y de
+   que Meta conserve el medio. Los medios de Meta caducan; para los mensajes muy
+   antiguos lo esperable es un 410, que es la respuesta correcta.
+3. **Ancho de banda.** Cada adjunto entrante se descarga y se guarda. Con
+   volumen alto conviene vigilar el crecimiento de `cm-assets`; no hay política
+   de retención.
+4. **Sin migración de datos.** Los mensajes ya guardados con un media id en
+   `content.url` no se reescriben: se resuelven al abrirlos. Si se quisiera
+   limpiarlos en bloque haría falta un script aparte, que no se ha escrito.
+
+**Pendiente publicar.** Sin commit, push ni deploy por parte del agente.

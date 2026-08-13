@@ -2,6 +2,8 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { createHmac, randomUUID, timingSafeEqual } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { filterPausedBrandIds } from "./intake-guard";
+import { scheduleAttachmentResolution } from "@/lib/inbox/media-resolver";
+import type { AttachmentContent } from "@/lib/inbox/attachments";
 import { INACTIVE_BRAND_INTAKE_RESPONSE } from "./brand-status";
 import { findReusableConversation } from "@/lib/smarttalk/conversation-dedupe";
 import { resolveToken } from "@/lib/auth/token-crypto";
@@ -574,6 +576,18 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
 
       const duplicateDelivery = isDuplicate || !insertedMessage || insertedMessage.length === 0;
 
+      // Mensaje guardado; el medio se resuelve después y sin bloquear. Un
+      // reenvío duplicado de Meta no vuelve a descargar nada.
+      if (!duplicateDelivery && parsed.type !== "text" && insertedMessage?.[0]?.id) {
+        scheduleAttachmentResolution({
+          messageId: insertedMessage[0].id as string,
+          organizationId: channel.organization_id,
+          brandId: channel.brand_id,
+          channelId: channel.id,
+          content: parsed.content as AttachmentContent,
+        });
+      }
+
       await admin
         .from("conversations")
         .update({
@@ -674,6 +688,18 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
         }
 
         const duplicateDelivery = isDuplicate || !insertedMessage || insertedMessage.length === 0;
+
+        // Mismo criterio que en la rama de `messaging`: guardar primero,
+        // resolver el medio después y nunca dos veces el mismo reenvío.
+        if (!duplicateDelivery && parsed.type !== "text" && insertedMessage?.[0]?.id) {
+          scheduleAttachmentResolution({
+            messageId: insertedMessage[0].id as string,
+            organizationId: channel.organization_id,
+            brandId: channel.brand_id,
+            channelId: channel.id,
+            content: parsed.content as AttachmentContent,
+          });
+        }
 
         await admin
           .from("conversations")

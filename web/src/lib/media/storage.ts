@@ -7,7 +7,8 @@
 //
 // Limites:
 //   - size max 100 MB
-//   - mime types: image/* + video/mp4 + video/mov + video/quicktime
+//   - mime types: image/* (salvo SVG), video mp4/mov/webm, audio comunes,
+//     PDF, Office y texto plano. SVG/HTML/ejecutables bloqueados.
 
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
@@ -16,10 +17,51 @@ const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || "cm-assets";
 export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
 
 const ALLOWED_MIME_PREFIXES = ["image/"];
+
+// Bloqueados aunque encajen en un prefijo permitido. SVG y HTML se ejecutan en
+// el navegador —scripts embebidos, XSS mediante `<foreignObject>`— y aquí no
+// hay sanitización. Es una lista de denegación **sobre** la de permisos, no en
+// lugar de ella.
+const BLOCKED_MIME_EXACT = new Set([
+  "image/svg+xml",
+  "image/svg",
+  "text/html",
+  "application/xhtml+xml",
+  "application/x-msdownload",
+  "application/x-msdos-program",
+  "application/x-executable",
+  "application/x-sh",
+  "application/x-shellscript",
+  "application/javascript",
+  "text/javascript",
+]);
+
 const ALLOWED_MIME_EXACT = new Set([
+  // Video
   "video/mp4",
   "video/mov",
   "video/quicktime",
+  "video/webm",
+  // Audio: los formatos que mandan WhatsApp, Messenger e Instagram.
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/ogg",
+  "audio/opus",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/mp4",
+  "audio/aac",
+  "audio/amr",
+  // Documentos
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "text/plain",
+  "text/csv",
 ]);
 
 function getStorageAdmin() {
@@ -37,7 +79,10 @@ function getStorageAdmin() {
 
 export function isAllowedMime(mime: string): boolean {
   if (!mime) return false;
-  const lower = mime.toLowerCase();
+  // El mime puede llegar con parámetros (`text/plain; charset=utf-8`).
+  const lower = mime.split(";")[0].trim().toLowerCase();
+  // La denegación va primero: `image/svg+xml` encaja en el prefijo `image/`.
+  if (BLOCKED_MIME_EXACT.has(lower)) return false;
   if (ALLOWED_MIME_EXACT.has(lower)) return true;
   return ALLOWED_MIME_PREFIXES.some((p) => lower.startsWith(p));
 }
@@ -51,6 +96,23 @@ function extFromMime(mime: string, fallback = "bin"): string {
   if (m === "image/svg+xml") return "svg";
   if (m === "video/mp4") return "mp4";
   if (m === "video/mov" || m === "video/quicktime") return "mov";
+  if (m === "video/webm") return "webm";
+  if (m === "audio/mpeg" || m === "audio/mp3") return "mp3";
+  if (m === "audio/ogg") return "ogg";
+  if (m === "audio/opus") return "opus";
+  if (m === "audio/wav" || m === "audio/x-wav") return "wav";
+  if (m === "audio/mp4") return "m4a";
+  if (m === "audio/aac") return "aac";
+  if (m === "audio/amr") return "amr";
+  if (m === "application/pdf") return "pdf";
+  if (m === "application/msword") return "doc";
+  if (m === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") return "docx";
+  if (m === "application/vnd.ms-excel") return "xls";
+  if (m === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") return "xlsx";
+  if (m === "application/vnd.ms-powerpoint") return "ppt";
+  if (m === "application/vnd.openxmlformats-officedocument.presentationml.presentation") return "pptx";
+  if (m === "text/plain") return "txt";
+  if (m === "text/csv") return "csv";
   const guess = m.split("/")[1];
   return guess ? guess.split("+")[0] : fallback;
 }

@@ -22,6 +22,7 @@ import {
   getAccessibleConversation,
   getBrandScopeAgent,
 } from "@/lib/smarttalk/brand-scope";
+import { sanitizeAttachmentForClient } from "@/lib/inbox/attachments";
 
 export const dynamic = "force-dynamic";
 
@@ -122,7 +123,7 @@ export async function GET(
       messages: matching.map((m) => ({
         id: m.id,
         direction: "inbound" as const,
-        content: m.content,
+        content: sanitizeAttachmentForClient(m.content),
         source_type: m.source_type,
         source_url: m.source_url,
         sentiment_label: m.sentiment_label,
@@ -169,7 +170,7 @@ export async function GET(
       messages: (msgs ?? []).map((m) => ({
         id: (m as { id: string }).id,
         direction: (m as { direction: string }).direction as "inbound" | "outbound",
-        content: (m as { content: string }).content,
+        content: sanitizeAttachmentForClient((m as { content: unknown }).content),
         media_url: (m as { media_url: string | null }).media_url,
         at: (m as { created_at: string }).created_at,
       })),

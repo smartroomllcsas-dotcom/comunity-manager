@@ -315,16 +315,35 @@ export interface Message {
   agent?: Agent;
 }
 
+/**
+ * Metadatos comunes a cualquier adjunto, guardados dentro del JSONB del
+ * mensaje. No se creó tabla nueva: la referencia al archivo vive aquí.
+ *
+ * `provider_url` y `provider_media_id` permiten reintentar la descarga; la
+ * interfaz nunca los usa como origen directo, porque pueden llevar credenciales
+ * en la query o no ser URLs en absoluto.
+ */
+export interface AttachmentMeta {
+  filename?: string;
+  mime_type?: string;
+  provider_media_id?: string;
+  provider_url?: string;
+  storage_path?: string;
+  size_bytes?: number;
+  source?: "meta" | "whatsapp" | "respond_io";
+  media_error?: string;
+}
+
 export type MessageContent =
   | { type: "text"; text: string }
-  | { type: "image"; url: string; caption?: string }
-  | { type: "video"; url: string; caption?: string }
-  | { type: "audio"; url: string }
-  | { type: "document"; url: string; filename: string; caption?: string }
+  | ({ type: "image"; url: string; caption?: string } & AttachmentMeta)
+  | ({ type: "video"; url: string; caption?: string } & AttachmentMeta)
+  | ({ type: "audio"; url: string; caption?: string } & AttachmentMeta)
+  | ({ type: "document"; url: string; filename: string; caption?: string } & AttachmentMeta)
   | { type: "template"; template_name: string; language: string; components: unknown[] }
   | { type: "interactive"; interactive_type: "button" | "list"; body: string; buttons?: { id: string; title: string }[]; sections?: { title: string; rows: { id: string; title: string; description?: string }[] }[] }
   | { type: "location"; latitude: number; longitude: number; name?: string }
-  | { type: "sticker"; url: string };
+  | ({ type: "sticker"; url: string; caption?: string } & AttachmentMeta);
 
 export interface MessageTemplate {
   id: string;
