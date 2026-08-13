@@ -30,4 +30,17 @@ describe("Meta OAuth", () => {
     expect(scope).toContain("pages_show_list");
     expect(scope).toContain("instagram_manage_messages");
   });
+
+  it("el OAuth clásico de Facebook/Messenger conserva sus permisos", () => {
+    const url = getOAuthUrl(
+      "https://www.comunitymanager.io/auth/facebook/callback",
+      "client:state",
+    );
+    const params = new URL(url).searchParams;
+
+    expect(params.has("config_id")).toBe(false);
+    expect(params.get("scope")).toBe(
+      "pages_manage_metadata,pages_show_list,pages_messaging",
+    );
+  });
 });
