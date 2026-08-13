@@ -37,6 +37,10 @@ export async function initiateMetaOAuth(request: NextRequest, callbackPath: stri
   const authUrl = getOAuthUrl(redirectUri, state, {
     includeInstagramMessaging: !isFacebookOnly,
     includeAds: !isFacebookOnly,
+    // External Page administrators must enter through the approved Facebook
+    // Login for Business configuration. getOAuthUrl intentionally omits
+    // `scope` whenever configId is present because Meta rejects both together.
+    configId: isFacebookOnly ? process.env.META_FACEBOOK_CONFIG_ID : undefined,
   })
   return NextResponse.redirect(authUrl)
 }
