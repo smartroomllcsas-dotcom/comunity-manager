@@ -29,20 +29,6 @@ export function useChannels(initialData: Channel[] = []) {
     if (!agent?.organization_id) return;
     if (query.isFetching || query.isLoading) return;
 
-    const visibleChannels = query.data || [];
-    const hasInstagram = visibleChannels.some(
-      (channel) => channel.type === "instagram" && channel.status === "active"
-    );
-    const hasRequiredVisibleChannel = visibleChannels.some(
-      (channel) =>
-        channel.status === "active" &&
-        (channel.type === "whatsapp_business_api" ||
-          channel.type === "whatsapp_cloud_api" ||
-          channel.type === "facebook_messenger" ||
-          channel.type === "instagram")
-    );
-
-    if (hasInstagram && hasRequiredVisibleChannel) return;
     if (syncAttemptedRef.current === agent.organization_id) return;
 
     syncAttemptedRef.current = agent.organization_id;

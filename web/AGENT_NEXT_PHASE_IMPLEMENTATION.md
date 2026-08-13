@@ -5858,3 +5858,37 @@ columna `consumed_at` que ya define. La migración fue aplicada correctamente el
 
 **Migración aplicada y versión publicada.** Commit `bdff80f`; despliegue de
 producción `dpl_9SsPE3gwZKHvAWxeMjVX2Ty8y9Q2` en estado `Ready`.
+
+---
+
+# Iteración 21 · Sincronización operativa de canales Meta
+
+La conexión de **Smart Digital Media 5.0** sí se guardó en `cm_social_accounts`,
+pero no tenía todavía sus filas operativas en `smarttalk.channels`. La pantalla
+de Clientes leía la tabla legacy y por eso mostraba «Meta conectado»; Inbox y
+los webhooks usan `smarttalk.channels` y descartaban el evento con:
+
+```text
+no matching smarttalk channel
+candidates: [1004299339426464]
+```
+
+Smart Sends Express funcionaba porque sí tenía su canal operativo. Además, el
+hook `useChannels` no ejecutaba la sincronización si ya veía cualquier canal de
+Facebook e Instagram; ese atajo impedía detectar una marca Meta nueva.
+
+La sincronización legacy ahora se intenta una vez por organización al cargar
+canales, aunque ya existan otros canales. Así se crean/actualizan de forma
+idempotente los canales de Facebook/Messenger e Instagram de todas las marcas.
+WhatsApp conserva su flujo de Embedded Signup y crea su propio canal
+`whatsapp_business_api` al completar la conexión.
+
+## Validación requerida
+
+1. Recargar Inbox con una sesión administradora para ejecutar la sincronización.
+2. Verificar que Smart Digital tenga canales Facebook/Messenger e Instagram.
+3. Enviar un mensaje desde un usuario externo a la página Smart Digital y
+   confirmar que aparece bajo esa marca.
+4. Conectar WhatsApp desde la tarjeta de Smart Digital y enviar un mensaje de
+   prueba al número conectado.
+5. Confirmar que Smart Sends Express sigue recibiendo sus propios mensajes.
