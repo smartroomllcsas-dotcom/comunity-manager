@@ -100,16 +100,19 @@ export function getOAuthUrl(
   const params = new URLSearchParams({
     client_id: process.env.META_APP_ID!,
     redirect_uri: redirectUri,
-    scope: scopes.join(','),
     state,
     response_type: 'code',
   })
 
   // Facebook Login for Business requires its own configuration. Keep this
-  // separate from the WhatsApp Embedded Signup configuration.
+  // separate from the WhatsApp Embedded Signup configuration. A business
+  // configuration owns the permissions, so `scope` must not be sent along
+  // with `config_id` or Meta may reject the dialog before the callback.
   if (options.configId) {
     params.set('config_id', options.configId)
     params.set('override_default_response_type', 'true')
+  } else {
+    params.set('scope', scopes.join(','))
   }
 
   return `https://www.facebook.com/v21.0/dialog/oauth?${params}`
