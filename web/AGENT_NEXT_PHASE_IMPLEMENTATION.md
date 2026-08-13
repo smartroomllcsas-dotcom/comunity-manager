@@ -5430,3 +5430,429 @@ configuración **no aparece en el repositorio**: sigue viviendo sólo en
    completado el diálogo real con la configuración nueva.
 
 **Pendiente publicar.** Sin commit ni push por parte del agente.
+
+---
+
+# Iteración 19 · Asignación multimarcas de canales Meta
+
+**Estado: pendiente publicar.**
+
+## 138. El defecto, y la prueba de que ya ocurrió
+
+```ts
+const page = flow === 'facebook' ? pages[0] : pages.find(…) || pages[0]
+```
+
+`pages[0]` es la primera página **en el orden que decide Meta**. No guarda
+ninguna relación con la que el usuario seleccionó en el diálogo. Con varias
+páginas administradas eso produce dos fallos:
+
+1. La marca se queda con la página equivocada.
+2. La misma página acaba conectada a dos marcas, porque nada lo impedía.
+
+No es teórico. La auditoría contra los datos reales encontró el caso:
+
+```
+✗ cm_social_accounts · page_id: 1 duplicado(s)
+    1117438298110765 → Smart Sends Express · Texar
+```
+
+Una misma página de Facebook conectada a dos marcas de la misma organización.
+Los webhooks llegan por el activo, no por la marca, así que los mensajes
+entrantes se enrutan de forma arbitraria — y `findMatchingChannel` llega a
+rechazar el evento por ambigüedad.
+
+## 139. Facebook · selección explícita
+
+| Páginas devueltas | Comportamiento |
+|---|---|
+| 1 | Conexión directa: no hay nada que elegir |
+| >1 | Se guardan los candidatos y se redirige a `/clients/connect/select` |
+
+Lo que viaja al navegador es sólo el identificador de la selección. Los
+candidatos —nombre, sufijo del id y, en Instagram, la cuenta asociada— se piden
+después a `/api/auth/meta/select-page`.
+
+**Los tokens no salen del servidor.** Se guardan cifrados con AES-256-GCM en
+`payload_ciphertext`. No aparecen en la URL, ni en la respuesta, ni en el log,
+ni en `localStorage`.
+
+### Por qué se guardan los tokens en vez de repetir el intercambio
+
+El `code` de OAuth es de un solo uso. Cuando el usuario elige, ya no se puede
+volver a canjear: o se conservan los tokens ya obtenidos, o habría que mandarlo
+otra vez por todo el diálogo de Meta.
+
+### Quién puede consumir una selección
+
+El mismo `cm_user_id`, la misma organización y la misma marca que iniciaron el
+OAuth. Los tres filtros van **en la consulta**, así que una selección ajena
+responde igual que una inexistente. Caduca a los 30 minutos y se consume una
+sola vez.
+
+## 140. Instagram · misma regla, sin degradar nada
+
+El flujo combinado ya prefería la página que expone una cuenta de Instagram
+—no era `pages[0]` a ciegas— pero seguía cogiendo la primera de las que la
+tuvieran. Ahora:
+
+- se filtran las páginas **con** cuenta de Instagram Business;
+- si queda más de una, se pide elección;
+- cada candidato muestra **página de Facebook + usuario de Instagram**, que es
+  justo la confusión a evitar: dos páginas de nombre parecido pueden llevar a
+  cuentas distintas;
+- una página sin cuenta asociada no entra en el flujo de Instagram.
+
+Conectar Facebook no sobrescribe Instagram ni al revés: la fila de
+`cm_social_accounts` se actualiza campo a campo, como antes.
+
+## 141. WhatsApp · sin tocar Embedded Signup
+
+El intercambio de tokens, la recepción y el envío quedan intactos. Dos cambios
+mínimos:
+
+1. La validación cross-marca pasa a usar la **guarda compartida**, así que el
+   mensaje y el criterio son los mismos que en Facebook e Instagram. Antes decía
+   «ya está conectado a otra marca» sin nombrarla, y devolvía 500 en vez de 409.
+2. `maybeSingle()` sobre `whatsapp_phone_number_id` **fallaba** si existían
+   filas duplicadas de datos antiguos. Ahora se piden todas y se elige la de
+   esta marca — un detalle que sólo se manifestaría con los duplicados que la
+   auditoría busca.
+
+## 142. La guarda compartida
+
+`src/lib/meta/asset-conflicts.ts`, un solo punto para los tres activos:
+
+| Flujo | Se valida |
+|---|---|
+| Facebook | `page_id` |
+| Instagram | `instagram_id` |
+| WhatsApp | `whatsapp_phone_number_id` |
+
+Mensaje literal y único:
+
+> Este canal ya está conectado a la marca **[nombre]**. Desconéctalo allí antes
+> de asignarlo a otra marca.
+
+Cuatro decisiones deliberadas:
+
+- **Reconectar dentro de la misma marca está permitido.** Es el caso normal de
+  renovar un token caducado.
+- **Una marca pausada no retiene sus activos.** Desactivar libera el activo
+  igual que libera el cupo (§94); exigir reactivarla sólo para soltar la página
+  sería absurdo.
+- **Un canal `disconnected` tampoco lo retiene.**
+- **Nunca se mueve nada automáticamente.** Se bloquea y se dice dónde está.
+  Mover un activo sin que nadie lo pida rompería la marca de origen en silencio.
+
+Si la comprobación **falla**, se bloquea igualmente: no poder verificar no es
+permiso para escribir. Es la dirección segura del error.
+
+El aislamiento entre agencias es previo: todo filtra por `organization_id`, así
+que una página conectada en otra organización ni bloquea ni se menciona —
+tampoco se filtra el nombre de la marca ajena.
+
+## 143. Persistencia y duplicados
+
+**Migración 037** (`20260813000100_037_meta_page_selection.sql`) — crea
+`public.cm_oauth_pending_selections`, RLS `service_role`-only, purga perezosa.
+Aplicada y **reaplicada** sin errores contra el clúster PostgreSQL desechable.
+
+**Ningún índice UNIQUE**, como pedía el requisito. Crearlo ahora fallaría a
+mitad de la migración por el duplicado que ya existe.
+
+**`scripts/audit-meta-duplicates.mjs`** — sólo lectura, sin `UPDATE`, `DELETE`
+ni `INSERT`. Revisa `smarttalk.channels` (meta_business_id y
+whatsapp_phone_number_id), `cm_social_accounts` (page_id, instagram_id) y
+`cm_whatsapp_accounts` (phone_number_id), agrupando por organización.
+
+### Duplicado encontrado y corrección propuesta
+
+| Activo | Marcas | Fuente |
+|---|---|---|
+| `1117438298110765` | Smart Sends Express · Texar | `cm_social_accounts.page_id` |
+
+Orden propuesto, **que no se ejecutó**:
+
+1. Decidir con negocio qué marca conserva la página.
+2. Desconectar el activo en la otra (`status='disconnected'`), **sin borrar
+   filas**: el histórico de conversaciones se conserva.
+3. Repetir la auditoría hasta que dé 0.
+4. Sólo entonces evaluar el índice UNIQUE, en una migración aparte.
+
+Los canales de SmartTalk salieron limpios (0 duplicados), así que el enrutado de
+webhooks no está afectado hoy; el duplicado vive en la tabla legacy que alimenta
+la interfaz de `/clients`.
+
+## 144. Interfaz
+
+`/clients/connect/select` — «Selecciona el canal para esta marca».
+
+- La **marca destino** siempre visible en la cabecera.
+- Nombre e **id parcial** (últimos 4 caracteres): suficiente para desambiguar
+  páginas homónimas sin publicar el identificador completo.
+- En el flujo de Instagram, la cuenta asociada junto a la página.
+- Los candidatos ocupados salen **deshabilitados**, con el nombre de la marca
+  que los tiene — mejor que dejar intentarlo y devolver un error después.
+- Al confirmar se vuelve a `/clients`, donde se recarga la tarjeta de la marca
+  destino. Ninguna otra marca cambia.
+
+## 145. Pruebas
+
+`src/qa-e2e/meta-multibrand.test.ts` — **34 pruebas, 34 en verde**, contra
+`handleMetaCallback` y la ruta de selección reales.
+
+| Bloque | Cubre |
+|---|---|
+| Facebook (8) | Con dos páginas no guarda ninguna; el enlace no lleva tokens ni ids; los candidatos tampoco; **seleccionar la segunda guarda la segunda**; la respuesta no filtra tokens; se guardan cifrados; una sola página conecta directo; una página ajena a la autorización se rechaza; la selección se consume una vez |
+| Conflictos (7) | Reconectar en la misma marca; misma página en otra marca bloqueada **con nombre**; el callback no escribe nada; marca pausada no retiene; canal desconectado tampoco; otra organización ni bloquea ni se menciona; **nunca mueve el activo**; mensaje idéntico en los tres flujos |
+| Instagram (5) | Dos cuentas exigen elección; se guarda la seleccionada, no la primera; los candidatos muestran página **y** usuario; las páginas sin IG quedan fuera; una cuenta ocupada bloquea |
+| Aislamiento (5) | Otro usuario no consume; otra organización responde igual que inexistente; caducada no sirve; el GET marca ocupados y nombra la marca; el GET no filtra tokens |
+| WhatsApp (3) | El flujo se conserva y usa la guarda compartida; número ocupado bloquea; el mismo número en la misma marca es reconexión |
+| Código (4) | No queda selección por índice cero; la migración no crea UNIQUE; el script es de sólo lectura; la pantalla muestra la marca destino |
+
+### Comprobación de que las pruebas sirven
+
+Se restauró la selección automática y se volvió a ejecutar:
+
+```
+× con dos páginas NO guarda ninguna y manda a la pantalla de selección
+× seleccionar la SEGUNDA página guarda esa y no la primera
+× guarda la cuenta de Instagram seleccionada, no la primera
+× otro usuario no puede consumir la selección
+   … 12 fallos en total
+```
+
+Restaurada la corrección, 34/34.
+
+### Verificación
+
+```
+npm test        → Test Files 37 passed | 1 skipped (38)
+                  Tests 763 passed | 4 skipped (767)
+                  node --test: 25 tests, 0 fail
+npm run build   → ✓ Compiled successfully
+npm run lint    → 0 errors
+migración 037   → aplicada y reaplicada en PostgreSQL desechable, sin errores
+auditoría       → ejecutada en solo lectura contra datos reales
+```
+
+## 146. Archivos
+
+**Nuevos**
+
+```
+web/supabase/migrations/20260813000100_037_meta_page_selection.sql
+web/scripts/audit-meta-duplicates.mjs                        # sólo lectura
+web/src/lib/meta/asset-conflicts.ts                          # guarda compartida
+web/src/lib/meta/page-selection.ts                           # candidatos cifrados
+web/src/app/api/auth/meta/select-page/route.ts               # GET + POST
+web/src/app/(agency)/clients/connect/select/page.tsx         # pantalla
+web/src/qa-e2e/meta-multibrand.test.ts                       # 34 pruebas
+```
+
+**Modificados**
+
+```
+web/src/lib/meta-oauth-handler.ts             # fin de la selección automática; finalizeMetaConnection extraída
+web/src/app/auth/whatsapp/exchange/route.ts   # guarda compartida; sin maybeSingle frágil
+```
+
+**Compatibilidad:** ninguna ruta pública cambió de firma. `/auth/facebook`,
+`/auth/facebook/callback`, `/api/auth/meta`, `/api/auth/meta/callback` y
+`/auth/whatsapp/exchange` siguen respondiendo igual; sólo aparece un destino
+nuevo cuando hay varias páginas. No se eliminó ninguna conexión existente y los
+webhooks no se tocaron.
+
+## 147. Pendiente y riesgos
+
+1. **El duplicado real sigue ahí.** No se corrigió: exige una decisión de
+   negocio sobre qué marca conserva la página. Hasta entonces, un índice UNIQUE
+   fallaría.
+2. **Nadie ha recorrido la pantalla con Meta real.** Todo está probado con
+   respuestas sintéticas de Graph.
+3. **`adAccounts[0]` sigue eligiendo la primera cuenta publicitaria.** Está
+   fuera del alcance pedido —el requisito nombra Facebook, Instagram y
+   WhatsApp— y su impacto es menor, pero es el mismo patrón y conviene
+   revisarlo.
+4. **La migración 037 no está aplicada** en producción. Sin ella, el flujo de
+   selección falla al guardar los candidatos y redirige con un error legible; no
+   conecta la página equivocada.
+5. **Selecciones a medias.** Si el usuario abandona la pantalla, la fila caduca a
+   los 30 minutos y se purga sola en el siguiente OAuth del mismo usuario.
+
+**Pendiente publicar.** Sin commit, push ni deploy.
+
+---
+
+# Iteración 20 · Correcciones de revisión de la iteración 19
+
+**Estado: pendiente publicar.**
+
+Los cuatro hallazgos comparten una forma: la protección existía, pero llegaba
+tarde o no cubría el camino de error. Ninguno se veía con el flujo feliz.
+
+## 148. WhatsApp validaba después de escribir
+
+La guarda estaba **después** del UPSERT de `cm_whatsapp_accounts`:
+
+```
+1. UPSERT cm_whatsapp_accounts  ← ya reasignaba client_id a la marca nueva
+2. findAssetConflict            ← 409
+```
+
+Un intento bloqueado respondía 409 pero ya había movido la cuenta legacy. El
+daño concreto: `client_id` apuntando a la marca nueva mientras el canal seguía
+en la antigua — la conexión partida en dos, y precisamente por el camino que
+pretendía impedirlo.
+
+Ahora la comprobación va **antes de cualquier escritura**, justo tras obtener
+el token y antes de construir el registro.
+
+## 149. Reconectar Facebook borraba Instagram
+
+`cm_social_accounts` es una fila compartida por los dos flujos, y `socialData`
+escribía siempre los cinco campos:
+
+```ts
+instagram_id: igAccount?.id || null,        // en el flujo facebook, igAccount es null
+ad_account_id: adAccount?.… || null,        // y adAccounts está vacío por construcción
+```
+
+Es decir: **cada reconexión de Facebook borraba la cuenta de Instagram, el
+usuario, la cuenta de anuncios y el business id** que hubiera conectado el otro
+flujo. Escribir lo que no se autorizó es destruir el trabajo ajeno.
+
+Ahora los campos comunes —página, tokens, perfil, fechas— se escriben siempre, y
+los de Instagram y Ads **sólo en el flujo que los autoriza**. El flujo de
+Instagram sigue actualizando los suyos con normalidad.
+
+## 150. El error de lectura daba vía libre
+
+`asset-conflicts` no miraba el `error` de ninguna de sus cuatro consultas.
+Supabase lo devuelve **en el resultado**, no lanzando, así que:
+
+```
+error de lectura → data = null → holders = [] → «no hay conflicto» → SE ESCRIBE
+```
+
+El comentario del `catch` decía «si no se puede comprobar, no se conecta». Era
+falso: el `catch` no se ejecutaba nunca porque nada lanzaba.
+
+Ahora las cuatro consultas —`channels`, `cm_social_accounts`,
+`cm_whatsapp_accounts` y `cm_clients`— lanzan ante `error`, el `catch` sí entra
+y devuelve un conflicto que bloquea. El mensaje al usuario no incluye el detalle
+interno (`permission denied for relation…` no llega a la interfaz).
+
+`cm_clients` merecía mención aparte: su error producía un mapa vacío, el bucle
+no reconocía ninguna marca y la conclusión era «no hay conflicto» aunque los
+ocupantes se hubieran encontrado correctamente.
+
+## 151. El consumo de la selección no era atómico
+
+`consumePendingSelection` devolvía `void` y quien llamaba continuaba pasara lo
+que pasara. Dos POST simultáneos —un doble clic basta— podían conectar dos
+páginas distintas con la misma autorización.
+
+Ahora la condición viaja **dentro del UPDATE** y se pide la fila de vuelta:
+
+```sql
+UPDATE … SET consumed_at = now() WHERE id = $1 AND consumed_at IS NULL RETURNING id
+```
+
+Postgres serializa las escrituras sobre la misma fila, así que de N peticiones
+concurrentes exactamente una recibe fila. La ruta comprueba el resultado y
+responde **409 `already_consumed`** si no fue ella, sin finalizar la conexión.
+Ante un error de escritura devuelve `false`: no consumir y conectar igual sería
+el peor de los dos mundos.
+
+No hizo falta una función PostgreSQL: el UPDATE condicionado con `RETURNING` ya
+es atómico.
+
+## 152. Pruebas
+
+`src/qa-e2e/meta-multibrand-hardening.test.ts` — **19 pruebas, 19 en verde**.
+
+| Bloque | Cubre |
+|---|---|
+| 1 · WhatsApp (5) | 409 con el nombre de la marca; **`cm_whatsapp_accounts` byte a byte intacta**; una cuenta legacy no cambia de marca; **`smarttalk.channels` intacta**; el camino feliz sigue escribiendo |
+| 2 · Instagram (4) | **Conectar Instagram y reconectar Facebook conserva Instagram**; los cinco campos no se tocan; el flujo de Instagram sí actualiza los suyos; una primera conexión de Facebook no inventa datos |
+| 3 · Errores (6) | Un error en cada una de las **cuatro** tablas produce bloqueo; el callback bloqueado no escribe nada; el mensaje no filtra detalles internos |
+| 4 · Concurrencia (4) | `consumePendingSelection` informa de quién ganó; **dos POST simultáneos → exactamente uno conecta**; el perdedor recibe 409 `already_consumed`; diez POST simultáneos → una sola conexión |
+
+### Comprobación de que las pruebas sirven
+
+Se restauró cada defecto y se volvió a ejecutar.
+
+Regresiones 2, 3 y 4 a la vez:
+
+```
+× conectar Instagram y luego reconectar Facebook conserva Instagram
+× un error en channels produce bloqueo, no vía libre
+× un error en cm_clients produce bloqueo, no vía libre
+× dos POST simultáneos: exactamente uno conecta
+   … 12 fallos en total
+```
+
+Regresión 1 (guarda de WhatsApp tardía):
+
+```
+× cm_whatsapp_accounts queda COMPLETAMENTE intacta
+× una cuenta legacy existente no cambia de marca al bloquearse
+   Tests  2 failed | 17 passed (19)
+```
+
+Restauradas las correcciones, 19/19.
+
+### Un límite honesto de la prueba de concurrencia
+
+El Supabase en memoria es de un solo hilo: las diez llamadas se intercalan en el
+bucle de eventos, no compiten de verdad. Lo que la prueba demuestra es que la
+**lógica** del consumo condicional es correcta y que la ruta respeta su
+resultado. La serialización real la aporta Postgres al ejecutar el
+`UPDATE … WHERE consumed_at IS NULL RETURNING id`, y eso no se puede verificar
+sin la migración 037 aplicada.
+
+### Verificación
+
+```
+npm test     → Test Files 38 passed | 1 skipped (39)
+               Tests 782 passed | 4 skipped (786)
+               node --test: 25 tests, 0 fail
+npm run lint → 0 errors
+npm run build → ✓ Compiled successfully
+git diff --check → limpio
+```
+
+## 153. Archivos
+
+**Nuevos**
+
+```
+web/src/qa-e2e/meta-multibrand-hardening.test.ts    # 19 pruebas
+```
+
+**Modificados**
+
+```
+web/src/app/auth/whatsapp/exchange/route.ts        # guarda antes de cualquier escritura
+web/src/lib/meta-oauth-handler.ts                  # socialData por flujo
+web/src/lib/meta/asset-conflicts.ts                # error comprobado en las 4 consultas
+web/src/lib/meta/page-selection.ts                 # consumo atómico con RETURNING
+web/src/app/api/auth/meta/select-page/route.ts     # 409 si no consumió
+```
+
+**Sin migración nueva.** La 037 no cambió: el UPDATE condicionado usa la
+columna `consumed_at` que ya define. La migración fue aplicada correctamente el
+13 de agosto de 2026 (`Success. No rows returned`).
+
+## 154. Qué queda
+
+1. **Migración 037 aplicada.** La tabla de selecciones ya existe y queda lista
+   para la validación real de concurrencia después del despliegue.
+2. **El duplicado de §143 sigue sin corregir** (`1117438298110765` en Smart Sends
+   Express y Texar): espera decisión de negocio.
+3. **`adAccounts[0]`** sigue eligiendo la primera cuenta publicitaria, como se
+   anotó en §147.
+
+**Migración aplicada; pendiente publicar.** Sin commit, push ni deploy.

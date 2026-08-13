@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { findAssetConflict } from '@/lib/meta/asset-conflicts'
 import { exchangeWhatsAppCode, getPhoneNumberDetails } from '@/lib/whatsapp-cm'
 import { getCmClientAccess } from '@/lib/cm-client-access'
 import { encryptToken } from '@/lib/auth/token-crypto'
@@ -59,6 +60,23 @@ export async function POST(request: NextRequest) {
       console.warn('[wa-exchange] no se pudo obtener detalles del número:', err)
     }
 
+    // Un número activo no puede estar en dos marcas a la vez.
+    //
+    // Va **antes de cualquier escritura**. En la primera versión de esta
+    // corrección la comprobación estaba después del UPSERT de
+    // `cm_whatsapp_accounts`: un intento bloqueado ya había reasignado el
+    // `client_id` de la cuenta legacy a la marca nueva, dejando la conexión a
+    // medio mover pese a responder 409.
+    const conflict = await findAssetConflict({
+      kind: 'whatsapp_phone',
+      assetId: phone_number_id,
+      organizationId: access.organizationId,
+      brandId: client_id,
+    })
+    if (conflict) {
+      return NextResponse.json({ error: conflict.message }, { status: 409 })
+    }
+
     const record = {
       waba_id,
       phone_number_id,
@@ -113,20 +131,24 @@ export async function POST(request: NextRequest) {
       },
       connected_at: new Date().toISOString(),
     }
-    const { data: existingChannel, error: existingChannelError } = await smarttalkAdmin
+    // `maybeSingle` fallaría si hubiera filas duplicadas de datos antiguos, así
+    // que se piden todas y se elige la de esta marca. La auditoría de
+    // duplicados vive en scripts/audit-meta-duplicates.mjs.
+    const { data: existingChannels, error: existingChannelError } = await smarttalkAdmin
       .from('channels')
       .select('id, organization_id, brand_id')
       .eq('whatsapp_phone_number_id', phone_number_id)
-      .maybeSingle()
     if (existingChannelError) {
       throw new Error(`No se pudo consultar el canal de WhatsApp: ${existingChannelError.message}`)
     }
-    if (
-      existingChannel &&
-      (existingChannel.organization_id !== access.organizationId || existingChannel.brand_id !== client_id)
-    ) {
-      throw new Error('Este número de WhatsApp ya está conectado a otra marca')
-    }
+    const existingChannel = ((existingChannels || []) as Array<{
+      id: string
+      organization_id: string
+      brand_id: string
+    }>).find(
+      (channel) =>
+        channel.organization_id === access.organizationId && channel.brand_id === client_id
+    )
 
     if (!existingChannel) {
       const billingDecision = await checkBillingFeature({

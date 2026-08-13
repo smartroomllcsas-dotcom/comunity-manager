@@ -18,6 +18,8 @@ import { getCmClientAccess } from '@/lib/cm-client-access'
 import { encryptToken } from '@/lib/crypto'
 import { checkBillingFeature, billingDeniedResponse } from '@/lib/billing/service'
 import { BILLING_FEATURES } from '@/lib/billing/features'
+import { createPendingSelection } from '@/lib/meta/page-selection'
+import { findAssetConflict } from '@/lib/meta/asset-conflicts'
 
 export async function initiateMetaOAuth(request: NextRequest, callbackPath: string) {
   const clientId = request.nextUrl.searchParams.get('clientId')
@@ -91,6 +93,209 @@ export async function initiateMetaOAuth(request: NextRequest, callbackPath: stri
   return NextResponse.redirect(authUrl)
 }
 
+export interface MetaPageLike {
+  id: string
+  name: string
+  access_token: string
+  instagram_business_account?: { id: string; username?: string } | null
+}
+
+/**
+ * Guarda la conexión de una página ya **elegida** y devuelve la redirección.
+ *
+ * Se extrajo del callback para que el camino automático (una sola página) y el
+ * de selección explícita (varias) recorran exactamente el mismo código. Si
+ * fueran dos implementaciones, la validación de conflicto o el cifrado de
+ * tokens acabarían divergiendo justo en el camino menos transitado.
+ */
+export async function finalizeMetaConnection(input: {
+  appUrl: string
+  clientId: string
+  access: { organizationId: string; cmUserId: string }
+  flow: 'facebook' | 'facebook_instagram_ads'
+  page: MetaPageLike
+  igAccount: { id: string; username?: string } | null | undefined
+  longToken: { access_token: string; expires_in?: number }
+  profile: { id: string }
+}): Promise<NextResponse> {
+  const { appUrl, clientId, access, flow, page, igAccount, longToken, profile } = input
+  // Un activo pertenece a una sola marca. Se comprueba ANTES de reservar cupo
+  // y de escribir nada: bloquear después dejaría el cupo consumido y la
+  // cuenta social a medio actualizar.
+  const conflict = await findAssetConflict({
+    kind: 'facebook_page',
+    assetId: page.id,
+    organizationId: access.organizationId,
+    brandId: clientId,
+  })
+  if (conflict) {
+    return NextResponse.redirect(
+      `${appUrl}/clients?meta_error=${encodeURIComponent(conflict.message)}`
+    )
+  }
+  if (igAccount?.id) {
+    const igConflict = await findAssetConflict({
+      kind: 'instagram_account',
+      assetId: igAccount.id,
+      organizationId: access.organizationId,
+      brandId: clientId,
+    })
+    if (igConflict) {
+      return NextResponse.redirect(
+        `${appUrl}/clients?meta_error=${encodeURIComponent(igConflict.message)}`
+      )
+    }
+  }
+
+  const adAccounts = flow === 'facebook' ? [] : await getUserAdAccounts(longToken.access_token)
+  const adAccount = adAccounts[0]
+
+  // The OAuth record is legacy data. The actual billable resources are the
+  // SmartTalk channels created by the sync step, so reserve only channels
+  // that do not already exist for this brand.
+  const expectedTypes = flow === 'facebook'
+    ? ['facebook_messenger']
+    : ['facebook_messenger', 'instagram']
+  const { data: currentChannels } = await supabaseAdmin
+    .schema('smarttalk')
+    .from('channels')
+    .select('type, status')
+    .eq('organization_id', access.organizationId)
+    .eq('brand_id', clientId)
+  const currentChannelRows = (currentChannels || []) as Array<{
+    type: string
+    status: string
+  }>
+  const currentTypes = new Set(
+    currentChannelRows
+      .filter((channel) => channel.status !== 'disconnected')
+      .map((channel) => channel.type)
+  )
+  const requestedUnits = expectedTypes.filter((type) => !currentTypes.has(type)).length
+  if (requestedUnits > 0) {
+    const billingDecision = await checkBillingFeature({
+      organizationId: access.organizationId,
+      featureCode: BILLING_FEATURES.CHANNELS_ACTIVE,
+      requestedUnits,
+      source: `oauth/meta/${flow}`,
+    })
+    if (!billingDecision.allowed) {
+      const denied = billingDeniedResponse(billingDecision)
+      return NextResponse.redirect(
+        `${appUrl}/clients?meta_error=${encodeURIComponent('El plan contratado no permite conectar mas canales')}&billing_status=${denied.status}`
+      )
+    }
+  }
+
+  const tokenExpires = new Date()
+  tokenExpires.setSeconds(tokenExpires.getSeconds() + (longToken.expires_in || 5184000))
+
+  const { data: existing, error: existingError } = await supabaseAdmin
+    .from('cm_social_accounts')
+    .select('id')
+    .eq('client_id', clientId)
+    .maybeSingle()
+
+  if (existingError) {
+    throw existingError
+  }
+
+  // Sprint 22 · Cifrado AES-256-GCM antes de persistir.
+  // Escribimos SOLO a las columnas *_ciphertext y ponemos las columnas plain
+  // en NULL para no dejar tokens en claro. Si TOKEN_ENCRYPTION_KEY no está
+  // configurada, encryptToken throwea y el catch de abajo redirige con error
+  // — comportamiento explícito y visible en lugar de escribir en claro.
+  // Campos que SIEMPRE se escriben: identifican la página y el token que acaba
+  // de autorizarse, en los dos flujos.
+  const socialData: Record<string, unknown> = {
+    client_id: clientId,
+    page_id: page.id,
+    page_name: page.name,
+    access_token: null,
+    access_token_ciphertext: encryptToken(longToken.access_token),
+    page_access_token: null,
+    page_access_token_ciphertext: encryptToken(page.access_token),
+    meta_user_id: profile.id,
+    connected_at: new Date().toISOString(),
+    token_expires_at: tokenExpires.toISOString(),
+  }
+
+  // Instagram y Ads sólo se tocan en el flujo que los autoriza.
+  //
+  // Antes se escribían siempre, y en el flujo de Facebook `igAccount` y
+  // `adAccount` son null por construcción: reconectar Facebook **borraba** la
+  // cuenta de Instagram y la de anuncios que la marca ya tenía. La fila es
+  // compartida por los dos flujos, así que escribir lo que no se autorizó es
+  // destruir el trabajo del otro.
+  if (flow !== 'facebook') {
+    socialData.instagram_id = igAccount?.id || null
+    socialData.instagram_username = igAccount?.username || null
+    socialData.ad_account_id =
+      adAccount?.account_id || adAccount?.id?.replace('act_', '') || null
+    socialData.ad_account_name = adAccount?.name || null
+    socialData.business_id = adAccount?.business?.id || adAccount?.business || null
+  }
+
+  if (existing) {
+    const { error: updateError } = await supabaseAdmin.from('cm_social_accounts').update(socialData).eq('id', existing.id)
+    if (updateError) {
+      throw updateError
+    }
+  } else {
+    const { error: insertError } = await supabaseAdmin.from('cm_social_accounts').insert(socialData)
+    if (insertError) {
+      throw insertError
+    }
+  }
+
+  if (page.id && page.access_token) {
+    try {
+      await subscribePageToApp(page.id, page.access_token)
+    } catch (subscriptionError) {
+      console.warn('[meta-oauth] page subscription failed', subscriptionError)
+    }
+  }
+
+  if (igAccount?.id && longToken.access_token) {
+    try {
+      await subscribeInstagramAccountToApp(igAccount.id, longToken.access_token)
+    } catch (subscriptionError) {
+      console.warn('[meta-oauth] instagram subscription failed', subscriptionError)
+    }
+  }
+
+  const { data: client } = await supabaseAdmin
+    .from('cm_clients')
+    .select('user_id, name')
+    .eq('id', clientId)
+    .single()
+  if (client) {
+    await supabaseAdmin.from('cm_activity_log').insert({
+      user_id: client.user_id,
+      action:
+        flow === 'facebook'
+          ? `Facebook conectado: ${page.name} para ${client.name}`
+          : `Redes conectadas: ${page.name}${igAccount ? ` + @${igAccount.username}` : ''}${adAccount?.name ? ` + Ads: ${adAccount.name}` : ''} para ${client.name}`,
+      status: 'success',
+    })
+  }
+
+  const successMsg =
+    flow === 'facebook'
+      ? `Facebook conectado: ${page.name}`
+      : `Conectado: ${page.name}${igAccount ? ` + @${igAccount.username}` : ''}${adAccount?.name ? ` + Ads: ${adAccount.name}` : ''}`
+  const traceParams = new URLSearchParams({
+    meta_success: successMsg,
+    meta_client_id: clientId,
+    meta_flow: flow,
+    meta_page: page.name,
+    meta_page_id: page.id,
+    meta_instagram: igAccount?.username || '',
+    meta_ad_account: adAccount?.name || '',
+  })
+  return NextResponse.redirect(`${appUrl}/clients?${traceParams.toString()}`)
+}
+
 export async function handleMetaCallback(request: NextRequest, callbackPath: string) {
   const code = request.nextUrl.searchParams.get('code')
   const state = request.nextUrl.searchParams.get('state')
@@ -155,153 +360,59 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
       )
     }
 
-    // Facebook may return several pages. For the Instagram flow, prefer the
-    // page that actually exposes its linked Instagram Business account instead
-    // of always taking the first page returned by Meta.
-    const page = flow === 'facebook'
-      ? pages[0]
-      : pages.find((candidate: { instagram_business_account?: unknown }) => candidate.instagram_business_account) || pages[0]
-    const igAccount = flow === 'facebook' ? null : page.instagram_business_account
+    // Meta puede devolver varias páginas administradas, y la primera del array
+    // NO es necesariamente la que el usuario seleccionó en el diálogo: el orden
+    // lo decide Meta. Elegir por él hacía que la marca se quedara con la página
+    // equivocada, y que la misma página acabara en dos marcas distintas.
+    //
+    // Con un solo candidato se conecta directo —no hay nada que elegir—. Con
+    // varios, se guardan los candidatos y se pide una decisión explícita.
+    const selectable = flow === 'facebook'
+      ? pages
+      : pages.filter((candidate: { instagram_business_account?: unknown }) => candidate.instagram_business_account)
 
-    if (flow !== 'facebook' && !igAccount) {
+    if (flow !== 'facebook' && selectable.length === 0) {
       return NextResponse.redirect(
         `${appUrl}/clients?meta_error=${encodeURIComponent('No se encontró una cuenta de Instagram Business asociada a las páginas autorizadas')}`
       )
     }
-    const adAccounts = flow === 'facebook' ? [] : await getUserAdAccounts(longToken.access_token)
-    const adAccount = adAccounts[0]
 
-    // The OAuth record is legacy data. The actual billable resources are the
-    // SmartTalk channels created by the sync step, so reserve only channels
-    // that do not already exist for this brand.
-    const expectedTypes = flow === 'facebook'
-      ? ['facebook_messenger']
-      : ['facebook_messenger', 'instagram']
-    const { data: currentChannels } = await supabaseAdmin
-      .schema('smarttalk')
-      .from('channels')
-      .select('type, status')
-      .eq('organization_id', access.organizationId)
-      .eq('brand_id', clientId)
-    const currentChannelRows = (currentChannels || []) as Array<{
-      type: string
-      status: string
-    }>
-    const currentTypes = new Set(
-      currentChannelRows
-        .filter((channel) => channel.status !== 'disconnected')
-        .map((channel) => channel.type)
-    )
-    const requestedUnits = expectedTypes.filter((type) => !currentTypes.has(type)).length
-    if (requestedUnits > 0) {
-      const billingDecision = await checkBillingFeature({
+    if (selectable.length > 1) {
+      const pending = await createPendingSelection({
+        cmUserId: access.cmUserId,
         organizationId: access.organizationId,
-        featureCode: BILLING_FEATURES.CHANNELS_ACTIVE,
-        requestedUnits,
-        source: `oauth/meta/${flow}`,
+        clientId,
+        flow,
+        secret: {
+          userAccessToken: longToken.access_token,
+          profileId: profile.id,
+          pages: selectable,
+        },
       })
-      if (!billingDecision.allowed) {
-        const denied = billingDeniedResponse(billingDecision)
+      if (!pending.ok) {
         return NextResponse.redirect(
-          `${appUrl}/clients?meta_error=${encodeURIComponent('El plan contratado no permite conectar mas canales')}&billing_status=${denied.status}`
+          `${appUrl}/clients?meta_error=${encodeURIComponent('No se pudo preparar la selección de página. Inténtalo de nuevo.')}`
         )
       }
+      // Sólo viaja el identificador de la selección. Los tokens se quedan
+      // cifrados en la base.
+      return NextResponse.redirect(
+        `${appUrl}/clients/connect/select?selection=${encodeURIComponent(pending.selectionId)}`
+      )
     }
 
-    const tokenExpires = new Date()
-    tokenExpires.setSeconds(tokenExpires.getSeconds() + (longToken.expires_in || 5184000))
-
-    const { data: existing, error: existingError } = await supabaseAdmin
-      .from('cm_social_accounts')
-      .select('id')
-      .eq('client_id', clientId)
-      .maybeSingle()
-
-    if (existingError) {
-      throw existingError
-    }
-
-    // Sprint 22 · Cifrado AES-256-GCM antes de persistir.
-    // Escribimos SOLO a las columnas *_ciphertext y ponemos las columnas plain
-    // en NULL para no dejar tokens en claro. Si TOKEN_ENCRYPTION_KEY no está
-    // configurada, encryptToken throwea y el catch de abajo redirige con error
-    // — comportamiento explícito y visible en lugar de escribir en claro.
-    const socialData = {
-      client_id: clientId,
-      page_id: page.id,
-      page_name: page.name,
-      access_token: null,
-      access_token_ciphertext: encryptToken(longToken.access_token),
-      page_access_token: null,
-      page_access_token_ciphertext: encryptToken(page.access_token),
-      instagram_id: igAccount?.id || null,
-      instagram_username: igAccount?.username || null,
-      ad_account_id: adAccount?.account_id || adAccount?.id?.replace('act_', '') || null,
-      ad_account_name: adAccount?.name || null,
-      business_id: adAccount?.business?.id || adAccount?.business || null,
-      meta_user_id: profile.id,
-      connected_at: new Date().toISOString(),
-      token_expires_at: tokenExpires.toISOString(),
-    }
-
-    if (existing) {
-      const { error: updateError } = await supabaseAdmin.from('cm_social_accounts').update(socialData).eq('id', existing.id)
-      if (updateError) {
-        throw updateError
-      }
-    } else {
-      const { error: insertError } = await supabaseAdmin.from('cm_social_accounts').insert(socialData)
-      if (insertError) {
-        throw insertError
-      }
-    }
-
-    if (page.id && page.access_token) {
-      try {
-        await subscribePageToApp(page.id, page.access_token)
-      } catch (subscriptionError) {
-        console.warn('[meta-oauth] page subscription failed', subscriptionError)
-      }
-    }
-
-    if (igAccount?.id && longToken.access_token) {
-      try {
-        await subscribeInstagramAccountToApp(igAccount.id, longToken.access_token)
-      } catch (subscriptionError) {
-        console.warn('[meta-oauth] instagram subscription failed', subscriptionError)
-      }
-    }
-
-    const { data: client } = await supabaseAdmin
-      .from('cm_clients')
-      .select('user_id, name')
-      .eq('id', clientId)
-      .single()
-    if (client) {
-      await supabaseAdmin.from('cm_activity_log').insert({
-        user_id: client.user_id,
-        action:
-          flow === 'facebook'
-            ? `Facebook conectado: ${page.name} para ${client.name}`
-            : `Redes conectadas: ${page.name}${igAccount ? ` + @${igAccount.username}` : ''}${adAccount?.name ? ` + Ads: ${adAccount.name}` : ''} para ${client.name}`,
-        status: 'success',
-      })
-    }
-
-    const successMsg =
-      flow === 'facebook'
-        ? `Facebook conectado: ${page.name}`
-        : `Conectado: ${page.name}${igAccount ? ` + @${igAccount.username}` : ''}${adAccount?.name ? ` + Ads: ${adAccount.name}` : ''}`
-    const traceParams = new URLSearchParams({
-      meta_success: successMsg,
-      meta_client_id: clientId,
-      meta_flow: flow,
-      meta_page: page.name,
-      meta_page_id: page.id,
-      meta_instagram: igAccount?.username || '',
-      meta_ad_account: adAccount?.name || '',
+    const page = selectable[0]
+    const igAccount = flow === 'facebook' ? null : page.instagram_business_account
+    return finalizeMetaConnection({
+      appUrl,
+      clientId,
+      access: { organizationId: access.organizationId, cmUserId: access.cmUserId },
+      flow,
+      page,
+      igAccount,
+      longToken,
+      profile,
     })
-    return NextResponse.redirect(`${appUrl}/clients?${traceParams.toString()}`)
   } catch (err) {
     const msg =
       err instanceof Error
