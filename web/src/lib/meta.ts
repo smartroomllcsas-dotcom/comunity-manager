@@ -170,11 +170,28 @@ export async function getLongLivedToken(shortToken: string) {
 // Get Pages & Instagram accounts
 // -----------------------------------------------------------------------------
 
-export async function getUserPages(accessToken: string) {
+export async function getUserPages(
+  accessToken: string,
+  options: { includeInstagram?: boolean } = {}
+) {
+  // El flujo exclusivo de Facebook no debe depender de campos de Instagram.
+  // Solicitar instagram_business_account en /me/accounts puede hacer que Meta
+  // omita o rechace páginas cuando el token sólo fue autorizado para
+  // Facebook/Messenger. El flujo combinado sí necesita ese campo.
+  const fields = options.includeInstagram
+    ? 'id,name,access_token,instagram_business_account{id,username}'
+    : 'id,name,access_token,tasks'
   const data = await metaFetch(
-    `${META_GRAPH_URL}/me/accounts?fields=id,name,access_token,instagram_business_account{id,username}&access_token=${accessToken}`
+    `${META_GRAPH_URL}/me/accounts?fields=${encodeURIComponent(fields)}&access_token=${accessToken}`
   )
   return data.data || []
+}
+
+export async function getUserPermissions(accessToken: string) {
+  const data = await metaFetch(
+    `${META_GRAPH_URL}/me/permissions?access_token=${accessToken}`
+  )
+  return (data.data || []) as Array<{ permission: string; status: string }>
 }
 
 export async function getUserProfile(accessToken: string) {

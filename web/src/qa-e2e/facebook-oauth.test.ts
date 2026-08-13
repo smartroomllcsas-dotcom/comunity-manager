@@ -293,6 +293,15 @@ describe("5 · Callback y state sin cambios", () => {
     expect(source).not.toContain(FACEBOOK_CONFIG_ID_ENV);
   });
 
+  it("el callback exclusivo consulta páginas sin depender de Instagram", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/lib/meta-oauth-handler.ts"),
+      "utf8",
+    );
+    expect(source).toContain("includeInstagram: flow !== 'facebook'");
+    expect(source).toContain("getUserPermissions");
+  });
+
   it("sigue exigiendo clientId y autorización antes que nada", async () => {
     H.access = null;
     const response = await initiateMetaOAuth(

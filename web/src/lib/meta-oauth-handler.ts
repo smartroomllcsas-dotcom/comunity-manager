@@ -7,6 +7,7 @@ import {
   exchangeCodeForToken,
   getLongLivedToken,
   getUserPages,
+  getUserPermissions,
   getUserProfile,
   getUserAdAccounts,
   subscribePageToApp,
@@ -125,10 +126,33 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
     const shortToken = await exchangeCodeForToken(code, redirectUri)
     const longToken = await getLongLivedToken(shortToken.access_token)
     const profile = await getUserProfile(longToken.access_token)
-    const pages = await getUserPages(longToken.access_token)
+    const permissions = await getUserPermissions(longToken.access_token)
+    const pages = await getUserPages(longToken.access_token, {
+      includeInstagram: flow !== 'facebook',
+    })
 
     if (pages.length === 0) {
-      return NextResponse.redirect(`${appUrl}/clients?meta_error=No+se+encontraron+paginas+de+Facebook`)
+      const granted = new Set(
+        permissions
+          .filter((permission) => permission.status === 'granted')
+          .map((permission) => permission.permission)
+      )
+      const required = flow === 'facebook'
+        ? ['public_profile', 'pages_show_list', 'pages_manage_metadata', 'pages_messaging']
+        : ['public_profile', 'pages_show_list', 'pages_read_engagement']
+      const missing = required.filter((permission) => !granted.has(permission))
+      const detail = missing.length > 0
+        ? `Meta no concedio los permisos requeridos: ${missing.join(', ')}. Vuelve a autorizar la integracion.`
+        : 'Meta autorizo la cuenta, pero no devolvio paginas administradas. Confirma que el perfil tenga control total sobre la pagina seleccionada.'
+      console.warn('[meta-oauth] no pages returned', {
+        flow,
+        profileId: profile.id,
+        grantedPermissions: [...granted],
+        missingPermissions: missing,
+      })
+      return NextResponse.redirect(
+        `${appUrl}/clients?meta_error=${encodeURIComponent(detail)}`
+      )
     }
 
     // Facebook may return several pages. For the Instagram flow, prefer the
