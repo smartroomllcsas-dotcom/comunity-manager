@@ -5269,3 +5269,164 @@ tabla ni columna.
    limpiarlos en bloque haría falta un script aparte, que no se ha escrito.
 
 **Pendiente publicar.** Sin commit, push ni deploy por parte del agente.
+
+---
+
+# Iteración 18 · Flujo OAuth exclusivo de Facebook
+
+**Estado: pendiente publicar.**
+
+## 132. Qué ya estaba bien
+
+Tres de las cuatro comprobaciones pedidas se cumplían antes de tocar nada, y se
+verificaron en lugar de reescribirse:
+
+| Comprobación | Estado previo |
+|---|---|
+| `/auth/facebook` usa `META_FACEBOOK_CONFIG_ID` | ✅ vía `initiateMetaOAuth` → `isFacebookOnly` |
+| `config_id`, `override_default_response_type=true`, `response_type=code` | ✅ en `getOAuthUrl` |
+| Sin `scope` cuando hay `config_id` | ✅ ramas excluyentes |
+| Instagram y WhatsApp separados | ✅ rutas y variables propias |
+
+El identificador nunca estuvo escrito en el código y sigue sin estarlo.
+
+## 133. El hueco real: retroceso silencioso al OAuth clásico
+
+```ts
+configId: isFacebookOnly ? process.env.META_FACEBOOK_CONFIG_ID : undefined,
+```
+
+Si la variable faltaba, `configId` quedaba `undefined` y `getOAuthUrl` caía a su
+rama `else`, que **añade `scope`**. Es decir: el flujo exclusivo de Facebook se
+convertía en OAuth clásico sin que nada avisara. El diálogo se abría, el usuario
+lo completaba y la conexión parecía correcta — pero los permisos concedidos no
+eran los de la configuración aprobada de Facebook Login for Business.
+
+Lo peor del fallo era que *parecía* funcionar. No había error, ni log, ni
+diferencia visible hasta que alguien investigara por qué faltaban permisos.
+
+**Y estaba activo aquí y ahora:** `META_FACEBOOK_CONFIG_ID` no está en
+`.env.local`, así que en desarrollo el flujo venía cayendo al camino clásico.
+
+## 134. La corrección
+
+`readFacebookConfigId()` en `src/lib/meta.ts` es el **único** punto que lee la
+variable, así que la validación no se puede saltar desde otra ruta.
+
+Valida el formato, no sólo la presencia:
+
+- recorta comillas envolventes, que algunos gestores de variables conservan;
+- exige entre 10 y 25 dígitos.
+
+Un marcador de posición, un valor entrecomillado o el identificador de la app en
+lugar del de la configuración producirían un diálogo que falla **después** de
+que el usuario salió de la aplicación, que es el peor momento para enterarse.
+
+`initiateMetaOAuth` corta antes de empezar:
+
+```
+falta o inválida  →  500 { code: "facebook_config_id_missing" | "facebook_config_id_invalid" }
+```
+
+Tres decisiones deliberadas:
+
+1. **Se detiene antes de crear el `state`.** Un flujo abortado no deja filas
+   huérfanas en `cm_oauth_states`.
+2. **Se detiene en todos los entornos, no sólo en producción.** El enunciado
+   pedía que fallara en producción; hacerlo también en desarrollo evita que el
+   camino clásico funcione localmente y oculte el problema justo hasta el
+   despliegue. Consecuencia: quien trabaje en local necesita definir la
+   variable, y el mensaje de error dice exactamente cuál.
+3. **El error no incluye el valor configurado.** No es un secreto, pero un
+   identificador mal puesto puede ser el de otra cuenta.
+
+El flujo combinado `/api/auth/meta` **no cambia**: sigue usando `scope` sin
+`config_id`, y no se bloquea aunque falte la variable de Facebook. La guarda es
+exclusiva del flujo de Facebook, y hay prueba de ello.
+
+## 135. Pruebas
+
+`src/qa-e2e/facebook-oauth.test.ts` — **22 pruebas, 22 en verde**, contra
+`initiateMetaOAuth` real.
+
+| Bloque | Cubre |
+|---|---|
+| 1 · Variable de entorno (3) | La ruta delega correctamente; **ningún identificador de 15+ dígitos escrito en el código**; cambiar la variable cambia la URL |
+| 2 · Parámetros (3) | `config_id`, `override_default_response_type=true`, `response_type=code`; **sin `scope`**; `redirect_uri` correcto |
+| 3 · Variable ausente o inválida (7) | 500 sin redirección; **no retrocede al clásico**; formatos inválidos; comillas toleradas; no se crea `state`; se detiene en los tres entornos; el valor no se filtra |
+| 4 · Sin regresiones (5) | El flujo combinado conserva `scope` y no se bloquea; Instagram con su ruta y permisos; WhatsApp con `NEXT_PUBLIC_META_CONFIG_ID`; `getOAuthUrl` de bajo nivel intacto |
+| 5 · Callback y state (4) | Formato `clientId:aleatorio`; el `state` viaja en la URL; el callback sin tocar; `clientId` y autorización siguen exigiéndose primero |
+
+### Comprobación de que las pruebas sirven
+
+Se restauró el retroceso silencioso y se volvió a ejecutar:
+
+```
+× sin la variable responde 500 y NO redirige a Facebook
+× NO retrocede al OAuth clásico: la respuesta no lleva scope ni URL de Meta
+× un valor con formato inválido también detiene el flujo
+× se detiene ANTES de crear el state, para no dejar basura en la base
+× se detiene en todos los entornos, no sólo en producción
+× el mensaje de error no filtra el valor configurado
+  Tests  6 failed | 16 passed (22)
+```
+
+Restaurada la guarda, 22/22.
+
+### Prueba existente renombrada
+
+`meta-oauth.test.ts` tenía «el OAuth clásico de Facebook/Messenger conserva sus
+permisos». El nombre pasó a ser engañoso: esa combinación ya no se puede
+producir por `/auth/facebook`. Se renombró a «getOAuthUrl sin configId conserva
+los permisos del OAuth clásico», con una nota de que la rama existe para el
+flujo combinado. La aserción no cambió.
+
+### Verificación
+
+```
+npx vitest run src/qa-e2e/facebook-oauth.test.ts src/qa-e2e/meta-oauth.test.ts
+                → Tests 25 passed (25)
+npm test        → Test Files 36 passed | 1 skipped (37)
+                  Tests 728 passed | 4 skipped (732)
+                  node --test: 25 tests, 0 fail
+npm run build   → ✓ Compiled successfully
+npm run lint    → 0 errors
+git diff --check → limpio
+grep del identificador en src/ y supabase/ → 0 ocurrencias
+```
+
+## 136. Archivos
+
+**Nuevos**
+
+```
+web/src/qa-e2e/facebook-oauth.test.ts     # 22 pruebas
+```
+
+**Modificados**
+
+```
+web/src/lib/meta.ts                  # readFacebookConfigId + FACEBOOK_CONFIG_ID_ENV
+web/src/lib/meta-oauth-handler.ts    # guarda; el state se crea después de validar
+web/src/qa-e2e/meta-oauth.test.ts    # prueba renombrada, aserción intacta
+web/src/qa-e2e/inbox-attachments.test.ts  # cast ajustado tras los cambios de Codex en attachments.ts
+```
+
+Sin migraciones. Sin cambios en Meta, Vercel ni DNS. El identificador de la
+configuración **no aparece en el repositorio**: sigue viviendo sólo en
+`META_FACEBOOK_CONFIG_ID`.
+
+## 137. Antes de publicar
+
+1. **`META_FACEBOOK_CONFIG_ID` debe estar definida en Vercel** con el
+   identificador de la nueva configuración. Con este cambio, si falta, la
+   conexión con Facebook responde 500 en lugar de degradarse en silencio: es el
+   comportamiento buscado, pero conviene confirmar la variable **antes** del
+   despliegue.
+2. **Quien desarrolle en local también la necesita.** Hoy no está en
+   `.env.local`; sin ella, `/auth/facebook` responderá 500 con el mensaje que
+   indica qué definir.
+3. **No se probó contra Meta.** Todo se verifica sobre la URL generada; nadie ha
+   completado el diálogo real con la configuración nueva.
+
+**Pendiente publicar.** Sin commit ni push por parte del agente.

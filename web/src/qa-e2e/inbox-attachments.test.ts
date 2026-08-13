@@ -179,7 +179,7 @@ describe("Contenido guardado en el JSONB", () => {
       providerType: "image",
       providerUrl: "https://cdn.invalid/x.jpg?access_token=EAAsecreto123",
       source: "meta",
-    }) as Record<string, unknown>;
+    }) as unknown as Record<string, unknown>;
     // `provider_url` se conserva para reintentar, pero jamás se sirve al
     // navegador: el componente usa el endpoint interno (ver bloque de interfaz).
     expect(Object.keys(content)).not.toContain("token");

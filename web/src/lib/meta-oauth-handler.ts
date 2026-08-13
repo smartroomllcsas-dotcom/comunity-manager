@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import {
+  FACEBOOK_CONFIG_ID_ENV,
   getOAuthUrl,
+  readFacebookConfigId,
   exchangeCodeForToken,
   getLongLivedToken,
   getUserPages,
@@ -28,19 +30,62 @@ export async function initiateMetaOAuth(request: NextRequest, callbackPath: stri
     return NextResponse.json({ error: 'Meta API no configurada' }, { status: 500 })
   }
 
-  const state = `${clientId}:${crypto.randomBytes(16).toString('hex')}`
-  await supabaseAdmin.from('cm_oauth_states').insert({ state, client_id: clientId })
-
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin
   const redirectUri = `${appUrl}${callbackPath}`
   const isFacebookOnly = callbackPath.includes('/auth/facebook/callback')
+
+  // El flujo exclusivo de Facebook SÓLO es válido a través de la configuración
+  // aprobada de Facebook Login for Business.
+  //
+  // Antes, si `META_FACEBOOK_CONFIG_ID` faltaba, `configId` quedaba `undefined`
+  // y `getOAuthUrl` caía a su rama `else`: OAuth clásico con `scope`. El
+  // diálogo se abría y el usuario pasaba por él sin que nada avisara, pero los
+  // permisos concedidos no eran los de la configuración aprobada. Un fallo
+  // silencioso y difícil de diagnosticar, porque todo *parecía* funcionar.
+  //
+  // Ahora se detiene aquí, antes de crear el `state` en la base y antes de
+  // sacar al usuario de la aplicación. Se detiene en **todos los entornos**, no
+  // sólo en producción: un desarrollo que funcione por el camino clásico
+  // ocultaría el problema justo hasta el despliegue.
+  let facebookConfigId: string | undefined
+  if (isFacebookOnly) {
+    const configResult = readFacebookConfigId()
+    if (!configResult.ok) {
+      console.error(
+        `[meta-oauth] flujo de Facebook bloqueado: ${FACEBOOK_CONFIG_ID_ENV} ${
+          configResult.reason === 'missing' ? 'no está definida' : 'tiene un formato inválido'
+        }`,
+      )
+      return NextResponse.json(
+        {
+          error:
+            configResult.reason === 'missing'
+              ? `Falta ${FACEBOOK_CONFIG_ID_ENV}. La conexión con Facebook no está disponible.`
+              : `${FACEBOOK_CONFIG_ID_ENV} tiene un valor inválido. La conexión con Facebook no está disponible.`,
+          code:
+            configResult.reason === 'missing'
+              ? 'facebook_config_id_missing'
+              : 'facebook_config_id_invalid',
+          // El valor no se incluye: aunque no es un secreto, un identificador
+          // mal puesto puede ser el de otra cuenta.
+          hint: `Define ${FACEBOOK_CONFIG_ID_ENV} con el identificador numérico de la configuración de Facebook Login for Business.`,
+        },
+        { status: 500 },
+      )
+    }
+    facebookConfigId = configResult.configId
+  }
+
+  const state = `${clientId}:${crypto.randomBytes(16).toString('hex')}`
+  await supabaseAdmin.from('cm_oauth_states').insert({ state, client_id: clientId })
+
   const authUrl = getOAuthUrl(redirectUri, state, {
     includeInstagramMessaging: !isFacebookOnly,
     includeAds: !isFacebookOnly,
     // External Page administrators must enter through the approved Facebook
     // Login for Business configuration. getOAuthUrl intentionally omits
     // `scope` whenever configId is present because Meta rejects both together.
-    configId: isFacebookOnly ? process.env.META_FACEBOOK_CONFIG_ID : undefined,
+    configId: facebookConfigId,
   })
   return NextResponse.redirect(authUrl)
 }

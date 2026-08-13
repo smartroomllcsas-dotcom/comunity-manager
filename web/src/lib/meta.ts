@@ -71,6 +71,34 @@ async function metaFetch(url: string, options: RequestInit = {}, maxRetries = 3)
 // OAuth Flow
 // -----------------------------------------------------------------------------
 
+/** Nombre de la variable, en un solo sitio, para que los mensajes no diverjan. */
+export const FACEBOOK_CONFIG_ID_ENV = 'META_FACEBOOK_CONFIG_ID'
+
+export type FacebookConfigIdResult =
+  | { ok: true; configId: string }
+  | { ok: false; reason: 'missing' | 'invalid' }
+
+/**
+ * Lee y valida la configuración de Facebook Login for Business.
+ *
+ * El identificador **nunca** se escribe en el código: vive sólo en
+ * `META_FACEBOOK_CONFIG_ID`. Esta función es el único punto que lo lee, de modo
+ * que la validación no se puede saltar por descuido desde otra ruta.
+ *
+ * Se valida el formato, no sólo la presencia. Un valor con comillas, un
+ * marcador de posición o el identificador de la app en lugar del de la
+ * configuración producirían un diálogo de Meta que falla *después* de que el
+ * usuario ya salió de la aplicación, que es el peor momento para enterarse.
+ */
+export function readFacebookConfigId(): FacebookConfigIdResult {
+  // Algunos gestores de variables conservan las comillas del valor.
+  const raw = (process.env[FACEBOOK_CONFIG_ID_ENV] || '').trim().replace(/^["']|["']$/g, '')
+  if (!raw) return { ok: false, reason: 'missing' }
+  // Los identificadores de configuración de Meta son numéricos y largos.
+  if (!/^\d{10,25}$/.test(raw)) return { ok: false, reason: 'invalid' }
+  return { ok: true, configId: raw }
+}
+
 export function getOAuthUrl(
   redirectUri: string,
   state: string,

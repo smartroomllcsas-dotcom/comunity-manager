@@ -31,7 +31,10 @@ describe("Meta OAuth", () => {
     expect(scope).toContain("instagram_manage_messages");
   });
 
-  it("el OAuth clásico de Facebook/Messenger conserva sus permisos", () => {
+  // getOAuthUrl es de bajo nivel y la comparte el flujo combinado, que sí
+  // necesita `scope`. Que exista esta rama no significa que /auth/facebook
+  // pueda llegar a ella: initiateMetaOAuth lo impide (ver facebook-oauth.test).
+  it("getOAuthUrl sin configId conserva los permisos del OAuth clásico", () => {
     const url = getOAuthUrl(
       "https://www.comunitymanager.io/auth/facebook/callback",
       "client:state",
