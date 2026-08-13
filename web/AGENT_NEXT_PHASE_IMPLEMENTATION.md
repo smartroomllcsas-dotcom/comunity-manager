@@ -5681,13 +5681,14 @@ webhooks no se tocaron.
 5. **Selecciones a medias.** Si el usuario abandona la pantalla, la fila caduca a
    los 30 minutos y se purga sola en el siguiente OAuth del mismo usuario.
 
-**Pendiente publicar.** Sin commit, push ni deploy.
+**Publicada el 13 de agosto de 2026.** Incluida en el despliegue de producción
+`dpl_9SsPE3gwZKHvAWxeMjVX2Ty8y9Q2`.
 
 ---
 
 # Iteración 20 · Correcciones de revisión de la iteración 19
 
-**Estado: pendiente publicar.**
+**Estado: publicada el 13 de agosto de 2026.**
 
 Los cuatro hallazgos comparten una forma: la protección existía, pero llegaba
 tarde o no cubría el camino de error. Ninguno se veía con el flujo feliz.
@@ -5855,4 +5856,5 @@ columna `consumed_at` que ya define. La migración fue aplicada correctamente el
 3. **`adAccounts[0]`** sigue eligiendo la primera cuenta publicitaria, como se
    anotó en §147.
 
-**Migración aplicada; pendiente publicar.** Sin commit, push ni deploy.
+**Migración aplicada y versión publicada.** Commit `bdff80f`; despliegue de
+producción `dpl_9SsPE3gwZKHvAWxeMjVX2Ty8y9Q2` en estado `Ready`.
