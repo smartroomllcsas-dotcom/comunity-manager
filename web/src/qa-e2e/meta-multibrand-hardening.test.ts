@@ -70,6 +70,9 @@ vi.mock("@/lib/whatsapp-cm", () => ({
     display_phone_number: "+57 300 000 0000",
     verified_name: "Empresa QA",
   }),
+  // La suscripción de la WABA ahora forma parte del éxito de la ruta: sin este
+  // doble, el camino feliz responde 502 «suscripción rechazada».
+  subscribeWabaToWebhook: async () => ({ success: true }),
 }));
 vi.mock("@/lib/meta", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/meta")>();

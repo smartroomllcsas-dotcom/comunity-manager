@@ -5892,3 +5892,962 @@ WhatsApp conserva su flujo de Embedded Signup y crea su propio canal
 4. Conectar WhatsApp desde la tarjeta de Smart Digital y enviar un mensaje de
    prueba al número conectado.
 5. Confirmar que Smart Sends Express sigue recibiendo sus propios mensajes.
+
+---
+
+# Iteración 22 · Auditoría multimarcas: «conectado» tiene que significar operativo
+
+Auditoría de la conexión multimarcas de Messenger, Instagram y WhatsApp, a
+partir del defecto de la iteración 21 y del commit `e1db3ef`. El encargo era
+verificar si esa corrección bastaba. **No bastaba.**
+
+## 155. Causa raíz
+
+El defecto observado tenía dos mitades, y `e1db3ef` sólo cerró una.
+
+**Mitad temporal (cerrada por `e1db3ef`).** El canal operativo de
+`smarttalk.channels` se creaba en `/api/channels/sync-legacy`, que sólo corre
+cuando alguien abre `/clients` y `useChannels` lo dispara. Entre el «conectado»
+y el canal había una ventana real —15 segundos en el caso de Smartroom LLC SAS,
+página `965702033291260`— en la que el webhook aceptaba el evento y no
+encontraba destino:
+
+```text
+[meta-webhook] no matching smarttalk channel
+```
+
+`ensureMetaChannelsReady` crea ahora esas filas antes de redirigir.
+
+**Mitad lógica (abierta hasta esta iteración).** Crear la fila deja el canal
+listo para *recibir*, pero no hace que Meta *envíe*. Quien decide eso es
+`POST /{activo}/subscribed_apps`. Y esa llamada vivía dentro de un
+`try { } catch { console.warn }`:
+
+```ts
+try {
+  await subscribePageToApp(page.id, page.access_token)
+} catch (subscriptionError) {
+  console.warn('[meta-oauth] page subscription failed', subscriptionError)   // ← y seguía
+}
+```
+
+Si Meta rechazaba la suscripción, la interfaz mostraba «Facebook conectado: X»,
+el canal quedaba `active`, el cupo del plan se consumía y **no llegaba ni un
+mensaje, nunca**. Un fallo permanente e invisible, peor que la ventana de 15
+segundos: aquella se cerraba sola al abrir /clients.
+
+La causa raíz común a las dos mitades es la misma: **el éxito se declaraba a
+partir de lo que la aplicación había escrito, no de lo que el proveedor había
+confirmado.**
+
+## 156. Riesgos encontrados
+
+Ocho defectos. Los cuatro primeros producen «conectado» sin recepción; el resto
+son las condiciones que lo hacen posible o irrecuperable.
+
+| # | Dónde | Qué pasaba | Gravedad |
+|---|---|---|---|
+| R1 | `meta-oauth-handler.ts` | `subscribePageToApp` y `subscribeInstagramAccountToApp` con el error atrapado en un `console.warn`: éxito mostrado sin suscripción | Crítica |
+| R2 | `api/auth/instagram/callback/route.ts` | El login directo de Instagram Business **no creaba ningún canal**: la ventana original de §21, intacta en otra ruta. Además tragaba el fallo de suscripción, no comprobaba conflicto de activo ni marca pausada | Crítica |
+| R3 | `auth/whatsapp/exchange/route.ts` | **Nunca** llamaba a `subscribeWabaToWebhook`. Creaba el canal `active` y respondía `success: true` esperando que alguien más suscribiera la WABA | Crítica |
+| R4 | `api/channels/whatsapp/connect/route.ts` | `subscribeWABAToApp` marcado «non-blocking»; además siempre `INSERT`, así que reconectar la misma marca chocaba con `uq_channels_whatsapp_phone` y devolvía «ya está conectado a otro canal» señalando a la propia marca. Sin `findAssetConflict` | Alta |
+| R5 | `meta-oauth-handler.ts` | `return finalizeMetaConnection(...)` dentro de `try/catch`: al no esperar la promesa, su rechazo quedaba **fuera** del catch. Cualquier fallo de escritura salía como 500 en blanco en vez de la redirección con `meta_error` | Alta |
+| R6 | `smarttalk.channels` | Sin unicidad en base para Page ID / Instagram ID. `findAssetConflict` es `SELECT` + `INSERT`: dos peticiones simultáneas leen lo mismo y ambas escriben. El resultado no es un error visible sino `ambiguous channel routing; refusing event` — pérdida silenciosa de **todos** los mensajes de esa página | Alta |
+| R7 | `meta-oauth-handler.ts` | Entre el `INSERT` de `cm_social_accounts` y el de `channels` no había compensación: un fallo del segundo dejaba la cuenta legacy escrita, que es justo lo que `/clients` pinta como «conectado» | Media |
+| R8 | `api/auth/meta/select-page/route.ts` | Devolvía `{ ok: true }` aunque `finalizeMetaConnection` hubiera redirigido con `meta_error`; y sin `try/catch`, un throw daba 500 sin cuerpo con la selección ya consumida | Media |
+
+Además, el OAuth de Meta y el login de Instagram eran los únicos caminos que
+seguían escribiendo canales en una **marca pausada**: `sync-legacy` ya se negaba
+y `/api/channels/whatsapp/connect` también. Conectar por ahí deshacía la pausa a
+medias y consumía su cupo.
+
+## 157. Correcciones implementadas
+
+### La suscripción forma parte del éxito
+
+Módulo nuevo `src/lib/meta/channel-activation.ts`. Tres decisiones que conviene
+dejar escritas porque no son obvias:
+
+1. **El canal se crea `active` ANTES de suscribir, no después.** Parece al
+   revés. Es lo seguro: mientras el activo no esté suscrito, Meta no envía
+   nada, así que un canal `active` sin suscripción no puede perder mensajes. El
+   orden inverso —suscribir primero, crear la fila después— reabre exactamente
+   la ventana de §21.
+2. **Si la suscripción falla, un canal NUEVO baja a `error`,** se guarda una
+   causa saneada en `config.activation_error` y se redirige con `meta_error`.
+   Nunca se muestra «conectado». El canal en `error` sigue reclamando el activo
+   (`findAssetConflict` sólo libera `disconnected`): una conexión a medias no
+   debe soltar la página para que otra marca la tome por accidente.
+3. **Un canal que YA estaba `active` no se degrada.** En una reconexión la
+   suscripción anterior sigue vigente y los mensajes siguen llegando; bajarlo a
+   `error` lo sacaría de `findMatchingChannel` —que filtra por `status =
+   'active'`— y provocaría justo la pérdida que se intenta evitar. Se informa el
+   fallo y se anota la causa, pero no se rompe lo que funciona.
+
+`sanitizeProviderError` limpia antes de que el texto llegue a una URL, a un log
+o a la base: quita `access_token=…`, los prefijos `EAA…`/`IGQ…`, cualquier cadena
+de 60+ caracteres, aplana el JSON y recorta a 160 caracteres. Hacía falta:
+`subscribeWABAToApp` construye su mensaje con `JSON.stringify(error)`, es decir,
+la respuesta completa de Meta.
+
+### Reintento
+
+- `POST /api/channels/[id]/retry-activation` reintenta **sólo** la suscripción,
+  con las credenciales ya guardadas. No pide tokens nuevos, no toca el activo,
+  no cambia de marca y no consume cupo. Necesario además porque en WhatsApp
+  Embedded Signup el `code` es de un solo uso: sin esta ruta, un fallo de
+  suscripción obligaba a rehacer todo el alta.
+- La ficha de canal (`/settings/channels`) muestra el aviso y el botón
+  «Reintentar activación» cuando `status === "error"`.
+
+### Aislamiento y concurrencia
+
+- `ensureMetaChannelsReady` devuelve ahora `{ id, type, assetId, wasActive }`
+  por canal —contrato con la activación— y traduce un `23505` al mensaje de
+  conflicto acordado en vez de propagar el texto de PostgreSQL.
+- Compensación en `finalizeMetaConnection` y en el callback de Instagram: si la
+  escritura del canal falla, la cuenta legacy nueva se borra y la preexistente
+  vuelve a sus valores anteriores (instantánea copiada **antes** del UPDATE).
+- `return await finalizeMetaConnection(...)` (R5).
+- Guarda de marca pausada en los tres caminos que faltaban.
+- `findAssetConflict` añadido a `/api/channels/whatsapp/connect` y al callback
+  de Instagram directo.
+- `/api/channels/whatsapp/connect` actualiza el canal existente en vez de
+  insertar siempre; `/auth/whatsapp/exchange` traduce el `23505` de
+  `uq_channels_whatsapp_phone` a un 409 `asset_already_connected`.
+- `select-page` devuelve `{ ok: false }` + 409 cuando el destino lleva
+  `meta_error`, y 500 con cuerpo explicable si `finalizeMetaConnection` lanza.
+
+### Estados
+
+`active` (suscrito y operativo), `error` (fallo recuperable, visible en la ficha
+con su acción de reintento), `disconnected` (no recibe y libera el activo).
+`pending` sigue siendo el valor por omisión de la columna, pero **el flujo de
+conexión no deja canales ahí**: dentro de la misma petición o queda `active` o
+queda `error`. Un `pending` persistente sería otra forma del mismo defecto —una
+fila que parece conectada y no recibe—.
+
+## 158. Migración propuesta (NO ejecutada)
+
+`supabase/migrations/20260814000100_038_meta_asset_uniqueness.sql`
+
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS ux_channels_meta_asset_active
+  ON smarttalk.channels(type, meta_business_id)
+  WHERE meta_business_id IS NOT NULL
+    AND status <> 'disconnected';
+```
+
+Por qué en base y no sólo en código: `findAssetConflict` es un `SELECT` seguido
+de un `INSERT`, y entre los dos cabe otra petición. WhatsApp ya estaba cubierto
+por `uq_channels_whatsapp_phone` (migración 013); Messenger e Instagram no
+tenían nada equivalente.
+
+Decisiones: parcial por `status` (un canal `disconnected` no reclama el activo;
+uno en `error` sí, porque es una conexión existente pendiente de activar);
+global y no por organización, porque Meta enruta por el activo y
+`findMatchingChannel` no filtra por agencia; con `type` en la tupla porque una
+página y una cuenta de Instagram comparten columna.
+
+La migración **aborta con un mensaje explícito** si ya hay duplicados en
+producción, en vez de fallar a medias. Para verlos, sin escribir nada:
+`node scripts/audit-meta-duplicates.mjs`. Reversión:
+`DROP INDEX IF EXISTS smarttalk.ux_channels_meta_asset_active;`. Es idempotente.
+
+**Queda lista para revisión de Codex. No se ejecutó.**
+
+## 159. Archivos
+
+Nuevos:
+
+- `src/lib/meta/channel-activation.ts`
+- `src/app/api/channels/[id]/retry-activation/route.ts`
+- `src/qa-e2e/meta-channel-activation.test.ts`
+- `supabase/migrations/20260814000100_038_meta_asset_uniqueness.sql` *(no ejecutada)*
+
+Modificados:
+
+- `src/lib/meta-oauth-handler.ts`
+- `src/lib/meta/channel-readiness.ts`
+- `src/app/api/auth/instagram/callback/route.ts`
+- `src/app/api/auth/meta/select-page/route.ts`
+- `src/app/auth/whatsapp/exchange/route.ts`
+- `src/app/api/channels/whatsapp/connect/route.ts`
+- `src/app/(dashboard)/settings/channels/page.tsx`
+- `src/lib/meta/channel-readiness.test.ts`
+- `src/qa-e2e/meta-multibrand-hardening.test.ts` *(el doble de `subscribeWabaToWebhook`, que la ruta ahora sí llama)*
+
+## 160. Pruebas ejecutadas y resultados
+
+```text
+npx vitest run src/lib/meta/channel-readiness.test.ts \
+  src/qa-e2e/meta-multibrand.test.ts \
+  src/qa-e2e/meta-multibrand-hardening.test.ts \
+  src/qa-e2e/channel-webhooks.test.ts \
+  src/qa-e2e/meta-channel-activation.test.ts
+
+ Test Files  5 passed (5)
+      Tests  174 passed (174)
+```
+
+```text
+npm test
+
+ Test Files  41 passed | 1 skipped (42)
+      Tests  868 passed | 4 skipped (872)
+# tests 25   # pass 6   # fail 0   # skipped 19   (node --test)
+```
+
+```text
+npm run lint
+✖ 172 problems (0 errors, 172 warnings)      ← 0 errores; ninguna advertencia en los archivos tocados
+
+npm run build
+✓ Compiled successfully in 9.6s
+├ ƒ /api/channels/[id]/retry-activation       ← la ruta nueva queda registrada
+```
+
+`src/qa-e2e/meta-channel-activation.test.ts` aporta **69 pruebas** repartidas en
+las diez secciones que pedía el encargo. Ninguna prueba se ejecutó contra
+producción; todas usan el Supabase en memoria de `qa-e2e/helpers`.
+
+## 161. Evidencia del aislamiento multimarcas
+
+Agencia sintética con **10 marcas**, cada una con su Page ID, su Instagram
+Business ID y su `phone_number_id` propios. Al conectarlas todas:
+
+- 30 canales exactos, uno por marca y tipo.
+- Los 30 activos distintos: `new Set(assets).size === assets.length`.
+- Los 30 con `organization_id` correcto y `brand_id` propio.
+- Los 30 suscritos (`page:`, `ig:` y `waba:` registrados por los dobles).
+- El mismo contacto escribiendo a dos marcas produce dos filas de `contacts`,
+  una por marca.
+- El token de cada marca queda sólo en su canal
+  (`enc:TOKEN-PAGINA-0` ≠ `enc:TOKEN-PAGINA-1`).
+- Reconectar la marca 0 deja los canales de la marca 1 **byte a byte idénticos**.
+- Una marca de otra agencia con la misma página ni bloquea ni se mezcla.
+- Un duplicado forzado hace que el webhook **rechace** el evento en vez de
+  elegir la primera coincidencia.
+
+Concurrencia, con el índice de la migración 038 emulado:
+
+| Escenario | Resultado |
+|---|---|
+| Dos marcas, misma página | 1 `meta_success` + 1 `meta_error`; 1 sola fila |
+| Dos marcas, mismo Instagram | 1 sola fila |
+| Dos marcas, mismo `phone_number_id` | `[200, 409]`; 409 con `code: asset_already_connected` |
+| Dos conexiones sobre la misma marca | 1 canal, 1 cuenta legacy |
+
+La perdedora recibe «ya está conectado a otra marca» y **no deja conexión
+parcial**: la compensación borra su cuenta legacy.
+
+La visibilidad por rol (asesor de marca ↔ marcas asignadas, administrador de
+agencia ↔ todas, superadministrador) no se duplicó aquí: ya la cubren
+`brand-isolation.test.ts`, `inbox-brand-visibility.test.ts` y
+`security-posture.test.ts`, que siguen en verde.
+
+## 162. Evidencia del webhook inmediato
+
+Para cada plataforma: conectar → entregar el webhook firmado en el acto →
+procesar la cola → comprobar la marca. Sin abrir `/clients`, sin `useChannels`,
+sin `sync-legacy`, sin recargar y sin cron.
+
+- **Messenger:** 200, un mensaje persistido, conversación con `brand_id` y
+  `organization_id` correctos.
+- **Instagram (vía página):** conversación ligada al `channel_id` del canal de
+  Instagram de esa marca.
+- **Instagram (login directo):** ídem — antes de esta iteración no había canal
+  que encontrar.
+- **WhatsApp:** el canal queda enrutable por `whatsapp_phone_number_id` y la
+  WABA suscrita al responder 200.
+- La cola queda en `processed`, no en `pending`.
+- Un mensaje a una página no conectada sigue sin encontrar canal (control
+  negativo).
+- Tras un fallo de suscripción y su reintento, el mensaje **sí** llega.
+
+## 163. Pendientes reales
+
+1. **La migración 038 no se ha ejecutado.** Hasta que se aplique, la garantía de
+   concurrencia para Page ID e Instagram ID es sólo de aplicación, y la carrera
+   de R6 sigue abierta en producción. Es lo más importante de esta lista.
+2. **Puede abortar por datos sucios.** El duplicado de §143
+   (`1117438298110765` en Smart Sends Express y Texar) sigue sin resolver y hará
+   fallar la migración a propósito. Hay que decidirlo antes de aplicarla.
+3. **`registerPhoneNumber` sigue sin bloquear** en `/api/channels/whatsapp/connect`.
+   Es deliberado —un número ya registrado devuelve error y eso es normal al
+   reconectar— y no afecta a la recepción de webhooks, pero conviene saberlo.
+4. **`fetchInstagramProfile` usa `graph.facebook.com`**, que no resuelve nombres
+   para tokens de Instagram Business Login. El mensaje llega y se enruta bien;
+   sólo el nombre del contacto cae al del payload.
+5. **`adAccounts[0]`** sigue eligiendo la primera cuenta publicitaria (§147).
+6. **Un canal en `error` sigue consumiendo cupo**, porque `channels.active`
+   cuenta todo lo que no esté `disconnected`. Es coherente —la conexión existe y
+   retiene el activo— pero es una decisión, no un efecto: para liberar el cupo
+   hay que desconectar el canal.
+7. **Sin verificación contra Meta real.** Todo está cubierto con dobles; la
+   confirmación de que Meta acepta la secuencia exacta requiere una prueba en la
+   organización QA tras el despliegue.
+
+## 164. Veredicto
+
+**APROBADO CON PENDIENTES.**
+
+Se cumplen los criterios de aceptación: no queda ventana entre «conectado» y
+«operativo»; la suscripción al webhook forma parte del éxito en las cuatro rutas
+de conexión; los tres canales funcionan sin cargar `/clients`; las reconexiones
+son idempotentes; las pruebas concurrentes no producen duplicados; el
+aislamiento entre organización, marca y canal está comprobado; no se pierden
+mensajes después de mostrar «conectado»; la suite (872) y la compilación pasan;
+y no hay cambios sin documentar.
+
+No es APROBADO a secas por un motivo concreto: **la garantía de concurrencia
+depende de una migración que aún no se ha ejecutado** (pendiente 1), y su
+aplicación está condicionada a resolver antes el duplicado de §143
+(pendiente 2). Mientras tanto, dos peticiones verdaderamente simultáneas sobre
+el mismo activo pueden seguir creando dos canales, con la pérdida silenciosa que
+eso implica.
+
+**No se hizo commit, push ni despliegue.** No se ejecutó ninguna migración ni se
+tocó dato alguno de producción.
+
+---
+
+# Iteración 23 · Bloqueos de la revisión de Codex sobre la iteración 22
+
+La revisión encontró tres bloqueos y pidió un cuarto grupo de pruebas. Los
+tres apuntan al mismo sitio: la iteración 22 hizo que el **backend** dejara de
+mentir sobre el estado del canal, pero no revisó quién lee ese estado ni qué
+pasa cuando el veredicto no se puede guardar.
+
+## 165. Hallazgos de Codex
+
+### B1 · La pantalla seguía decidiendo «conectado» desde el registro legacy
+
+`/clients` derivaba el estado de `cm_social_accounts` y `cm_whatsapp_accounts`:
+
+```tsx
+const facebookConnected = Boolean(
+  social?.page_id || social?.page_name ||
+  (metaTrace?.clientId === client.id && metaTrace?.page)
+)
+```
+
+Ninguna de las dos fuentes lo sabe. Son registros **legacy**: guardan lo que
+Meta autorizó, no lo que la plataforma puede recibir. `metaTrace` es todavía
+más débil —sale de los parámetros de la URL— y sólo dice que el usuario acaba
+de volver del diálogo.
+
+El efecto era el defecto de la iteración 22 **una capa más arriba**: con la
+suscripción rechazada, el backend dejaba el canal en `error` y redirigía con
+`meta_error`… y la tarjeta se pintaba verde igualmente, porque la fila legacy
+existía. Los cinco segundos de la notificación de error pasaban, y quedaba una
+marca «conectada» con la bandeja vacía y ninguna forma de saber por qué.
+
+### B2 · `patchChannel` ignoraba los errores de SELECT y UPDATE
+
+```ts
+await smarttalk.from("channels").update(patch).eq("id", channelId);   // sin comprobar
+```
+
+Supabase devuelve los errores en el resultado, no lanzando. Así que:
+
+- **Camino de éxito:** suscripción correcta + UPDATE rechazado ⇒ `ok: true` y
+  «conectado», sin que el estado se hubiera guardado.
+- **Camino de fallo:** suscripción rechazada + UPDATE rechazado ⇒ se informaba
+  un fallo recuperable sobre una fila que seguía diciendo `active`. La interfaz
+  y la base contaban cosas distintas.
+
+Es la misma clase de error que §150 («el error de lectura daba vía libre»),
+repetida en la escritura.
+
+### B3 · Una prueba afirmaba lo contrario que la migración 038
+
+`«una marca de otra agencia con la misma página no bloquea ni se mezcla»`
+esperaba `meta_success`. Pero la 038 impone unicidad **global** sobre
+`(type, meta_business_id)`, y a propósito: Meta enruta los webhooks por el
+activo, no por la organización, y `findMatchingChannel` no filtra por agencia.
+Dos agencias con la misma página producen `ambiguous channel routing` y
+**ninguna** recibe nada.
+
+La prueba habría pasado en verde mientras la migración fallaba en producción, o
+—peor— habría justificado no aplicarla.
+
+## 166. Correcciones
+
+### B1 · El estado sale de `smarttalk.channels`, y de ningún otro sitio
+
+Módulo puro nuevo `src/lib/smarttalk/brand-channel-status.ts`, con cuatro
+estados y una sola función autorizada para pintar verde:
+
+| Estado | Significa | Qué muestra la tarjeta |
+|---|---|---|
+| `active` | suscrito y recibiendo | Conectado (verde) |
+| `error` | autorizado, sin suscripción | Pendiente de activación (ámbar), causa y «Reintentar activación» |
+| `disconnected` | desconectado a propósito | Conectar |
+| `missing` | no hay canal | Conectar |
+
+`pending` —el valor por omisión de la columna— se normaliza a `error`: para
+quien mira la pantalla significan lo mismo. Cualquier estado desconocido cae
+también ahí: no se pinta verde algo que no se sabe leer.
+
+`isChannelConnected()` **no acepta el registro legacy**. Es deliberado: admitirlo
+como segunda fuente reabriría el defecto, así que la firma lo impide.
+
+`GET /api/cm/clients` —la ruta autenticada que ya cargaba las marcas— adjunta
+ahora `channels` por marca, vía `loadBrandChannelSummaries`, con los dos filtros
+obligatorios: `organization_id` y la lista de marcas del alcance del usuario
+(`getAgentBrandIds`), que la ruta ya calculaba. Nunca devuelve `access_token`,
+`access_token_ciphertext` ni el `config` completo: de `config` sólo sale
+`activation_error`, ya saneado.
+
+Si ese resumen no se puede leer, la ruta responde **500**. Devolver el listado
+sin él haría que la pantalla mostrara «Conectar» sobre canales que sí existen e
+invitara a reconectar un activo ya tomado.
+
+La pantalla usa el registro legacy sólo para el **detalle** —nombre de página,
+usuario de Instagram, número—, nunca para el estado. La tarjeta de WhatsApp
+pasó a `whatsapp?.verified_name`: ahora puede existir canal activo sin fila
+legacy, y con el acceso directo habría reventado.
+
+### B2 · `persistActivation` comprueba y propaga todo
+
+`patchChannel` pasa a llamarse `persistActivation` y devuelve
+`{ persisted, error }`. `ActivationFailure` gana el campo `persisted`, y
+`activateChannels` **nunca** responde `ok: true` si el veredicto no llegó a la
+base:
+
+- Suscripción correcta + persistencia fallida ⇒ `ok: false`, con la causa
+  «La suscripción se completó pero no se pudo guardar el estado del canal».
+- Suscripción fallida + persistencia fallida ⇒ las dos causas, unidas por
+  «Además, …».
+
+Un matiz que se mantiene a propósito: si falla el **SELECT** de `config`, se
+escribe igualmente el estado a secas. Si no se hiciera, un canal cuya
+suscripción acaba de fallar se quedaría en `active` —la marca diría que recibe y
+no recibiría—, que es exactamente el defecto original. Lo que no se hace es
+escribir `config` a ciegas: un objeto vacío borraría `legacy_id`, del que
+depende el enrutamiento del webhook. El fallo se reporta igual y el reintento,
+que es idempotente, completa los metadatos.
+
+### B3 · La prueba dice ahora lo que hace la migración
+
+Cinco pruebas en lugar de una, todas con el índice 038 emulado:
+
+- la misma página en otra agencia **queda bloqueada**: un solo canal con ese
+  activo en toda la plataforma;
+- el canal ganador de la otra agencia **no se modifica ni se elimina**
+  (comparación byte a byte de la fila antes y después);
+- la perdedora no deja conexión parcial: sin canal propio, sin cuenta legacy
+  —la compensación la borra— y sin suscripción;
+- el bloqueo **no revela** el nombre ni el identificador de la marca ajena
+  (`findAssetConflict` filtra por organización precisamente para eso, así que el
+  bloqueo llega de la base);
+- el webhook de esa página sigue llegando a la agencia que la tiene.
+
+Y una sexta documenta el riesgo residual: **sin** el índice, la conexión pasa,
+quedan dos canales con la misma página y el webhook descarta el evento por
+ambigüedad. Es la prueba que justifica aplicar la migración.
+
+## 167. Archivos
+
+Nuevos:
+
+- `src/lib/smarttalk/brand-channel-status.ts` — reglas puras, sin Supabase, compartidas por la ruta y el componente de cliente.
+- `src/lib/smarttalk/brand-channel-summary.ts` — carga con `service_role`, filtrada por organización y alcance de marcas.
+- `src/qa-e2e/brand-channel-status.test.ts` — 34 pruebas.
+
+Modificados:
+
+- `src/app/api/cm/clients/route.ts` — adjunta `channels` por marca; 500 si no se puede resumir.
+- `src/app/(agency)/clients/page.tsx` — estado desde `client.channels`; tarjeta de activación pendiente con causa y reintento en los tres canales; detalle de WhatsApp desacoplado de la fila legacy.
+- `src/lib/meta/channel-activation.ts` — `persistActivation`, `ActivationFailure.persisted`, `ok` condicionado a la persistencia.
+- `src/qa-e2e/meta-channel-activation.test.ts` — B3 y sus cinco pruebas nuevas.
+
+## 168. Pruebas ejecutadas y resultados
+
+```text
+npx vitest run src/qa-e2e/brand-channel-status.test.ts
+ Test Files  1 passed (1)
+      Tests  34 passed (34)
+
+npx vitest run src/qa-e2e/meta-channel-activation.test.ts
+ Test Files  1 passed (1)
+      Tests  74 passed (74)
+```
+
+```text
+npm test
+ Test Files  42 passed | 1 skipped (43)
+      Tests  907 passed | 4 skipped (911)
+# tests 25   # pass 6   # fail 0   # skipped 19   (node --test)
+
+npm run lint
+✖ 172 problems (0 errors, 172 warnings)      ← 0 errores; ninguna advertencia nueva
+
+npm run build
+✓ Compiled successfully in 17.7s
+```
+
+Cobertura de lo que pidió la revisión:
+
+| Requisito | Dónde |
+|---|---|
+| registro legacy + canal en `error` ⇒ NO dice conectado | §1 de `brand-channel-status.test.ts` |
+| Messenger, Instagram y WhatsApp en error ⇒ activación pendiente con causa | §2 (`it.each` sobre los tres) |
+| tras reintento exitoso ⇒ `active` y conectado | §3 (los tres canales) |
+| otra organización no consulta ni reintenta | §4 (listado, resumen, asesor, 404 del reintento, 401 sin sesión) |
+| fallo al persistir nunca devuelve éxito | §5 (UPDATE, SELECT, ambos, y el camino feliz como control) |
+| la pantalla usa esas reglas | §6, aserciones sobre `page.tsx` |
+
+## 169. Pendientes reales
+
+Siguen vigentes los de §163, con un cambio de matiz en el primero:
+
+1. **La migración 038 no se ha ejecutado.** Es lo único que cierra la carrera de
+   concurrencia sobre Page ID e Instagram ID —y, como ahora demuestra la última
+   prueba de §166, también el cruce entre agencias—.
+2. **El duplicado de §143** (`1117438298110765` en Smart Sends Express y Texar)
+   hará abortar la migración a propósito. Hay que resolverlo antes.
+3. `registerPhoneNumber` sigue sin bloquear (deliberado).
+4. `fetchInstagramProfile` usa `graph.facebook.com`, que no resuelve nombres con
+   tokens de Instagram Business Login. El mensaje llega y se enruta bien.
+5. `adAccounts[0]` sigue eligiendo la primera cuenta publicitaria (§147).
+6. Un canal en `error` sigue consumiendo cupo: la conexión existe y retiene el
+   activo. Para liberarlo hay que desconectarlo.
+7. Sin verificación contra Meta real: todo con dobles.
+
+Nuevo, menor:
+
+8. `/settings/channels` y `/clients` ofrecen ahora el reintento por separado, con
+   textos propios. Si en el futuro se unifican, conviene extraer el componente.
+
+## 170. Veredicto
+
+**APROBADO CON PENDIENTES.**
+
+Los tres bloqueos quedan corregidos y cubiertos por pruebas que fallan si se
+revierte cualquiera de ellos:
+
+- «conectado» sólo se muestra cuando `smarttalk.channels` dice `active`, en los
+  tres canales y respetando organización y alcance de marcas;
+- `activateChannels` no informa éxito si el veredicto no quedó persistido;
+- la prueba de agencias cruzadas afirma lo mismo que la migración 038, y se
+  añadió la que justifica aplicarla.
+
+Se mantiene «con pendientes» por la misma razón que en §164, ahora mejor
+documentada: **la garantía de concurrencia depende de la migración 038, que no
+se ha ejecutado**, y su aplicación está condicionada a resolver antes el
+duplicado de §143.
+
+**No se hizo commit, push ni despliegue. No se aplicó ninguna migración.** Queda
+listo para revisión.
+
+---
+
+# Iteración 24 · La identidad del activo, y el indicador que la delata
+
+Un solo bloqueo, con tres consecuencias. La revisión encontró que `wasActive`
+—el interruptor que decide si un fallo de suscripción puede dejar un canal en
+`active`— miraba únicamente el estado de la fila.
+
+## 171. Hallazgo de Codex
+
+```ts
+const wasActive = matches[0].status === "active"   // ← insuficiente
+```
+
+Con eso, dos situaciones que no se parecen en nada eran indistinguibles:
+
+| Situación | Qué hay que hacer si la suscripción falla |
+|---|---|
+| Canal activo con **Página A**, se reconecta la **Página A** | Conservar `active`: la suscripción anterior sigue vigente y el canal sigue recibiendo. Degradarlo lo sacaría de `findMatchingChannel` y provocaría la pérdida que se intenta evitar. |
+| Canal activo con **Página A**, se conecta la **Página B** | Dejar en `error`: es un activo **nuevo**, no hay ninguna suscripción que lo cubra, y el canal ya apunta a B. |
+
+El código trataba las dos como la primera. El resultado: cambiar de página —o
+de cuenta de Instagram, o mover el número a otro WABA— y que Meta rechazara la
+suscripción dejaba el canal en `active` apuntando a un activo por el que no
+llegaba nada. **«Conectado» sobre un canal mudo, colado por la puerta de la
+reconexión**, que es el mismo defecto de la iteración 22 por su único camino
+sin cubrir.
+
+De ahí salieron dos requisitos más:
+
+- **B2.** El resumen que consume `/clients` no leía `config.webhook_subscribed`.
+  Un canal que se quede en `active` con la suscripción rechazada —porque el
+  UPDATE a `error` no llegó a escribirse, por ejemplo— se pintaba verde.
+- **B3.** Al reconectar el mismo activo, un fallo transitorio escribía
+  `webhook_subscribed: false`. Combinado con B2, eso habría pintado «pendiente
+  de activación» un canal que sigue recibiendo perfectamente.
+
+## 172. Correcciones
+
+### La identidad, en una sola regla
+
+`wasAssetOperational()` en `channel-activation.ts`. Tres condiciones, todas
+obligatorias:
+
+1. el canal estaba `active`;
+2. `config.webhook_subscribed` **no** es `false` —un canal `active` cuya última
+   activación se sabe fallida no estaba operativo, estaba por inercia—;
+3. **todos** los identificadores del activo coinciden, y ninguno está vacío: un
+   identificador ausente no demuestra identidad.
+
+Los identificadores no son uno por canal:
+
+| Canal | Identidad | Por qué |
+|---|---|---|
+| Messenger | `meta_business_id` (respaldo: `config.legacy_id`) | Page ID |
+| Instagram | igual | Instagram Business ID |
+| WhatsApp | `whatsapp_phone_number_id` **y** `whatsapp_business_account_id` | La suscripción va contra el **WABA**. Un número puede moverse de una cuenta a otra, y entonces la suscripción anterior no cubre la nueva |
+
+Ese último caso es el que más fácilmente se habría escapado:
+`/auth/whatsapp/exchange` busca el canal **por número**, así que el número
+siempre coincide y parecía suficiente. No lo es.
+`/api/channels/whatsapp/connect` es aún más laxo —busca por marca y tipo—, y su
+canal puede apuntar a un número y un WABA completamente distintos.
+
+Aplicado en los cuatro puntos de conexión: `ensureMetaChannelsReady`,
+`ensureInstagramChannelReady` (login directo de Instagram),
+`/auth/whatsapp/exchange` y `/api/channels/whatsapp/connect`.
+
+**Y el `config` deja de heredarse a ciegas.** Al cambiar de activo, los
+indicadores de la suscripción vieja se sueltan: arrastrar
+`webhook_subscribed: true` de la Página A haría pasar por operativa una Página B
+que aún no lo es. Cuando el activo no cambia, se conservan.
+
+### `active` ya no basta para pintar verde
+
+`normalizeState` recibe ahora `webhook_subscribed`:
+
+```
+disconnected            → disconnected
+active + false          → error        ← nuevo
+active + true / ausente → active
+resto (error, pending…) → error
+```
+
+Sólo el `false` **explícito** degrada. Un canal histórico, creado antes de que
+existiera el indicador, no tiene el campo y sigue mostrándose conectado:
+degradarlos a todos convertiría una mejora de precisión en una alarma masiva
+sobre canales que funcionan. Un valor corrupto —cualquier cosa que no sea un
+booleano— se trata igual que ausente; el filtro está en
+`brand-channel-summary.ts`.
+
+### Un fallo transitorio no borra el indicador operativo
+
+`activateChannels` escribe cosas distintas según el caso:
+
+| Caso | `status` | `webhook_subscribed` | Dónde queda la causa |
+|---|---|---|---|
+| Suscripción correcta | `active` | `true` | se limpian `activation_error` y `activation_warning` |
+| Fallo, activo nuevo | `error` | `false` | `activation_error` |
+| Fallo, mismo activo ya operativo | sin tocar | **sin tocar** | `activation_warning` |
+
+La advertencia es un campo separado a propósito: el canal recibe, así que no
+tiene nada «pendiente de activación», pero el operador sí debe poder ver que el
+último intento de renovar la suscripción falló. Una activación posterior
+correcta la borra.
+
+## 173. Archivos
+
+- `src/lib/meta/channel-activation.ts` — `wasAssetOperational()`; escritura diferenciada por caso; limpieza de la advertencia al activar.
+- `src/lib/meta/channel-readiness.ts` — identidad del activo en Messenger e Instagram (incluido el login directo); `config` heredado sólo si el activo no cambia.
+- `src/app/auth/whatsapp/exchange/route.ts` — identidad número + WABA.
+- `src/app/api/channels/whatsapp/connect/route.ts` — ídem, sobre una búsqueda que ni siquiera filtraba por número.
+- `src/lib/smarttalk/brand-channel-status.ts` — `webhook_subscribed` en el estado.
+- `src/lib/smarttalk/brand-channel-summary.ts` — lo extrae de `config`, sólo si es booleano.
+- `src/qa-e2e/meta-channel-activation.test.ts` — sección «3 bis» y ampliación de la 3.
+- `src/qa-e2e/brand-channel-status.test.ts` — sección «1 bis».
+
+## 174. Pruebas ejecutadas y resultados
+
+```text
+npx vitest run src/qa-e2e/meta-channel-activation.test.ts
+ Test Files  1 passed (1)
+      Tests  89 passed (89)
+
+npx vitest run src/qa-e2e/brand-channel-status.test.ts
+ Test Files  1 passed (1)
+      Tests  47 passed (47)
+```
+
+```text
+npm test
+ Test Files  42 passed | 1 skipped (43)
+      Tests  935 passed | 4 skipped (939)
+# tests 25   # pass 6   # fail 0   # skipped 19   (node --test)
+
+npm run lint
+✖ 172 problems (0 errors, 172 warnings)      ← 0 errores; ninguna advertencia nueva
+
+npm run build
+✓ Compiled successfully in 10.7s
+```
+
+Cobertura de lo que pidió la revisión:
+
+| Requisito | Prueba |
+|---|---|
+| Página A activa → Página B falla ⇒ `error` y `/clients` no muestra conectado | «Messenger: /clients NO muestra conectado tras cambiar a un activo que falla» — consulta la ruta real antes y después |
+| Instagram A activa → Instagram B falla ⇒ `error` y activación pendiente | dos pruebas: flujo por página y login directo, más la vista de `/clients` |
+| Reconectar exactamente la Página A y fallar ⇒ conserva la operación | «reconectar el MISMO activo y fallar deja /clients mostrando conectado», más la que comprueba que se escribe `activation_warning` y **no** `webhook_subscribed: false` |
+| `active` + `webhook_subscribed=false` ⇒ `isChannelConnected=false` | `it.each` sobre los tres canales, más el histórico sin el campo y el valor corrupto |
+| Messenger, Instagram y WhatsApp | los tres en cada bloque; WhatsApp incluye el caso «mismo número, otro WABA» |
+
+Complementarias: `wasAssetOperational` con sus ocho combinaciones; cambiar de
+activo **con éxito** sí conecta y limpia los indicadores viejos; un canal
+`active` con `webhook_subscribed: false` no protege al activo nuevo; y entre
+duplicados gana el que sí está suscrito.
+
+## 175. Pendientes reales
+
+Sin cambios respecto de §169. Los dos primeros siguen siendo los que importan:
+
+1. **La migración 038 no se ha ejecutado.**
+2. **El duplicado de §143** (`1117438298110765` en Smart Sends Express y Texar)
+   la hará abortar a propósito; hay que resolverlo antes.
+3. `registerPhoneNumber` sigue sin bloquear (deliberado).
+4. `fetchInstagramProfile` usa `graph.facebook.com`, que no resuelve nombres con
+   tokens de Instagram Business Login.
+5. `adAccounts[0]` sigue eligiendo la primera cuenta publicitaria (§147).
+6. Un canal en `error` sigue consumiendo cupo.
+7. Sin verificación contra Meta real: todo con dobles.
+8. El reintento vive en dos pantallas con textos propios (§169.8).
+
+Nuevo, menor:
+
+9. `config.activation_warning` no se muestra en ninguna pantalla todavía: queda
+   en la fila para diagnóstico. Mostrarlo exigiría decidir dónde avisar de algo
+   que no impide recibir, y esa decisión es de negocio.
+
+## 176. Veredicto
+
+**APROBADO CON PENDIENTES.**
+
+El bloqueo queda corregido en sus tres partes, con pruebas que fallan si se
+revierte cualquiera de ellas: la identidad del activo decide si un fallo puede
+conservar la operación, el indicador `webhook_subscribed` manda sobre la columna
+`status` a la hora de pintar verde, y un fallo transitorio sobre el mismo activo
+ya no borra el indicador operativo.
+
+Se mantiene «con pendientes» por lo mismo que en §164 y §170: **la garantía de
+concurrencia depende de la migración 038, que no se ha ejecutado**, y su
+aplicación está condicionada a resolver antes el duplicado de §143.
+
+**No se hizo commit, push ni despliegue. No se aplicó ninguna migración.** Queda
+listo para revisión.
+
+---
+
+# Iteración 25 · El canal nace no-conectado
+
+Último caso en el que un canal podía aparecer como «Conectado» sin que su
+webhook hubiera quedado suscrito. Cierra la serie abierta en la iteración 22.
+
+## 177. Hallazgo
+
+La regla de compatibilidad de §166 —«`webhook_subscribed` ausente significa
+canal histórico, y no se degrada por no saber»— dejaba una ventana que ninguna
+de las correcciones anteriores tocaba.
+
+El orden de una conexión es:
+
+1. `ensureMetaChannelsReady` crea o actualiza la fila con `status: 'active'`,
+   para que un webhook inmediato encuentre su canal;
+2. se llama a Meta (`subscribed_apps`);
+3. `persistActivation` guarda el veredicto.
+
+Entre 1 y 3, `config.webhook_subscribed` **no existía**. Si el paso 3 fallaba
+—un `permission denied`, un timeout, la propia base caída— la fila se quedaba
+en `active` sin el campo. Y sin el campo, el resumen que consume `/clients` la
+trataba como canal histórico y la pintaba verde.
+
+Es decir: exactamente el defecto original —«conectado» sobre un canal cuyo
+webhook nunca se suscribió— reproducible con un único fallo de escritura, y
+además **invisible**, porque el estado de la fila era coherente consigo mismo.
+La iteración 23 hizo que `activateChannels` devolviera `ok: false` en ese caso,
+pero eso sólo afecta al mensaje de la petición en curso; la fila quedaba mal
+para siempre y la pantalla la creía.
+
+## 178. Corrección
+
+**El canal nace no-conectado.** `PENDING_SUBSCRIPTION_CONFIG`
+(`{ webhook_subscribed: false, webhook_subscribed_at: null }`) se escribe
+**antes** de llamar al proveedor, sobre todo canal nuevo y sobre todo canal
+cuyo activo acaba de cambiar —Page ID, Instagram Business ID, número de
+WhatsApp o WABA ID—.
+
+Eso invierte la carga de la prueba: sólo una suscripción confirmada asciende el
+canal a conectado. Si algo se rompe por el camino —el proveedor, la red o la
+base—, el estado que queda es el prudente.
+
+`status` sigue siendo `active` desde el primer momento, y eso **no cambia**: es
+lo que permite que un webhook inmediato encuentre su canal, que es la mitad
+temporal del defecto original (§155). Lo que cambia es que la interfaz no lo da
+por conectado hasta ver `webhook_subscribed` en `true`.
+
+### Reglas de estado, completas
+
+| Situación | `status` | `webhook_subscribed` | Causa |
+|---|---|---|---|
+| Antes de llamar al proveedor (activo nuevo o cambiado) | `active` | `false` | — |
+| Suscripción confirmada | `active` | `true` | se limpian `activation_error` y `activation_warning` |
+| Suscripción rechazada, activo nuevo o cambiado | `error` | `false` | `activation_error` |
+| Fallo del guardado final | (lo que hubiera) | **sigue `false`** | la petición responde `ok: false` |
+| Mismo activo ya operativo, reintento fallido | sin tocar | **sin tocar** (`true`) | `activation_warning` |
+
+La última fila es la que impide el falso negativo: un fallo transitorio al
+renovar la suscripción de la misma página no puede marcar como pendiente un
+canal que sigue recibiendo por la suscripción anterior.
+
+### Dónde se aplica
+
+- `src/lib/meta/channel-readiness.ts` — Messenger e Instagram conectado desde
+  una página (`ensureMetaChannelsReady`, en el INSERT y en el UPDATE) e
+  Instagram Business Login directo (`ensureInstagramChannelReady`, ídem).
+- `src/app/auth/whatsapp/exchange/route.ts` — Embedded Signup.
+- `src/app/api/channels/whatsapp/connect/route.ts` — el otro flujo de WhatsApp.
+
+En los cuatro, el `config` anterior se hereda **sólo** si el activo no cambia;
+al cambiar, el indicador se resetea junto con el resto de marcas de la
+suscripción vieja.
+
+## 179. Archivos
+
+- `src/lib/meta/channel-activation.ts` — `PENDING_SUBSCRIPTION_CONFIG`.
+- `src/lib/meta/channel-readiness.ts` — marca previa en los cuatro puntos de escritura (dos flujos × INSERT/UPDATE).
+- `src/app/auth/whatsapp/exchange/route.ts` — ídem.
+- `src/app/api/channels/whatsapp/connect/route.ts` — ídem.
+- `src/lib/meta/channel-readiness.test.ts` — 14 pruebas (antes 10).
+- `src/qa-e2e/meta-channel-activation.test.ts` — 96 pruebas (antes 89).
+- `src/qa-e2e/brand-channel-status.test.ts` — 60 pruebas (antes 47).
+
+Sin migraciones nuevas.
+
+## 180. Pruebas ejecutadas y resultados
+
+```text
+npx vitest run src/qa-e2e/meta-channel-activation.test.ts \
+  src/qa-e2e/brand-channel-status.test.ts \
+  src/lib/meta/channel-readiness.test.ts \
+  src/qa-e2e/meta-multibrand-hardening.test.ts
+
+ Test Files  4 passed (4)
+      Tests  189 passed (189)
+```
+
+```text
+npm test
+ Test Files  42 passed | 1 skipped (43)
+      Tests  959 passed | 4 skipped (963)
+# tests 25   # pass 6   # fail 0   # skipped 19   (node --test)
+
+npm run build
+✓ Compiled successfully in 17.6s
+
+npm run lint
+0 errores (172 advertencias preexistentes, ninguna nueva)
+
+git diff --check
+(sin salida: sin problemas de espacios en blanco)
+```
+
+### Los cuatro casos que pedía la revisión
+
+Los tres primeros consultan `loadBrandChannelSummaries` —**el mismo resumen que
+usa `GET /api/cm/clients`**— y comprueban las tres condiciones: `state` distinto
+de `active`, `isChannelConnected` en `false` y `needsActivation` en `true`, de
+modo que `/clients` no puede mostrar «Conectado». Cada uno con `it.each` sobre
+Messenger, Instagram y WhatsApp (§7 de `brand-channel-status.test.ts`):
+
+| Caso | Qué demuestra |
+|---|---|
+| Canal nuevo + proveedor rechaza + falla el UPDATE final | La fila se queda en `active` porque el UPDATE no llegó, pero el `false` escrito de antemano impide que se muestre conectada |
+| Activo cambiado + proveedor rechaza + falla el UPDATE final | Igual, sobre un canal que existía y cuya página cambió |
+| Proveedor confirma + falla el guardado final | La suscripción existe en Meta pero no se pudo dejar constancia: no se afirma «conectado» sobre algo que no se pudo comprobar |
+| Mismo activo operativo + reintento fallido | `status` sigue `active`, `webhook_subscribed` sigue `true`, el problema queda en `activation_warning`, y el resumen **sí** lo da por conectado |
+
+### El orden, comprobado
+
+§11 de `meta-channel-activation.test.ts` verifica lo que realmente importa —que
+la marca se escribe **antes** de la llamada, no después—: el doble del proveedor
+registra el valor de `webhook_subscribed` en el instante mismo de la
+invocación. Cubre los cuatro flujos de conexión (Messenger, Instagram desde
+página, Instagram directo y WhatsApp Embedded Signup), más el reseteo al cambiar
+de activo y la conservación del `true` al reconectar el mismo.
+
+`channel-readiness.test.ts` añade el contrato en la capa de escritura: un canal
+nuevo nace con el indicador en `false`; una reconexión sobre un canal **creado
+pero nunca suscrito** no cuenta como operativa; una sobre uno ya suscrito sí y
+conserva el indicador; y cambiar de activo lo resetea.
+
+## 181. Estado de la migración 038 — corrección de pendientes
+
+**La migración 038 fue aplicada y validada.** El índice confirmado en
+producción es:
+
+```
+smarttalk.ux_channels_meta_asset_active
+```
+
+Con eso quedan **cerrados** los dos pendientes que encabezaban §163, §169 y
+§175:
+
+- ~~«La migración 038 no se ha ejecutado»~~ → aplicada y validada.
+- ~~«El duplicado de §143 la hará abortar»~~ → resuelto; el índice existe, luego
+  no quedaban duplicados sobre `(type, meta_business_id)` con `status <>
+  'disconnected'`.
+
+La garantía de concurrencia sobre Page ID e Instagram ID ya no depende de
+código: la impone PostgreSQL. `uq_channels_whatsapp_phone` (migración 013) cubre
+el número de WhatsApp desde antes.
+
+No se ha creado ninguna migración adicional en esta iteración.
+
+## 182. Pendientes reales
+
+1. `registerPhoneNumber` sigue sin bloquear en
+   `/api/channels/whatsapp/connect`. Es deliberado —un número ya registrado
+   devuelve error y eso es normal al reconectar— y no afecta a la recepción de
+   webhooks.
+2. `fetchInstagramProfile` usa `graph.facebook.com`, que no resuelve nombres con
+   tokens de Instagram Business Login. El mensaje llega y se enruta bien; sólo
+   el nombre del contacto cae al del payload.
+3. `adAccounts[0]` sigue eligiendo la primera cuenta publicitaria (§147).
+4. Un canal en `error` sigue consumiendo cupo: la conexión existe y retiene el
+   activo. Para liberarlo hay que desconectarlo.
+5. El reintento vive en dos pantallas —`/clients` y `/settings/channels`— con
+   textos propios. Si se unifican, conviene extraer el componente.
+6. `config.activation_warning` no se muestra en ninguna pantalla: queda en la
+   fila para diagnóstico. Mostrarlo exige decidir dónde avisar de algo que no
+   impide recibir, y esa decisión es de negocio.
+7. Sin verificación contra Meta real: toda la cobertura usa dobles. La
+   confirmación de que Meta acepta la secuencia exacta requiere una prueba en la
+   organización QA tras el despliegue.
+
+Ninguno bloquea.
+
+## 183. Veredicto
+
+**APROBADO.**
+
+Se cumplen los criterios de aceptación de la serie completa:
+
+- no queda ventana entre «conectado» y «operativo» —ni temporal, porque el canal
+  se crea antes de redirigir, ni lógica, porque la suscripción forma parte del
+  éxito, ni de persistencia, porque el canal nace no-conectado y sólo una
+  confirmación guardada lo asciende—;
+- los tres canales funcionan sin cargar `/clients`;
+- las reconexiones son idempotentes y distinguen el mismo activo de uno nuevo;
+- las pruebas concurrentes no producen duplicados, y ahora la garantía la impone
+  el índice `smarttalk.ux_channels_meta_asset_active`, ya aplicado;
+- hay aislamiento comprobado entre organización, marca y canal;
+- no se pierden mensajes después de mostrar «conectado»;
+- la suite (963) y la compilación pasan;
+- no hay cambios sin documentar.
+
+Los pendientes de §182 son mejoras conocidas y acotadas, ninguna relacionada con
+el defecto de esta serie.
+
+**No se hizo commit, push ni despliegue. No se ejecutó SQL ni migración
+alguna.** Queda listo para revisión de Codex.

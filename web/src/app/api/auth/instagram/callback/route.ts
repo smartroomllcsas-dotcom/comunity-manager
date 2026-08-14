@@ -10,6 +10,10 @@ import { encryptToken } from '@/lib/auth/token-crypto'
 import { getCmClientAccess } from '@/lib/cm-client-access'
 import { billingDeniedResponse, checkBillingFeature } from '@/lib/billing/service'
 import { BILLING_FEATURES } from '@/lib/billing/features'
+import { findAssetConflict } from '@/lib/meta/asset-conflicts'
+import { ensureInstagramChannelReady } from '@/lib/meta/channel-readiness'
+import { activateChannels, activationErrorMessage } from '@/lib/meta/channel-activation'
+import { isPausedBrandStatus } from '@/lib/smarttalk/brand-status'
 
 const REDIRECT_URI_FALLBACK = 'https://www.comunitymanager.io/'
 
@@ -117,23 +121,58 @@ export async function GET(request: NextRequest) {
 
     if (clientId) {
       const publicAdmin = createAdminClient('public')
+
+      const { data: client } = await publicAdmin
+        .from('cm_clients')
+        .select('user_id, name, status')
+        .eq('id', clientId)
+        .maybeSingle()
+
+      // Una marca inactiva no recupera canales por la puerta de atrás.
+      if (isPausedBrandStatus((client as { status?: string | null } | null)?.status)) {
+        return NextResponse.redirect(
+          `${appUrl}/clients?meta_error=${encodeURIComponent(
+            'Esta marca está inactiva. Reactívala antes de conectar canales.'
+          )}`
+        )
+      }
+
+      // Un activo pertenece a una sola marca. Este flujo no lo comprobaba: la
+      // misma cuenta de Instagram podía quedar en dos marcas y el webhook
+      // acababa rechazando el evento por ambigüedad.
+      const conflict = await findAssetConflict({
+        kind: 'instagram_account',
+        assetId: profile.id,
+        organizationId: access.organizationId,
+        brandId: clientId,
+      })
+      if (conflict) {
+        return NextResponse.redirect(
+          `${appUrl}/clients?meta_error=${encodeURIComponent(conflict.message)}`
+        )
+      }
+
       const { data: existing } = await publicAdmin
         .from('cm_social_accounts')
         .select('*')
         .eq('client_id', clientId)
         .maybeSingle()
+      const previousSocial = existing ? { ...(existing as Record<string, unknown>) } : null
 
       const tokenExpiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null
+      const connectedAt = new Date().toISOString()
+      const tokenCiphertext = encryptToken(longTokenStr)
       const socialData = {
         client_id: clientId,
         access_token: null as string | null,
-        access_token_ciphertext: encryptToken(longTokenStr),
+        access_token_ciphertext: tokenCiphertext,
         instagram_id: profile.id,
         instagram_username: profile.username,
-        connected_at: new Date().toISOString(),
+        connected_at: connectedAt,
         token_expires_at: tokenExpiresAt,
       }
 
+      let legacyAccountId = (existing as { id?: string } | null)?.id || null
       if (existing) {
         const { error: updateError } = await publicAdmin
           .from('cm_social_accounts')
@@ -143,29 +182,81 @@ export async function GET(request: NextRequest) {
           throw updateError
         }
       } else {
-        const { error: insertError } = await publicAdmin.from('cm_social_accounts').insert(socialData)
+        const { data: insertedAccount, error: insertError } = await publicAdmin
+          .from('cm_social_accounts')
+          .insert(socialData)
+          .select('id')
+          .single()
         if (insertError) {
           throw insertError
         }
+        legacyAccountId = (insertedAccount as { id?: string } | null)?.id || null
       }
 
+      // El canal operativo, antes de declarar el éxito.
+      //
+      // Esta ruta no creaba ninguno: la marca aparecía «conectada» y el canal
+      // no existía hasta que alguien abría /clients y `useChannels` disparaba
+      // `sync-legacy`. Cualquier mensaje enviado en esa ventana llegaba al
+      // webhook y no encontraba destino.
+      let readyChannel
       try {
-        await subscribeInstagramAccountToApp(profile.id, longTokenStr)
-      } catch (subscriptionError) {
-        console.warn('[ig-oauth-callback] instagram subscription failed', subscriptionError)
+        readyChannel = await ensureInstagramChannelReady({
+          organizationId: access.organizationId,
+          brandId: clientId,
+          legacyAccountId,
+          instagram: { id: profile.id, username: profile.username },
+          accessTokenCiphertext: tokenCiphertext,
+          connectedAt,
+          tokenExpiresAt,
+        })
+      } catch (channelError) {
+        try {
+          if (previousSocial) {
+            await publicAdmin
+              .from('cm_social_accounts')
+              .update(previousSocial)
+              .eq('id', previousSocial.id)
+          } else if (legacyAccountId) {
+            await publicAdmin.from('cm_social_accounts').delete().eq('id', legacyAccountId)
+          }
+        } catch (rollbackError) {
+          console.error('[ig-oauth-callback] no se pudo revertir la cuenta legacy', rollbackError)
+        }
+        const detail = channelError instanceof Error ? channelError.message : 'Error desconocido'
+        return NextResponse.redirect(
+          `${appUrl}/clients?meta_error=${encodeURIComponent(detail)}`
+        )
       }
 
-      const { data: client } = await publicAdmin
-        .from('cm_clients')
-        .select('user_id, name')
-        .eq('id', clientId)
-        .single()
+      // La suscripción forma parte del éxito: antes su fallo sólo dejaba un
+      // `console.warn` y la interfaz seguía diciendo «Instagram conectado».
+      const activation = await activateChannels([
+        {
+          channelId: readyChannel.id,
+          asset: 'instagram_account',
+          assetId: profile.id,
+          wasActive: readyChannel.wasActive,
+          subscribe: () => subscribeInstagramAccountToApp(profile.id, longTokenStr),
+        },
+      ])
+
       if (client) {
         await publicAdmin.from('cm_activity_log').insert({
-          user_id: client.user_id,
-          action: `Instagram conectado: @${profile.username} para ${client.name}`,
-          status: 'success',
+          user_id: (client as { user_id?: string }).user_id,
+          action: activation.ok
+            ? `Instagram conectado: @${profile.username} para ${(client as { name?: string }).name}`
+            : `Instagram pendiente de activación: @${profile.username} · ${activation.failures[0]?.cause}`,
+          status: activation.ok ? 'success' : 'error',
         })
+      }
+
+      if (!activation.ok) {
+        return NextResponse.redirect(
+          `${appUrl}/clients?meta_error=${encodeURIComponent(
+            activationErrorMessage(activation.failures)
+          )}&meta_client_id=${encodeURIComponent(clientId)}&meta_flow=instagram`
+        )
       }
 
       return NextResponse.redirect(

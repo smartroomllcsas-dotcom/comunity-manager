@@ -1,11 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { findAssetConflict } from '@/lib/meta/asset-conflicts'
-import { exchangeWhatsAppCode, getPhoneNumberDetails } from '@/lib/whatsapp-cm'
+import {
+  exchangeWhatsAppCode,
+  getPhoneNumberDetails,
+  subscribeWabaToWebhook,
+} from '@/lib/whatsapp-cm'
 import { getCmClientAccess } from '@/lib/cm-client-access'
 import { encryptToken } from '@/lib/auth/token-crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { billingDeniedResponse, checkBillingFeature } from '@/lib/billing/service'
 import { BILLING_FEATURES } from '@/lib/billing/features'
+import {
+  activateChannels,
+  activationErrorMessage,
+  wasAssetOperational,
+  PENDING_SUBSCRIPTION_CONFIG,
+} from '@/lib/meta/channel-activation'
+import { isPausedBrandStatus } from '@/lib/smarttalk/brand-status'
 
 interface ExchangeRequestBody {
   code?: string
@@ -58,6 +69,26 @@ export async function POST(request: NextRequest) {
       verifiedName = details.verified_name ?? null
     } catch (err) {
       console.warn('[wa-exchange] no se pudo obtener detalles del número:', err)
+    }
+
+    // Una marca inactiva no recupera canales por la puerta de atrás. Igual que
+    // en `/api/channels/whatsapp/connect` y en el OAuth de Meta.
+    const { data: brandRow, error: brandError } = await publicAdmin
+      .from('cm_clients')
+      .select('status')
+      .eq('id', client_id)
+      .maybeSingle()
+    if (brandError) {
+      throw new Error(`No se pudo verificar el estado de la marca: ${brandError.message}`)
+    }
+    if (isPausedBrandStatus((brandRow as { status?: string | null } | null)?.status)) {
+      return NextResponse.json(
+        {
+          error: 'inactive_brand',
+          message: 'Esta marca está inactiva. Reactívala antes de conectar canales.',
+        },
+        { status: 409 }
+      )
     }
 
     // Un número activo no puede estar en dos marcas a la vez.
@@ -136,7 +167,7 @@ export async function POST(request: NextRequest) {
     // duplicados vive en scripts/audit-meta-duplicates.mjs.
     const { data: existingChannels, error: existingChannelError } = await smarttalkAdmin
       .from('channels')
-      .select('id, organization_id, brand_id')
+      .select('id, organization_id, brand_id, status, whatsapp_phone_number_id, whatsapp_business_account_id, config')
       .eq('whatsapp_phone_number_id', phone_number_id)
     if (existingChannelError) {
       throw new Error(`No se pudo consultar el canal de WhatsApp: ${existingChannelError.message}`)
@@ -145,6 +176,10 @@ export async function POST(request: NextRequest) {
       id: string
       organization_id: string
       brand_id: string
+      status: string
+      whatsapp_phone_number_id: string | null
+      whatsapp_business_account_id: string | null
+      config: Record<string, unknown> | null
     }>).find(
       (channel) =>
         channel.organization_id === access.organizationId && channel.brand_id === client_id
@@ -162,17 +197,110 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const { error: channelError } = existingChannel
-      ? await smarttalkAdmin.from('channels').update(channelRecord).eq('id', existingChannel.id)
-      : await smarttalkAdmin.from('channels').insert(channelRecord)
-    if (channelError) {
-      throw new Error(`WhatsApp se guardó, pero no se pudo crear el canal: ${channelError.message}`)
+    // ¿Este canal ya recibía por ESTE número y ESTE WABA?
+    //
+    // La búsqueda ya filtra por `phone_number_id`, pero eso no basta: la
+    // suscripción va contra el WABA, y un número puede haberse movido de una
+    // cuenta a otra. Con el WABA cambiado la suscripción anterior no cubre la
+    // nueva, así que un fallo de resuscripción sí debe dejar el canal en error.
+    const wasOperational = wasAssetOperational({
+      status: existingChannel?.status,
+      config: existingChannel?.config,
+      assetPairs: [
+        [existingChannel?.whatsapp_phone_number_id, phone_number_id],
+        [existingChannel?.whatsapp_business_account_id, waba_id],
+      ],
+    })
+
+    let channelId = existingChannel?.id
+    if (existingChannel) {
+      const { error: channelError } = await smarttalkAdmin
+        .from('channels')
+        .update({
+          ...channelRecord,
+          // Los indicadores de la suscripción sólo se heredan si el activo es
+          // el mismo; si cambió el WABA, arrastrar `webhook_subscribed: true`
+          // haría pasar por operativo un canal que aún no lo es. Y el activo
+          // nuevo se marca como no-suscrito ANTES de preguntarle a Meta, para
+          // que un fallo del guardado final no lo deje pareciendo conectado.
+          config: {
+            ...(wasOperational ? existingChannel.config || {} : {}),
+            ...channelRecord.config,
+            ...(wasOperational ? {} : PENDING_SUBSCRIPTION_CONFIG),
+          },
+        })
+        .eq('id', existingChannel.id)
+      if (channelError) {
+        throw new Error(`WhatsApp se guardó, pero no se pudo crear el canal: ${channelError.message}`)
+      }
+    } else {
+      const { data: insertedChannel, error: channelError } = await smarttalkAdmin
+        .from('channels')
+        .insert({
+          ...channelRecord,
+          // Canal nuevo: nace no-conectado.
+          config: { ...channelRecord.config, ...PENDING_SUBSCRIPTION_CONFIG },
+        })
+        .select('id')
+        .single()
+      if (channelError) {
+        // `uq_channels_whatsapp_phone` es global, no por organización: dos
+        // agencias no pueden compartir número. Ese caso no lo ve
+        // `findAssetConflict` —que filtra por organización a propósito— y sólo
+        // aparece aquí, como violación de unicidad. Es la garantía que cierra
+        // la carrera entre dos conexiones simultáneas.
+        if ((channelError as { code?: string }).code === '23505') {
+          return NextResponse.json(
+            {
+              error:
+                'Este número de WhatsApp ya está conectado en otro canal. Desconéctalo antes de asignarlo aquí.',
+              code: 'asset_already_connected',
+            },
+            { status: 409 }
+          )
+        }
+        throw new Error(`WhatsApp se guardó, pero no se pudo crear el canal: ${channelError.message}`)
+      }
+      channelId = (insertedChannel as { id?: string } | null)?.id
+    }
+
+    if (!channelId) {
+      throw new Error('WhatsApp se guardó, pero no se pudo identificar el canal creado')
+    }
+
+    // La suscripción de la WABA forma parte del éxito.
+    //
+    // Este flujo **nunca** la llamaba: creaba el canal `active`, respondía
+    // `success: true` y esperaba a que alguien más suscribiera la cuenta. Si
+    // nadie lo hacía, Meta no enviaba un solo evento y la marca aparecía
+    // conectada con la bandeja vacía para siempre.
+    const activation = await activateChannels([
+      {
+        channelId,
+        asset: 'whatsapp_phone',
+        assetId: phone_number_id,
+        wasActive: wasOperational,
+        subscribe: () => subscribeWabaToWebhook(waba_id, token.access_token),
+      },
+    ])
+
+    if (!activation.ok) {
+      return NextResponse.json(
+        {
+          error: activationErrorMessage(activation.failures),
+          code: 'webhook_subscription_failed',
+          retryable: true,
+          channel_id: channelId,
+        },
+        { status: 502 }
+      )
     }
 
     return NextResponse.json({
       success: true,
       waba_id,
       phone_number_id,
+      channel_id: channelId,
       display_phone_number: displayPhone,
       verified_name: verifiedName,
     })

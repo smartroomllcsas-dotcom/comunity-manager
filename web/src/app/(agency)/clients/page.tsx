@@ -14,6 +14,15 @@ import {
   BRAND_INACTIVE_NOTICE,
   isPausedBrandStatus,
 } from '@/lib/smarttalk/brand-status'
+import {
+  ACTIVATION_PENDING_HINT,
+  ACTIVATION_PENDING_LABEL,
+  emptyBrandChannels,
+  isChannelConnected,
+  needsActivation,
+  type BrandChannelMap,
+  type BrandChannelStatus,
+} from '@/lib/smarttalk/brand-channel-status'
 
 /** Canal que una reactivación no logró restaurar. Lo envía /api/cm/clients. */
 interface ReconnectionChannel {
@@ -22,7 +31,17 @@ interface ReconnectionChannel {
   note: 'token_expired' | 'channel_missing'
 }
 
-type ClientRow = CMClient & { needs_reconnection?: ReconnectionChannel[] }
+type ClientRow = CMClient & {
+  needs_reconnection?: ReconnectionChannel[]
+  /**
+   * Estado operativo real, leído de `smarttalk.channels` por /api/cm/clients.
+   *
+   * Es la ÚNICA fuente válida para decir «conectado». `cm_social_accounts` y
+   * `cm_whatsapp_accounts` sólo aportan el detalle que se muestra dentro de la
+   * tarjeta —nombre de página, usuario de Instagram, número—, nunca el estado.
+   */
+  channels?: BrandChannelMap
+}
 
 interface SocialAccount {
   id: string
@@ -81,6 +100,54 @@ interface BillingStatusPayload {
 
 const ACTIVE_BILLING_STATUSES = new Set<BillingStatus>(['unlimited', 'active', 'trial', 'past_due'])
 
+/**
+ * Tarjeta de un canal autorizado que todavía no recibe.
+ *
+ * Es el estado que antes no existía en esta pantalla: la conexión se guardó,
+ * pero el proveedor no quedó suscrito al webhook. Se muestra ámbar —ni verde ni
+ * ausente—, con la causa y la acción que lo arregla sin repetir el OAuth.
+ */
+function PendingActivationCard({
+  channel,
+  label,
+  busy,
+  onRetry,
+}: {
+  channel: BrandChannelStatus
+  label: string
+  busy: boolean
+  onRetry: () => void
+}) {
+  return (
+    <div
+      data-testid={`channel-pending-${channel.kind}`}
+      className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3"
+    >
+      <div className="mb-1 flex items-center gap-2">
+        <div className="h-2 w-2 rounded-full bg-amber-400" />
+        <span className="text-[11px] font-medium text-amber-300">
+          {label}: {ACTIVATION_PENDING_LABEL}
+        </span>
+      </div>
+      <p className="text-[11px] text-slate-400">{ACTIVATION_PENDING_HINT}</p>
+      {channel.activationError && (
+        <p className="mt-1 text-[11px] text-slate-500" data-testid="channel-pending-cause">
+          Causa: {channel.activationError}
+        </p>
+      )}
+      <button
+        type="button"
+        data-testid="channel-retry-activation"
+        onClick={onRetry}
+        disabled={busy}
+        className="mt-3 inline-flex w-full items-center justify-center rounded-md border border-amber-500/30 bg-amber-500/20 px-3 py-2 text-[11px] font-medium text-amber-100 transition hover:bg-amber-500/30 disabled:opacity-50"
+      >
+        {busy ? 'Activando…' : 'Reintentar activación'}
+      </button>
+    </div>
+  )
+}
+
 export default function ClientsPage() {
   const { user } = useAuth()
   const searchParams = useSearchParams()
@@ -110,6 +177,7 @@ export default function ClientsPage() {
   // canales que no volvieron, y así el aviso aparece sin esperar al recargado.
   // La fuente duradera es `client.needs_reconnection`, que llega en el GET.
   const [reconnectNotice, setReconnectNotice] = useState<Record<string, ReconnectionChannel[]>>({})
+  const [retryingChannelId, setRetryingChannelId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [editingClientId, setEditingClientId] = useState<string | null>(null)
   const [editingClientName, setEditingClientName] = useState('')
@@ -287,6 +355,35 @@ export default function ClientsPage() {
     }
     setWhatsapps(whatsappMap)
     setLoading(false)
+  }
+
+  /**
+   * Reintenta la suscripción al webhook de un canal en `error`.
+   *
+   * No repite el OAuth: usa las credenciales ya guardadas. En WhatsApp Embedded
+   * Signup es además la única opción, porque el `code` es de un solo uso.
+   */
+  async function retryChannelActivation(channelId: string) {
+    setRetryingChannelId(channelId)
+    try {
+      const response = await fetch(`/api/channels/${channelId}/retry-activation`, {
+        method: 'POST',
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (response.ok) {
+        setNotification({ type: 'success', message: 'Canal activado. Ya puede recibir mensajes.' })
+        await loadData()
+      } else {
+        setNotification({
+          type: 'error',
+          message: payload.error || 'No fue posible activar el canal. Inténtalo de nuevo.',
+        })
+      }
+    } catch {
+      setNotification({ type: 'error', message: 'No fue posible conectar con el servidor.' })
+    } finally {
+      setRetryingChannelId(null)
+    }
   }
 
   async function syncAfterMetaReturn() {
@@ -624,16 +721,18 @@ export default function ClientsPage() {
                 ? localReconnect
                 : client.needs_reconnection ?? []
             const traceMatchesClient = metaTrace?.clientId === client.id && Boolean(metaTrace.flow)
-            const facebookConnected = Boolean(
-              social?.page_id ||
-                social?.page_name ||
-                (metaTrace?.clientId === client.id && metaTrace?.page)
-            )
-            const instagramConnected = Boolean(
-              social?.instagram_id ||
-                social?.instagram_username ||
-                (metaTrace?.clientId === client.id && metaTrace?.instagram)
-            )
+            // El estado sale SIEMPRE de `smarttalk.channels`.
+            //
+            // Antes se derivaba de la fila legacy (`social.page_id`) y del
+            // rastro en la URL (`metaTrace`). Ninguno de los dos sabe si el
+            // canal recibe: el legacy sólo dice que Meta autorizó, y el rastro
+            // sólo que el usuario acaba de volver del diálogo. Con un canal en
+            // `error` —autorizado pero sin suscripción— la tarjeta salía verde
+            // y la bandeja quedaba vacía sin explicación.
+            const channelState: BrandChannelMap = client.channels ?? emptyBrandChannels()
+            const facebookConnected = isChannelConnected(channelState.messenger)
+            const instagramConnected = isChannelConnected(channelState.instagram)
+            const whatsappConnected = isChannelConnected(channelState.whatsapp)
             return (
               <div
                 key={client.id}
@@ -740,25 +839,27 @@ export default function ClientsPage() {
                 ) : (
                   <>
                 {/* Social Connection Status */}
-                {(((client.platforms || []).includes('Facebook')) || facebookConnected) ? (
+                {(((client.platforms || []).includes('Facebook')) ||
+                  facebookConnected ||
+                  needsActivation(channelState.messenger)) ? (
                   facebookConnected ? (
-                    <div className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3">
+                    <div
+                      data-testid="channel-connected-messenger"
+                      className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3"
+                    >
                       <div className="flex items-center gap-2 mb-1">
                         <div className="w-2 h-2 rounded-full bg-emerald-500" />
                         <span className="text-[11px] font-medium text-emerald-400">
-                          {(social?.page_id || social?.page_name) ? 'Meta conectado' : 'Conexión Meta en proceso'}
+                          Meta conectado
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-400">
-                        {(social?.page_id || social?.page_name) ? (
-                          <>
-                            {social.page_name && <span className="text-blue-400">FB: {social.page_name}</span>}
-                          </>
-                        ) : (
-                          <>
-                            {metaTrace?.page && <span className="text-blue-400">FB: {metaTrace.page}</span>}
-                          </>
-                        )}
+                        {/* El nombre viene del registro legacy; el ESTADO, nunca. */}
+                        {social?.page_name ? (
+                          <span className="text-blue-400">FB: {social.page_name}</span>
+                        ) : channelState.messenger.name ? (
+                          <span className="text-blue-400">FB: {channelState.messenger.name}</span>
+                        ) : null}
                       </p>
                       <a
                         href={`/clients/${client.id}/meta`}
@@ -774,6 +875,15 @@ export default function ClientsPage() {
                         Reconectar Meta
                       </button>
                     </div>
+                  ) : needsActivation(channelState.messenger) ? (
+                    <PendingActivationCard
+                      channel={channelState.messenger}
+                      label="Messenger"
+                      busy={retryingChannelId === channelState.messenger.channelId}
+                      onRetry={() =>
+                        void retryChannelActivation(channelState.messenger.channelId as string)
+                      }
+                    />
                   ) : (
                     <button
                       onClick={() => connectFacebook(client.id)}
@@ -787,22 +897,27 @@ export default function ClientsPage() {
                   )
                 ) : null}
 
-                {(client.platforms || []).includes('Instagram') ? (
+                {((client.platforms || []).includes('Instagram') ||
+                  instagramConnected ||
+                  needsActivation(channelState.instagram)) ? (
                   instagramConnected ? (
-                    <div className="mb-3 rounded-lg border border-pink-500/20 bg-pink-500/10 p-3">
+                    <div
+                      data-testid="channel-connected-instagram"
+                      className="mb-3 rounded-lg border border-pink-500/20 bg-pink-500/10 p-3"
+                    >
                       <div className="flex items-center gap-2 mb-1">
                         <div className="w-2 h-2 rounded-full bg-pink-500" />
                         <span className="text-[11px] font-medium text-pink-400">
-                          {social?.instagram_username || metaTrace?.instagram ? 'Instagram conectado' : 'Conexión Instagram en proceso'}
+                          Instagram conectado
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-400">
                         {social?.instagram_username ? (
                           <span className="text-pink-400">IG: @{social.instagram_username}</span>
-                        ) : metaTrace?.instagram ? (
-                          <span className="text-pink-400">IG: @{metaTrace.instagram}</span>
+                        ) : channelState.instagram.name ? (
+                          <span className="text-pink-400">{channelState.instagram.name}</span>
                         ) : (
-                          <span className="text-slate-500">Cuenta de Instagram lista para conectar</span>
+                          <span className="text-slate-500">Cuenta de Instagram conectada</span>
                         )}
                       </p>
                       <a
@@ -819,6 +934,15 @@ export default function ClientsPage() {
                         Reconectar Instagram
                       </button>
                     </div>
+                  ) : needsActivation(channelState.instagram) ? (
+                    <PendingActivationCard
+                      channel={channelState.instagram}
+                      label="Instagram"
+                      busy={retryingChannelId === channelState.instagram.channelId}
+                      onRetry={() =>
+                        void retryChannelActivation(channelState.instagram.channelId as string)
+                      }
+                    />
                   ) : (
                     <button
                       onClick={() => connectInstagram(client.id)}
@@ -832,22 +956,32 @@ export default function ClientsPage() {
                   )
                 ) : null}
 
-                {(client.platforms || []).includes('WhatsApp') ? (
-                  whatsapp ? (
-                    <div className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3">
+                {((client.platforms || []).includes('WhatsApp') ||
+                  whatsappConnected ||
+                  needsActivation(channelState.whatsapp)) ? (
+                  whatsappConnected ? (
+                    <div
+                      data-testid="channel-connected-whatsapp"
+                      className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3"
+                    >
                       <div className="flex items-center gap-2 mb-2">
                         <div className="w-2 h-2 rounded-full bg-emerald-500" />
                         <span className="text-[11px] font-medium text-emerald-400">WhatsApp Conectado</span>
                       </div>
-                      {whatsapp.verified_name && (
+                      {/* El detalle sale del registro legacy cuando existe, pero
+                          la tarjeta ya no depende de él: el estado lo decidió
+                          el canal, y la fila legacy puede faltar. */}
+                      {whatsapp?.verified_name && (
                         <p className="text-[11px] text-slate-300">
                           Empresa: <span className="text-emerald-300">{whatsapp.verified_name}</span>
                         </p>
                       )}
                       <p className="mt-1 text-[11px] text-slate-300">
                         Número:{' '}
-                        {whatsapp.display_phone_number ? (
+                        {whatsapp?.display_phone_number ? (
                           <span className="font-medium text-white">{whatsapp.display_phone_number}</span>
+                        ) : channelState.whatsapp.name ? (
+                          <span className="font-medium text-white">{channelState.whatsapp.name}</span>
                         ) : (
                           <span className="text-amber-300">No disponible. Reconecta para actualizarlo.</span>
                         )}
@@ -868,6 +1002,15 @@ export default function ClientsPage() {
                         />
                       </div>
                     </div>
+                  ) : needsActivation(channelState.whatsapp) ? (
+                    <PendingActivationCard
+                      channel={channelState.whatsapp}
+                      label="WhatsApp"
+                      busy={retryingChannelId === channelState.whatsapp.channelId}
+                      onRetry={() =>
+                        void retryChannelActivation(channelState.whatsapp.channelId as string)
+                      }
+                    />
                   ) : (
                     <div className="mb-3">
                       <WhatsAppConnectButton

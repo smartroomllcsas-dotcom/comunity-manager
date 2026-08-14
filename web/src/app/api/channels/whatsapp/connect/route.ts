@@ -10,9 +10,16 @@ import {
 import { encryptToken } from "@/lib/auth/token-crypto";
 import { getBrandInOrganization } from "@/lib/smarttalk/brand-scope";
 import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
-import { CHANNEL_PUBLIC_COLUMNS } from "@/lib/smarttalk/channel-public";
+import { CHANNEL_PUBLIC_COLUMNS, toPublicChannel } from "@/lib/smarttalk/channel-public";
 import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
+import { findAssetConflict } from "@/lib/meta/asset-conflicts";
+import {
+  activateChannels,
+  activationErrorMessage,
+  wasAssetOperational,
+  PENDING_SUBSCRIPTION_CONFIG,
+} from "@/lib/meta/channel-activation";
 
 const FB_APP_ID = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID!;
 const FB_APP_SECRET = process.env.FACEBOOK_APP_SECRET!;
@@ -61,9 +68,13 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "No autorizado para esta marca" }, { status: 403 });
   }
 
+  // Ojo: esta búsqueda es por marca y tipo, no por número. El canal que
+  // devuelve puede apuntar a un número y un WABA completamente distintos de los
+  // que se están conectando ahora, así que su estado por sí solo no dice nada
+  // sobre si la suscripción anterior cubre este activo.
   const { data: existingChannel } = await admin
     .from("channels")
-    .select("id")
+    .select("id, status, whatsapp_phone_number_id, whatsapp_business_account_id, config")
     .eq("organization_id", agent.organization_id)
     .eq("brand_id", brand.id)
     .eq("type", "whatsapp_business_api")
@@ -170,14 +181,29 @@ export async function POST(request: NextRequest) {
     const phoneNumberId = phoneInfo?.id || null;
     const phoneNumber = phoneInfo?.display_phone_number || null;
 
-    // 6. Subscribe WABA to app for webhooks
-    try {
-      await subscribeWABAToApp(wabaId, accessToken);
-    } catch (subErr) {
-      console.warn("WABA subscription failed (non-blocking):", subErr);
+    // 6. Un número activo pertenece a una sola marca.
+    //
+    // Esta ruta no comprobaba nada: iba directa al INSERT y dejaba que el
+    // índice único decidiera. Eso convertía «esta página ya está en otra marca»
+    // —un caso de negocio con mensaje acordado— en un 23505 genérico, y no
+    // cubría en absoluto la cuenta legacy de `cm_whatsapp_accounts`.
+    if (phoneNumberId) {
+      const conflict = await findAssetConflict({
+        kind: "whatsapp_phone",
+        assetId: phoneNumberId,
+        organizationId: agent.organization_id,
+        brandId: brand.id,
+      });
+      if (conflict) {
+        return Response.json({ error: conflict.message }, { status: 409 });
+      }
     }
 
-    // 7. Register phone number for messaging
+    // 7. Register phone number for messaging.
+    //
+    // No bloquea: un número ya registrado devuelve error y ese caso es normal
+    // en una reconexión. No afecta a la recepción de webhooks, que es lo que
+    // decide si el canal está operativo.
     if (phoneNumberId) {
       try {
         await registerPhoneNumber(phoneNumberId, accessToken);
@@ -186,32 +212,70 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 8. Create channel record in the database
-    const { data: channel, error } = await admin
-      .from("channels")
-      .insert({
-        organization_id: agent.organization_id,
-        brand_id: brand.id,
-        type: "whatsapp_business_api",
-        name: phoneNumber
-          ? `WhatsApp ${phoneNumber}`
-          : "WhatsApp Business",
-        status: "active",
-        whatsapp_phone_number_id: phoneNumberId,
-        whatsapp_business_account_id: wabaId,
-        whatsapp_phone_number: phoneNumber,
-        access_token: null,
-        access_token_ciphertext: encryptToken(accessToken),
-        facebook_app_id: FB_APP_ID,
-        token_expires_at: tokenExpiresAt,
-        config: {
-          connected_via: "embedded_signup",
-          phone_info: phoneInfo || {},
-        },
-        connected_at: new Date().toISOString(),
-      })
-      .select(CHANNEL_PUBLIC_COLUMNS)
-      .single();
+    // 8. Create or update the channel record.
+    //
+    // Antes siempre insertaba: reconectar la misma marca chocaba con
+    // `uq_channels_whatsapp_phone` y devolvía «ya está conectado a otro canal»
+    // señalando a la propia marca. La reconexión es idempotente por definición
+    // —renueva el token, conserva la fila, los contactos y las conversaciones—.
+    const channelRecord = {
+      organization_id: agent.organization_id,
+      brand_id: brand.id,
+      type: "whatsapp_business_api",
+      name: phoneNumber
+        ? `WhatsApp ${phoneNumber}`
+        : "WhatsApp Business",
+      status: "active",
+      whatsapp_phone_number_id: phoneNumberId,
+      whatsapp_business_account_id: wabaId,
+      whatsapp_phone_number: phoneNumber,
+      access_token: null,
+      access_token_ciphertext: encryptToken(accessToken),
+      facebook_app_id: FB_APP_ID,
+      token_expires_at: tokenExpiresAt,
+      config: {
+        connected_via: "embedded_signup",
+        phone_info: phoneInfo || {},
+      },
+      connected_at: new Date().toISOString(),
+    };
+
+    // ¿El canal que ya existe recibía por ESTE número y ESTE WABA?
+    const wasOperational = wasAssetOperational({
+      status: existingChannel?.status,
+      config: existingChannel?.config as Record<string, unknown> | null,
+      assetPairs: [
+        [existingChannel?.whatsapp_phone_number_id, phoneNumberId],
+        [existingChannel?.whatsapp_business_account_id, wabaId],
+      ],
+    });
+
+    const { data: channel, error } = existingChannel
+      ? await admin
+          .from("channels")
+          .update({
+            ...channelRecord,
+            config: {
+              ...(wasOperational
+                ? ((existingChannel.config as Record<string, unknown> | null) || {})
+                : {}),
+              ...channelRecord.config,
+              // Activo nuevo o cambiado: no-suscrito hasta que Meta lo
+              // confirme, escrito ANTES de preguntárselo.
+              ...(wasOperational ? {} : PENDING_SUBSCRIPTION_CONFIG),
+            },
+          })
+          .eq("id", existingChannel.id)
+          .select(CHANNEL_PUBLIC_COLUMNS)
+          .single()
+      : await admin
+          .from("channels")
+          .insert({
+            ...channelRecord,
+            config: { ...channelRecord.config, ...PENDING_SUBSCRIPTION_CONFIG },
+          })
+          .select(CHANNEL_PUBLIC_COLUMNS)
+          .single();
 
     if (error) {
       if (error.code === "23505") {
@@ -223,7 +287,38 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: error.message }, { status: 500 });
     }
 
-    // 9. Also update the organization's default WhatsApp credentials
+    // 9. Subscribe the WABA. La suscripción forma parte del éxito: sin ella
+    // Meta no envía un solo evento y el canal aparecería «conectado» con la
+    // bandeja vacía. Antes era `non-blocking` y su fallo sólo dejaba un warn.
+    const channelId = (channel as { id?: string } | null)?.id || existingChannel?.id;
+    if (channelId) {
+      const activation = await activateChannels([
+        {
+          channelId,
+          asset: "whatsapp_phone",
+          assetId: phoneNumberId || wabaId,
+          wasActive: wasOperational,
+          subscribe: () => subscribeWABAToApp(wabaId, accessToken),
+        },
+      ]);
+
+      if (!activation.ok) {
+        return Response.json(
+          {
+            error: activationErrorMessage(activation.failures),
+            code: "webhook_subscription_failed",
+            retryable: true,
+            channel: toPublicChannel({
+              ...(channel as Record<string, unknown>),
+              status: activation.failures[0]?.degraded ? "error" : "active",
+            }),
+          },
+          { status: 502 },
+        );
+      }
+    }
+
+    // 10. Also update the organization's default WhatsApp credentials
     // for backward compatibility with existing webhook logic.
     await admin
       .from("organizations")
@@ -235,7 +330,7 @@ export async function POST(request: NextRequest) {
       })
       .eq("id", agent.organization_id);
 
-    // 10. Sync message templates from WhatsApp (non-blocking)
+    // 11. Sync message templates from WhatsApp (non-blocking)
     try {
       const waApiVersion = process.env.WHATSAPP_API_VERSION || "v21.0";
       const templatesResponse = await fetch(

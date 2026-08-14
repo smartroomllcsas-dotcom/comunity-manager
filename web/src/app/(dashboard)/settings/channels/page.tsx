@@ -149,6 +149,8 @@ function ChannelManageSheet({
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [retryResult, setRetryResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   // Reset state when channel changes
   useEffect(() => {
@@ -177,6 +179,36 @@ function ChannelManageSheet({
       }
     } finally {
       setSaving(false);
+    }
+  }
+
+  /**
+   * Reintenta SÓLO la suscripción al webhook, con las credenciales ya
+   * guardadas. Un canal en `error` es una conexión que existe pero a la que
+   * Meta rechazó `subscribed_apps`; repetir el diálogo de OAuth entero para
+   * volver a intentar esa llamada es desproporcionado, y en WhatsApp Embedded
+   * Signup ni siquiera es posible: el `code` es de un solo uso.
+   */
+  async function handleRetryActivation() {
+    if (!channel) return;
+    setRetrying(true);
+    setRetryResult(null);
+    try {
+      const res = await fetch(`/api/channels/${channel.id}/retry-activation`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setRetryResult({ ok: true, message: "Canal activado. Ya puede recibir mensajes." });
+        onUpdated();
+      } else {
+        setRetryResult({
+          ok: false,
+          message: data.error || "No fue posible activar el canal. Inténtalo de nuevo.",
+        });
+      }
+    } catch {
+      setRetryResult({ ok: false, message: "Error de conexión al activar el canal." });
+    } finally {
+      setRetrying(false);
     }
   }
 
@@ -248,6 +280,46 @@ function ChannelManageSheet({
               </span>
             )}
           </div>
+
+          {/* Activación pendiente.
+              Un canal en `error` existe, tiene su token y su marca, pero Meta
+              rechazó la suscripción al webhook: no recibe nada. Se ofrece el
+              reintento aquí porque es la única acción que lo arregla sin
+              repetir el OAuth. */}
+          {channel.status === "error" && (
+            <div
+              data-testid="channel-retry-activation"
+              className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3"
+            >
+              <div className="flex items-center gap-2 text-amber-300">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <p className="text-xs font-medium">Este canal no está recibiendo mensajes</p>
+              </div>
+              <p className="mt-1 text-[11px] text-[#8b949e]">
+                La suscripción al webhook no se completó. Reintenta la activación; no hace falta
+                volver a autorizar la cuenta.
+              </p>
+              <Button
+                onClick={handleRetryActivation}
+                disabled={retrying}
+                size="sm"
+                className="mt-2 h-8 bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                {retrying ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  "Reintentar activación"
+                )}
+              </Button>
+              {retryResult && (
+                <p
+                  className={`mt-2 text-[11px] ${retryResult.ok ? "text-green-400" : "text-red-400"}`}
+                >
+                  {retryResult.message}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Editable Name */}
           <div>

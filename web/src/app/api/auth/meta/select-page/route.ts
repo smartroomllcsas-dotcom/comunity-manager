@@ -161,20 +161,54 @@ export async function POST(request: NextRequest) {
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
-  const response = await finalizeMetaConnection({
-    appUrl,
-    clientId: selection.clientId,
-    access: { organizationId: access.organizationId, cmUserId: access.cmUserId },
-    flow: selection.flow,
-    page,
-    igAccount,
-    // El token largo se recupera descifrado del lado servidor; nunca se envía.
-    longToken: { access_token: selection.secret.userAccessToken },
-    profile: { id: selection.secret.profileId },
-  });
+
+  // `finalizeMetaConnection` escribe en cuatro tablas y llama a Meta. Cualquiera
+  // de esos pasos puede lanzar —un `channels` que no admite la fila, una
+  // migración a medias— y sin este catch la ruta devolvía un 500 sin cuerpo:
+  // la pantalla se quedaba con «No fue posible conectar» y sin causa, después de
+  // haber consumido ya la selección.
+  let response;
+  try {
+    response = await finalizeMetaConnection({
+      appUrl,
+      clientId: selection.clientId,
+      access: { organizationId: access.organizationId, cmUserId: access.cmUserId },
+      flow: selection.flow,
+      page,
+      igAccount,
+      // El token largo se recupera descifrado del lado servidor; nunca se envía.
+      longToken: { access_token: selection.secret.userAccessToken },
+      profile: { id: selection.secret.profileId },
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Error desconocido";
+    console.error("[meta-select-page] no se pudo finalizar la conexión", detail);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "No fue posible completar la conexión. Vuelve a iniciarla desde la marca.",
+        code: "finalize_failed",
+      },
+      { status: 500 },
+    );
+  }
 
   // `finalizeMetaConnection` devuelve una redirección pensada para el callback.
   // Aquí la petición es fetch, así que se traduce a JSON con el destino.
-  const location = response.headers.get("location");
-  return NextResponse.json({ ok: true, redirectTo: location || `${appUrl}/clients` });
+  //
+  // El destino también dice si funcionó: un `meta_error` en la URL es un fallo
+  // —conflicto de activo, cupo agotado, suscripción rechazada— y devolver
+  // `ok: true` con él hacía que la pantalla navegara como si nada. El error se
+  // veía después, en /clients, sin relación aparente con lo que se acababa de
+  // pulsar.
+  const location = response.headers.get("location") || `${appUrl}/clients`;
+  const failure = new URL(location, appUrl).searchParams.get("meta_error");
+  if (failure) {
+    return NextResponse.json(
+      { ok: false, error: failure, redirectTo: location, code: "connection_rejected" },
+      { status: 409 },
+    );
+  }
+
+  return NextResponse.json({ ok: true, redirectTo: location });
 }

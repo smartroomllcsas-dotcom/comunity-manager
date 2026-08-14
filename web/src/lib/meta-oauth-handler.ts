@@ -21,6 +21,12 @@ import { BILLING_FEATURES } from '@/lib/billing/features'
 import { createPendingSelection } from '@/lib/meta/page-selection'
 import { findAssetConflict } from '@/lib/meta/asset-conflicts'
 import { ensureMetaChannelsReady } from '@/lib/meta/channel-readiness'
+import {
+  activateChannels,
+  activationErrorMessage,
+  type ActivationTarget,
+} from '@/lib/meta/channel-activation'
+import { isPausedBrandStatus } from '@/lib/smarttalk/brand-status'
 
 export async function initiateMetaOAuth(request: NextRequest, callbackPath: string) {
   const clientId = request.nextUrl.searchParams.get('clientId')
@@ -120,6 +126,30 @@ export async function finalizeMetaConnection(input: {
   profile: { id: string }
 }): Promise<NextResponse> {
   const { appUrl, clientId, access, flow, page, igAccount, longToken, profile } = input
+
+  // Una marca inactiva no recupera canales por la puerta de atrás.
+  //
+  // `sync-legacy` ya se negaba a reinsertar canales de una marca pausada y
+  // `/api/channels/whatsapp/connect` ya rechazaba la conexión; el OAuth de Meta
+  // era el único camino que seguía escribiendo. Conectar aquí dejaba un canal
+  // `active` en una marca desactivada: deshacía la pausa a medias, consumía su
+  // cupo de canales y volvía a admitir mensajes que la pausa debía descartar.
+  const { data: brandRow, error: brandError } = await supabaseAdmin
+    .from('cm_clients')
+    .select('id, name, status, user_id')
+    .eq('id', clientId)
+    .maybeSingle()
+  if (brandError) {
+    throw new Error(`No se pudo verificar el estado de la marca: ${brandError.message}`)
+  }
+  if (isPausedBrandStatus((brandRow as { status?: string | null } | null)?.status)) {
+    return NextResponse.redirect(
+      `${appUrl}/clients?meta_error=${encodeURIComponent(
+        'Esta marca está inactiva. Reactívala antes de conectar canales.'
+      )}`
+    )
+  }
+
   // Un activo pertenece a una sola marca. Se comprueba ANTES de reservar cupo
   // y de escribir nada: bloquear después dejaría el cupo consumido y la
   // cuenta social a medio actualizar.
@@ -194,15 +224,23 @@ export async function finalizeMetaConnection(input: {
   const userTokenCiphertext = encryptToken(longToken.access_token)
   const pageTokenCiphertext = encryptToken(page.access_token)
 
+  // Se lee la fila COMPLETA, no sólo el id: si el paso siguiente falla hay que
+  // poder devolverla exactamente a como estaba. Véase la compensación de más
+  // abajo.
   const { data: existing, error: existingError } = await supabaseAdmin
     .from('cm_social_accounts')
-    .select('id')
+    .select('*')
     .eq('client_id', clientId)
     .maybeSingle()
 
   if (existingError) {
     throw existingError
   }
+
+  // Copia, no referencia. La instantánea tiene que quedar congelada ANTES del
+  // UPDATE de más abajo; guardar el objeto tal cual haría que «lo anterior» y
+  // «lo nuevo» fueran lo mismo y la compensación no restauraría nada.
+  const previousSocial = existing ? { ...(existing as Record<string, unknown>) } : null
 
   // Sprint 22 · Cifrado AES-256-GCM antes de persistir.
   // Escribimos SOLO a las columnas *_ciphertext y ponemos las columnas plain
@@ -262,48 +300,98 @@ export async function finalizeMetaConnection(input: {
     throw new Error('No se pudo identificar la conexión Meta guardada')
   }
 
-  await ensureMetaChannelsReady({
-    organizationId: access.organizationId,
-    brandId: clientId,
-    legacyAccountId,
-    page,
-    instagram: igAccount,
-    pageAccessTokenCiphertext: pageTokenCiphertext,
-    connectedAt,
-    tokenExpiresAt: tokenExpires.toISOString(),
-    includeInstagram: flow !== 'facebook',
-  })
-
-  if (page.id && page.access_token) {
+  // Si el canal operativo no se puede crear, la cuenta legacy no puede quedarse
+  // escrita.
+  //
+  // El orden es obligado —el canal necesita `legacy_account_id`—, así que entre
+  // las dos escrituras hay un instante en el que la marca tiene cuenta legacy
+  // pero no canal: exactamente el estado que /clients pinta como «conectado» y
+  // que el webhook no sabe enrutar. Cuando el segundo paso falla —el índice
+  // único de la migración 038 rechazando una conexión simultánea sobre el mismo
+  // activo, por ejemplo— se deshace el primero antes de propagar el error: la
+  // fila nueva se borra y la que ya existía vuelve a sus valores anteriores.
+  let readyChannels
+  try {
+    readyChannels = await ensureMetaChannelsReady({
+      organizationId: access.organizationId,
+      brandId: clientId,
+      legacyAccountId,
+      page,
+      instagram: igAccount,
+      pageAccessTokenCiphertext: pageTokenCiphertext,
+      connectedAt,
+      tokenExpiresAt: tokenExpires.toISOString(),
+      includeInstagram: flow !== 'facebook',
+    })
+  } catch (channelError) {
     try {
-      await subscribePageToApp(page.id, page.access_token)
-    } catch (subscriptionError) {
-      console.warn('[meta-oauth] page subscription failed', subscriptionError)
+      if (previousSocial) {
+        await supabaseAdmin
+          .from('cm_social_accounts')
+          .update(previousSocial)
+          .eq('id', previousSocial.id)
+      } else {
+        await supabaseAdmin.from('cm_social_accounts').delete().eq('id', legacyAccountId)
+      }
+    } catch (rollbackError) {
+      // La compensación es el mejor esfuerzo: si también falla, lo que no puede
+      // ocurrir es que su error tape el original, que es el que explica qué
+      // pasó. Se registra y se sigue.
+      console.error('[meta-oauth] no se pudo revertir la cuenta legacy', rollbackError)
     }
+    throw channelError
   }
 
-  if (igAccount?.id && longToken.access_token) {
-    try {
-      await subscribeInstagramAccountToApp(igAccount.id, longToken.access_token)
-    } catch (subscriptionError) {
-      console.warn('[meta-oauth] instagram subscription failed', subscriptionError)
-    }
+  // La suscripción al webhook forma parte del éxito.
+  //
+  // Antes vivía en dos `try { } catch { console.warn }`: si Meta rechazaba la
+  // suscripción, la interfaz decía «conectado», el canal quedaba `active` y no
+  // llegaba ni un mensaje. Ahora el veredicto del proveedor decide el estado
+  // del canal y decide también qué se le dice al administrador.
+  const activationTargets: ActivationTarget[] = []
+  const messengerChannel = readyChannels.find((channel) => channel.type === 'facebook_messenger')
+  if (messengerChannel && page.id && page.access_token) {
+    activationTargets.push({
+      channelId: messengerChannel.id,
+      asset: 'facebook_page',
+      assetId: page.id,
+      wasActive: messengerChannel.wasActive,
+      subscribe: () => subscribePageToApp(page.id, page.access_token),
+    })
+  }
+  const instagramChannel = readyChannels.find((channel) => channel.type === 'instagram')
+  if (instagramChannel && igAccount?.id && longToken.access_token) {
+    activationTargets.push({
+      channelId: instagramChannel.id,
+      asset: 'instagram_account',
+      assetId: igAccount.id,
+      wasActive: instagramChannel.wasActive,
+      subscribe: () => subscribeInstagramAccountToApp(igAccount.id, longToken.access_token),
+    })
   }
 
-  const { data: client } = await supabaseAdmin
-    .from('cm_clients')
-    .select('user_id, name')
-    .eq('id', clientId)
-    .single()
+  const activation = await activateChannels(activationTargets)
+
+  const client = brandRow as { user_id?: string; name?: string } | null
   if (client) {
     await supabaseAdmin.from('cm_activity_log').insert({
       user_id: client.user_id,
-      action:
-        flow === 'facebook'
+      action: activation.ok
+        ? flow === 'facebook'
           ? `Facebook conectado: ${page.name} para ${client.name}`
-          : `Redes conectadas: ${page.name}${igAccount ? ` + @${igAccount.username}` : ''}${adAccount?.name ? ` + Ads: ${adAccount.name}` : ''} para ${client.name}`,
-      status: 'success',
+          : `Redes conectadas: ${page.name}${igAccount ? ` + @${igAccount.username}` : ''}${adAccount?.name ? ` + Ads: ${adAccount.name}` : ''} para ${client.name}`
+        : `Conexión Meta pendiente de activación: ${page.name} para ${client.name} · ${activation.failures[0]?.cause}`,
+      status: activation.ok ? 'success' : 'error',
     })
+  }
+
+  // Sin suscripción no hay «conectado». El canal existe y guarda su token, pero
+  // el mensaje que ve el administrador es el de un fallo con reintento.
+  if (!activation.ok) {
+    return NextResponse.redirect(
+      `${appUrl}/clients?meta_error=${encodeURIComponent(activationErrorMessage(activation.failures))}` +
+        `&meta_client_id=${encodeURIComponent(clientId)}&meta_flow=${encodeURIComponent(flow)}`
+    )
   }
 
   const successMsg =
@@ -429,7 +517,13 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
 
     const page = selectable[0]
     const igAccount = flow === 'facebook' ? null : page.instagram_business_account
-    return finalizeMetaConnection({
+    // `return await`, no `return`: dentro de un try/catch, devolver la promesa
+    // sin esperarla deja su rechazo FUERA del catch de abajo. Cualquier fallo
+    // de `finalizeMetaConnection` —el índice único rechazando una conexión
+    // simultánea, un INSERT sin permisos— salía como excepción no controlada y
+    // el usuario recibía un 500 en blanco en vez de la redirección con
+    // `meta_error` que este catch existe para producir.
+    return await finalizeMetaConnection({
       appUrl,
       clientId,
       access: { organizationId: access.organizationId, cmUserId: access.cmUserId },

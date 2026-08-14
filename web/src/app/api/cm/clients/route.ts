@@ -15,6 +15,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getAgentBrandIds } from "@/lib/smarttalk/brand-scope";
 import { getChannelsNeedingReconnection } from "@/lib/smarttalk/brand-lifecycle";
+import { loadBrandChannelSummaries } from "@/lib/smarttalk/brand-channel-summary";
+import { emptyBrandChannels } from "@/lib/smarttalk/brand-channel-status";
 
 const ALLOWED_PLATFORMS = new Set([
   "Instagram",
@@ -101,10 +103,41 @@ export async function GET() {
     clients.map((client) => client.id as string),
   );
 
+  // Estado operativo real de cada canal.
+  //
+  // La pantalla decidía «conectado» a partir de `cm_social_accounts` y
+  // `cm_whatsapp_accounts`, que son registros legacy: guardan lo que Meta
+  // autorizó, no lo que la plataforma puede recibir. Con un canal en `error`
+  // —autorizado pero sin suscripción al webhook— la tarjeta se pintaba verde y
+  // la bandeja quedaba vacía sin que nada lo dijera.
+  //
+  // La consulta va filtrada por organización y por el alcance de marcas que ya
+  // se calculó arriba, así que un asesor sólo recibe el estado de las suyas.
+  let channelsByBrand: Record<string, ReturnType<typeof emptyBrandChannels>>;
+  try {
+    channelsByBrand = await loadBrandChannelSummaries(
+      agent.organization_id,
+      clients.map((client) => client.id as string),
+    );
+  } catch (channelError) {
+    // Devolver el listado sin este dato haría que la interfaz mostrara
+    // «Conectar» sobre canales que sí existen, y un segundo intento de conexión
+    // sobre un activo ya tomado. Es preferible fallar de forma visible.
+    console.error(
+      "[cm/clients] no se pudo resumir el estado de los canales",
+      channelError instanceof Error ? channelError.message : "error desconocido",
+    );
+    return Response.json(
+      { error: "No fue posible cargar el estado de los canales." },
+      { status: 500 },
+    );
+  }
+
   return Response.json({
     clients: clients.map((client) => ({
       ...client,
       needs_reconnection: needsReconnection.get(client.id as string) || [],
+      channels: channelsByBrand[client.id as string] || emptyBrandChannels(),
     })),
   });
 }
