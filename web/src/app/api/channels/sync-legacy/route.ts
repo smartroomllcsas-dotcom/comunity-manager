@@ -162,7 +162,9 @@ export async function POST(_request: NextRequest) {
           : account.page_access_token || account.access_token || null,
         access_token_ciphertext: account.page_access_token_ciphertext || account.access_token_ciphertext || null,
         facebook_app_id: null,
-        meta_business_id: account.business_id || account.page_id,
+        // Meta envía el Page ID en entry.id. Guardarlo directamente evita
+        // colisiones entre varias páginas del mismo portafolio comercial.
+        meta_business_id: account.page_id,
         config: {
           legacy_source: "cm_social_accounts",
           legacy_type: "facebook",
@@ -220,7 +222,7 @@ export async function POST(_request: NextRequest) {
           : account.page_access_token || account.access_token || null,
         access_token_ciphertext: account.page_access_token_ciphertext || account.access_token_ciphertext || null,
         facebook_app_id: null,
-        meta_business_id: account.business_id || null,
+        meta_business_id: account.instagram_id || null,
         config: {
           legacy_source: "cm_social_accounts",
           legacy_type: "instagram",

@@ -20,6 +20,7 @@ import { checkBillingFeature, billingDeniedResponse } from '@/lib/billing/servic
 import { BILLING_FEATURES } from '@/lib/billing/features'
 import { createPendingSelection } from '@/lib/meta/page-selection'
 import { findAssetConflict } from '@/lib/meta/asset-conflicts'
+import { ensureMetaChannelsReady } from '@/lib/meta/channel-readiness'
 
 export async function initiateMetaOAuth(request: NextRequest, callbackPath: string) {
   const clientId = request.nextUrl.searchParams.get('clientId')
@@ -153,7 +154,7 @@ export async function finalizeMetaConnection(input: {
   // The OAuth record is legacy data. The actual billable resources are the
   // SmartTalk channels created by the sync step, so reserve only channels
   // that do not already exist for this brand.
-  const expectedTypes = flow === 'facebook'
+  const expectedTypes = flow === 'facebook' || !igAccount?.id
     ? ['facebook_messenger']
     : ['facebook_messenger', 'instagram']
   const { data: currentChannels } = await supabaseAdmin
@@ -189,6 +190,9 @@ export async function finalizeMetaConnection(input: {
 
   const tokenExpires = new Date()
   tokenExpires.setSeconds(tokenExpires.getSeconds() + (longToken.expires_in || 5184000))
+  const connectedAt = new Date().toISOString()
+  const userTokenCiphertext = encryptToken(longToken.access_token)
+  const pageTokenCiphertext = encryptToken(page.access_token)
 
   const { data: existing, error: existingError } = await supabaseAdmin
     .from('cm_social_accounts')
@@ -212,11 +216,11 @@ export async function finalizeMetaConnection(input: {
     page_id: page.id,
     page_name: page.name,
     access_token: null,
-    access_token_ciphertext: encryptToken(longToken.access_token),
+    access_token_ciphertext: userTokenCiphertext,
     page_access_token: null,
-    page_access_token_ciphertext: encryptToken(page.access_token),
+    page_access_token_ciphertext: pageTokenCiphertext,
     meta_user_id: profile.id,
-    connected_at: new Date().toISOString(),
+    connected_at: connectedAt,
     token_expires_at: tokenExpires.toISOString(),
   }
 
@@ -236,17 +240,39 @@ export async function finalizeMetaConnection(input: {
     socialData.business_id = adAccount?.business?.id || adAccount?.business || null
   }
 
+  let legacyAccountId = existing?.id as string | undefined
   if (existing) {
     const { error: updateError } = await supabaseAdmin.from('cm_social_accounts').update(socialData).eq('id', existing.id)
     if (updateError) {
       throw updateError
     }
   } else {
-    const { error: insertError } = await supabaseAdmin.from('cm_social_accounts').insert(socialData)
+    const { data: insertedAccount, error: insertError } = await supabaseAdmin
+      .from('cm_social_accounts')
+      .insert(socialData)
+      .select('id')
+      .single()
     if (insertError) {
       throw insertError
     }
+    legacyAccountId = insertedAccount?.id as string | undefined
   }
+
+  if (!legacyAccountId) {
+    throw new Error('No se pudo identificar la conexión Meta guardada')
+  }
+
+  await ensureMetaChannelsReady({
+    organizationId: access.organizationId,
+    brandId: clientId,
+    legacyAccountId,
+    page,
+    instagram: igAccount,
+    pageAccessTokenCiphertext: pageTokenCiphertext,
+    connectedAt,
+    tokenExpiresAt: tokenExpires.toISOString(),
+    includeInstagram: flow !== 'facebook',
+  })
 
   if (page.id && page.access_token) {
     try {
