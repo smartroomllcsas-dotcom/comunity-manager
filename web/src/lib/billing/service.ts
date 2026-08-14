@@ -152,10 +152,15 @@ function isSubscriptionUsable(
     return false;
   }
   if (!subscription) {
-    // `organizations.plan_id` may contain the compatibility Free plan. It is
-    // not proof that the customer completed onboarding or has an entitlement.
-    // A real trial or paid activation is represented by subscriptions.
-    return false;
+    // Los planes gratuitos no pasan por una pasarela y, por tanto, varias
+    // organizaciones legítimas no tienen fila en `subscriptions`. El estado
+    // de onboarding activo sí confirma que terminaron el alta; sus límites se
+    // siguen aplicando mediante `plan_entitlements` como a cualquier plan.
+    // Los planes pagos continúan exigiendo trial o suscripción activa.
+    return (
+      organization.onboarding_status === "active" &&
+      Number(organization.plan?.price_monthly ?? -1) === 0
+    );
   }
   if (subscription.status === "active") return true;
   if (

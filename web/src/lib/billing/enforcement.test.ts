@@ -62,6 +62,7 @@ function setupTables(opts: {
   superAdmin?: boolean;
   usage?: number;
   hasSubscription?: boolean;
+  planPrice?: number;
 }) {
   const subscription = opts.hasSubscription === false
     ? { data: null, error: null }
@@ -87,7 +88,7 @@ function setupTables(opts: {
         billing_enforcement_mode: "hard",
         trial_ends_at: null,
         onboarding_status: "active",
-        plan: { price_monthly: 0 },
+        plan: { price_monthly: opts.planPrice ?? 0 },
       },
       error: null,
     },
@@ -152,8 +153,17 @@ describe("checkBillingFeature enforcement", () => {
     expect(decision.mode).toBe("off");
   });
 
-  it("sin suscripción activa: bloquea y responde 402 con BILLING_SUBSCRIPTION_REQUIRED", async () => {
+  it("plan gratuito activo sin suscripción: aplica sus límites y permite mientras haya cupo", async () => {
     setupTables({ hasSubscription: false, usage: 0 });
+    const decision = await check();
+    expect(decision.allowed).toBe(true);
+    expect(decision.reason).toBe("within_limit");
+    expect(decision.currentUsage).toBe(0);
+    expect(decision.limitValue).toBe(LIMIT);
+  });
+
+  it("plan pago sin suscripción activa: bloquea con BILLING_SUBSCRIPTION_REQUIRED", async () => {
+    setupTables({ hasSubscription: false, usage: 0, planPrice: 59_000 });
     const decision = await check();
     expect(decision.allowed).toBe(false);
     expect(decision.reason).toBe("subscription_inactive");
