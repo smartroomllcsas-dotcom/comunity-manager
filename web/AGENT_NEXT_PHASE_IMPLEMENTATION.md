@@ -6885,3 +6885,150 @@ demasiado amplia como expiración.
 Las 189 pruebas críticas pasan. La cobertura distingue explícitamente
 Instagram vía Facebook (instalación sobre Página) de Instagram Login directo
 (instalación sobre cuenta profesional).
+
+---
+
+# Iteración 27 · Los adjuntos del Inbox no se abrían: una columna que no existe
+
+Alcance acotado a la apertura y descarga de adjuntos. No se tocó OAuth,
+conexión empresarial de Meta, webhooks, aislamiento multimarcas, facturación ni
+canales activos.
+
+## 187. Hallazgo y causa
+
+Todos los adjuntos del Inbox respondían:
+
+```json
+{"error":"Mensaje no encontrado."}
+```
+
+El mensaje existía. Tenía `type=document`, su `provider_url` de Meta, su
+`provider_media_id`, un `conversation_id` válido y una conversación con
+`channel_id`; sólo le faltaba `storage_path`, que es exactamente el caso que la
+ruta debía resolver.
+
+La causa está en una sola línea de
+`src/app/api/inbox/messages/[messageId]/media/route.ts`:
+
+```ts
+.select("id, conversation_id, content, channel_id")   // ← channel_id no existe
+```
+
+`smarttalk.messages` **no tiene** `channel_id`. La columna vive en
+`smarttalk.conversations` desde la migración 003
+(`ALTER TABLE conversations ADD COLUMN channel_id`). Pedirla hacía que PostgREST
+rechazara la consulta entera y devolviera `data = null`.
+
+Y aquí el fallo se volvió invisible: el resultado se comprobaba con
+
+```ts
+if (!message) return notFound();
+```
+
+que no distingue «no hay fila» de «la consulta falló». Un error de esquema se
+presentaba como un 404 perfectamente creíble —el mismo que se usa a propósito
+para los mensajes ajenos—, así que la respuesta parecía correcta y apuntaba a
+un problema de permisos que no existía.
+
+Verificado además que ninguna otra consulta del proyecto pedía
+`messages.channel_id`: el defecto estaba aislado en esta ruta.
+
+## 188. Corrección
+
+1. **`.select("id, conversation_id, content")`.** Sin `channel_id`.
+2. **El error de la consulta se comprueba y se separa.** Un fallo de
+   SQL/PostgREST responde `500` con `code: "message_query_failed"`, se registra
+   con `redactSecrets` y **no** se disfraza de mensaje inexistente. El `404`
+   uniforme queda reservado para lo que siempre significó: no existe, o no es
+   tuyo.
+3. **El canal sale exclusivamente de `conversation.channel_id`,** después de que
+   `getAccessibleConversation()` haya validado organización y marca. Ya no se
+   intenta leer `message.channel_id`.
+
+Se conserva íntegro todo lo demás: `getBrandScopeAgent()`,
+`getAccessibleConversation()`, el aislamiento por `organization_id` y
+`brand_id`, el 404 uniforme para mensajes ajenos, las URLs firmadas de
+`cm-assets`, la redacción de tokens, la descarga diferida desde
+`provider_url`/`provider_media_id` y la persistencia posterior en
+`storage_path` conservando `filename`, `mime_type` y `size_bytes`. El navegador
+sigue usando únicamente `/api/inbox/messages/[messageId]/media`; ni
+`provider_url` ni ningún token salen en la respuesta.
+
+## 189. Archivos modificados
+
+- `src/app/api/inbox/messages/[messageId]/media/route.ts` — las tres
+  correcciones de §188.
+- `src/qa-e2e/inbox-attachments.test.ts` — fixtures corregidas y cobertura
+  nueva (§190).
+
+Sin migraciones. Sin cambios de tablas.
+
+## 190. Pruebas
+
+**Las fixtures eran cómplices del defecto.** Los mensajes de prueba llevaban
+`channel_id`, y el Supabase falso acepta cualquier columna: el `select` roto
+pasaba en pruebas y sólo fallaba contra PostgREST real. Ahora ningún mensaje lo
+lleva y las conversaciones sí, que es el esquema verdadero.
+
+Sección nueva «4 bis» en `inbox-attachments.test.ts`:
+
+| Prueba | Qué fija |
+|---|---|
+| REGRESIÓN: no vuelve a seleccionar `messages.channel_id` | El `select` literal, y que no se lea `message.channel_id` de ninguna forma |
+| REGRESIÓN: el canal se toma de la conversación | La expresión exacta que lo resuelve |
+| REGRESIÓN: el esquema no declara `messages.channel_id` | Se lee la migración 001 y se comprueba contra la definición real de la tabla |
+| Un error de consulta no se disfraza de «no encontrado» | Inyectando `42703`: responde 500 con `message_query_failed`, y el detalle del esquema no llega al navegador |
+| Mensaje autorizado y almacenado | Abre con redirección firmada a `cm-assets` |
+| Mensaje con `provider_url` | Se descarga, se copia a `cm-assets` con la organización y la marca de la conversación, y se guarda `storage_path` conservando `filename`, `mime_type` y `size_bytes` |
+| Segunda apertura | Ya no consulta al proveedor |
+| Mensaje con `provider_media_id` | Se resuelve con el token del canal **de la conversación** (`conv-token → ch-token`), única vía posible |
+| Fallo del guardado | El archivo se entrega igual y no queda `storage_path` |
+| `?download=1` | `Content-Disposition: attachment` con el nombre original |
+| Mensaje de otra organización | 404, y ni una descarga ni una llamada a Graph |
+| Asesor sin la marca asignada | 404 dentro de su propia organización |
+| Secretos | Ninguna respuesta —cabeceras ni cuerpo— contiene `access_token`, `Bearer `, `EAA` ni el token del canal |
+| `provider_url` al navegador | No aparece en ninguna cabecera |
+| Fallo del proveedor | El motivo no filtra el token |
+| Tipos de adjunto | `it.each` sobre image, video, audio, document y sticker |
+| Canales | `it.each` sobre Instagram, Messenger, WhatsApp y Respond.io |
+| Conversación sin canal | Error controlado 410, no una excepción |
+
+**La regresión se comprobó de verdad:** al reponer temporalmente
+`channel_id` en el `select`, la suite falla en «REGRESIÓN: la ruta no vuelve a
+seleccionar messages.channel_id». Restaurada la corrección, vuelve a pasar.
+
+### Resultados
+
+```text
+npx vitest run src/qa-e2e/inbox-attachments.test.ts
+ Test Files  1 passed (1)
+      Tests  76 passed (76)          ← antes 44
+
+npm test
+ Test Files  42 passed | 1 skipped (43)
+      Tests  984 passed | 4 skipped (988)
+# tests 25   # pass 6   # fail 0   # skipped 19   (node --test)
+
+npx next build
+✓ Compiled successfully in 13.7s
+
+npm run lint
+0 errores (ninguna advertencia nueva)
+
+git diff --check
+(sin salida)
+```
+
+## 191. Alcance verificado
+
+`git status` tras el cambio muestra exactamente dos archivos:
+
+```
+M src/app/api/inbox/messages/[messageId]/media/route.ts
+M src/qa-e2e/inbox-attachments.test.ts
+```
+
+No se modificó ninguna migración, tabla, flujo OAuth de Meta, suscripción de
+webhooks ni la asignación página/canal/marca.
+
+**No se hizo commit, push ni despliegue.** Queda listo para revisión de Codex.

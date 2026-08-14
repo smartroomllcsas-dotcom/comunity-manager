@@ -75,11 +75,34 @@ export async function GET(
   if (!agent) return notFound();
 
   const admin = createAdminClient("smarttalk");
-  const { data: message } = await admin
+  // `smarttalk.messages` NO tiene `channel_id`: el canal cuelga de la
+  // conversación (migración 003, `ALTER TABLE conversations ADD COLUMN
+  // channel_id`). Pedirlo aquí hacía que PostgREST rechazara la consulta
+  // entera; `data` volvía `null` y el `if (!message)` de abajo lo interpretaba
+  // como «no existe». Resultado: todos los adjuntos respondían
+  // «Mensaje no encontrado.» aunque el mensaje estuviera ahí, con su
+  // `provider_url` y su `conversation_id` correctos.
+  const { data: message, error: messageError } = await admin
     .from("messages")
-    .select("id, conversation_id, content, channel_id")
+    .select("id, conversation_id, content")
     .eq("id", messageId)
     .maybeSingle();
+
+  // Un fallo de consulta no es un mensaje inexistente, y confundirlos fue
+  // justamente lo que ocultó el defecto durante toda la investigación: el
+  // usuario veía un 404 honesto mientras el error real era de esquema. Se
+  // separan a propósito, con un código propio y sin filtrar el detalle.
+  if (messageError) {
+    console.error("[inbox-media] no se pudo consultar el mensaje", {
+      messageId,
+      code: (messageError as { code?: string }).code,
+      message: redactSecrets(messageError.message || ""),
+    });
+    return NextResponse.json(
+      { error: "No se pudo consultar el mensaje.", code: "message_query_failed" },
+      { status: 500 },
+    );
+  }
 
   if (!message) return notFound();
 
@@ -122,10 +145,10 @@ export async function GET(
   }
 
   // --- 2. Aún no está guardado: resolverlo ahora ----------------------------
-  const channelId =
-    (message as { channel_id?: string | null }).channel_id ||
-    (conversation as { channel_id?: string | null }).channel_id ||
-    null;
+  // El canal sale EXCLUSIVAMENTE de la conversación, que además es la fila que
+  // `getAccessibleConversation` ya validó contra la organización y la marca del
+  // agente. No hay `message.channel_id` que leer.
+  const channelId = (conversation as { channel_id?: string | null }).channel_id || null;
   const channel = channelId ? await loadChannelForMedia(channelId) : null;
   const token = channel ? channelToken(channel) : null;
 
