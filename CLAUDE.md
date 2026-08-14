@@ -2,6 +2,14 @@
 
 Multi-agent platform for community management across multiple brands and clients.
 
+## Mandatory repository guardrails
+
+Before analyzing or changing this repository, read and follow `AGENTS.md`.
+Those rules are mandatory for views, API actions, multiagency/multibrand data,
+webhooks, channel connections, migrations, tests and Git/deployment ownership.
+Claude may implement and document local changes, but Codex owns final review,
+commits, merges, pushes and deployments.
+
 ## Architecture
 
 - **Orchestrator** (`orchestrator/AGENT.md`) — Routes requests, manages modes (A/B/C), loads client context
