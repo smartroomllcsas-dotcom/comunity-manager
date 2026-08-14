@@ -87,7 +87,11 @@ function getMetaAppSecret(channel: "whatsapp" | "messenger" | "facebook" | "inst
     return process.env.WHATSAPP_APP_SECRET || process.env.META_APP_SECRET || "";
   }
   if (channel === "instagram") {
-    return process.env.META_IG_APP_SECRET || process.env.META_APP_SECRET || "";
+    // Facebook Login for Business, Messenger e Instagram pertenecen a la
+    // misma app de Meta y Meta firma sus webhooks con el App Secret de esa
+    // app. `META_IG_APP_SECRET` queda únicamente como compatibilidad para una
+    // instalación antigua que no tenga configurado el secreto compartido.
+    return process.env.META_APP_SECRET || process.env.META_IG_APP_SECRET || "";
   }
   return process.env.META_APP_SECRET || "";
 }

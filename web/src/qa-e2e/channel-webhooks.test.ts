@@ -3,7 +3,7 @@
 // Ejercita las RUTAS REALES de webhook con firmas HMAC calculadas con secretos
 // sintéticos. Verifica el orden de las defensas (rate limit -> secreto -> firma
 // -> cuerpo), la verificación de suscripción `hub.challenge`, el encolado
-// idempotente y el aislamiento de secretos por canal.
+// idempotente y el secreto compartido de la app Meta.
 //
 // Fuera de alcance aquí (requiere ambiente QA aislado y app de Meta de prueba):
 // ventana de 24 h, plantillas aprobadas, adjuntos y límites reales de Meta.
@@ -71,7 +71,7 @@ interface ChannelCase {
 
 const CHANNELS: ChannelCase[] = [
   { name: "facebook", secret: APP_SECRET, receive: fbReceive as never, verify: fbVerify as never, queues: true },
-  { name: "instagram", secret: IG_SECRET, receive: igReceive as never, verify: igVerify as never, queues: true },
+  { name: "instagram", secret: APP_SECRET, receive: igReceive as never, verify: igVerify as never, queues: true },
   { name: "messenger", secret: APP_SECRET, receive: msReceive as never, verify: msVerify as never, queues: true },
   { name: "whatsapp", secret: WA_SECRET, receive: waReceive as never, verify: waVerify as never, queues: false },
 ];
@@ -143,6 +143,8 @@ function makeGet(params: Record<string, string>) {
 }
 
 beforeEach(() => {
+  process.env.META_APP_SECRET = APP_SECRET;
+  process.env.META_IG_APP_SECRET = IG_SECRET;
   H.current = createFakeSupabase({
     tables: { webhook_events: [], rate_limit_hits: [], channels: [], contacts: [], conversations: [], messages: [] },
   });
@@ -210,7 +212,7 @@ describe.each(CHANNELS)("Webhook $name · firma HMAC", (channel) => {
   });
 });
 
-describe("Aislamiento de secretos entre canales", () => {
+describe("Secretos de la app Meta", () => {
   it("el secreto de Instagram no valida un evento de Facebook", async () => {
     const payload = metaPayload();
     const res = await fbReceive(makePost(payload, { "x-hub-signature-256": sign(payload, IG_SECRET) }));
@@ -223,7 +225,14 @@ describe("Aislamiento de secretos entre canales", () => {
     expect(res.status).toBe(401);
   });
 
-  it("Instagram acepta su propio secreto dedicado", async () => {
+  it("Instagram acepta el secreto compartido de la app Meta", async () => {
+    const payload = metaPayload();
+    const res = await igReceive(makePost(payload, { "x-hub-signature-256": sign(payload, APP_SECRET) }));
+    expect(res.status).toBe(200);
+  });
+
+  it("Instagram solo usa el secreto dedicado como respaldo si falta META_APP_SECRET", async () => {
+    delete process.env.META_APP_SECRET;
     const payload = metaPayload();
     const res = await igReceive(makePost(payload, { "x-hub-signature-256": sign(payload, IG_SECRET) }));
     expect(res.status).toBe(200);
