@@ -42,6 +42,15 @@ type MessengerProfileResponse = {
   };
 };
 
+type InstagramProfileResponse = {
+  name?: string;
+  username?: string;
+  profile_pic?: string;
+  error?: {
+    message?: string;
+  };
+};
+
 type MessengerConversationResponse = {
   data?: Array<{
     participants?: {
@@ -128,6 +137,31 @@ async function fetchMessengerProfile(pageToken: string, psid: string): Promise<C
 
   return {
     name: buildDisplayName(data.first_name, data.last_name),
+    profile_picture_url: data.profile_pic || null,
+  };
+}
+
+export async function fetchInstagramProfile(
+  pageToken: string,
+  igScopedId: string
+): Promise<ContactIdentity | null> {
+  const metaVersion = process.env.META_GRAPH_VERSION || "v21.0";
+  const fields = "name,username,profile_pic";
+  const url = `https://graph.facebook.com/${metaVersion}/${encodeURIComponent(igScopedId)}?fields=${fields}&access_token=${encodeURIComponent(pageToken)}`;
+
+  const response = await fetch(url);
+  const data = (await response.json()) as InstagramProfileResponse;
+
+  if (!response.ok || data.error) {
+    console.warn("[meta-webhook] instagram profile lookup failed", {
+      igScopedId,
+      error: data.error?.message || `HTTP ${response.status}`,
+    });
+    return null;
+  }
+
+  return {
+    name: data.name?.trim() || (data.username ? `@${data.username}` : null),
     profile_picture_url: data.profile_pic || null,
   };
 }
@@ -484,6 +518,8 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
           contactId
         );
       }
+    } else if (channel.type === "instagram" && channelToken) {
+      profile = await fetchInstagramProfile(channelToken, contactId);
     }
 
     contactProfileCache.set(contactId, profile);
