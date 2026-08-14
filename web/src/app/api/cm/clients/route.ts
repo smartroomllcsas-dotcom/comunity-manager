@@ -337,7 +337,10 @@ export async function PATCH(request: NextRequest) {
     .maybeSingle();
 
   if (!agent) return Response.json({ error: "Agente no encontrado." }, { status: 404 });
-  if (agent.role !== "admin" && agent.is_super_admin !== true) {
+  if (
+    agent.is_super_admin !== true &&
+    !(agent.role === "admin" && agent.member_type === "agency_user")
+  ) {
     return Response.json({ error: "Solo un administrador puede editar marcas." }, { status: 403 });
   }
 
@@ -368,4 +371,94 @@ export async function PATCH(request: NextRequest) {
   }
 
   return Response.json({ client: updated });
+}
+
+/**
+ * Elimina definitivamente una marca que nunca llegó a configurarse.
+ *
+ * La eliminación está deliberadamente limitada a marcas `onboarding` sin
+ * canales ni datos operativos. Una marca que alguna vez recibió información
+ * debe desactivarse, no borrarse, para conservar su historial.
+ */
+export async function DELETE(request: NextRequest) {
+  const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
+  const clientId = typeof payload?.clientId === "string" ? payload.clientId.trim() : "";
+  if (!clientId) {
+    return Response.json({ error: "clientId es requerido." }, { status: 400 });
+  }
+
+  if (isLocalMysql()) {
+    return Response.json(
+      { error: "La eliminación segura no está disponible con el proveedor local." },
+      { status: 501 },
+    );
+  }
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return Response.json({ error: "No autorizado." }, { status: 401 });
+
+  const smarttalkAdmin = createAdminClient();
+  const publicAdmin = createAdminClient("public");
+  const { data: agent } = await smarttalkAdmin
+    .from("agents")
+    .select("id, organization_id, role, member_type, is_super_admin")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (!agent) return Response.json({ error: "Agente no encontrado." }, { status: 404 });
+  if (agent.role !== "admin" && agent.is_super_admin !== true) {
+    return Response.json({ error: "Solo un administrador puede eliminar marcas vacías." }, { status: 403 });
+  }
+
+  const { data: brand, error: brandError } = await publicAdmin
+    .from("cm_clients")
+    .select("id, status")
+    .eq("id", clientId)
+    .eq("smarttalk_organization_id", agent.organization_id)
+    .maybeSingle();
+  if (brandError) {
+    return Response.json({ error: "No fue posible verificar la marca." }, { status: 500 });
+  }
+  if (!brand) return Response.json({ error: "Marca no encontrada." }, { status: 404 });
+  if (brand.status !== "onboarding") {
+    return Response.json(
+      { error: "Esta marca ya fue utilizada. Desactívala para conservar su información." },
+      { status: 409 },
+    );
+  }
+
+  const [channels, contacts, conversations, socialAccounts, whatsappAccounts] = await Promise.all([
+    smarttalkAdmin.from("channels").select("id").eq("organization_id", agent.organization_id).eq("brand_id", clientId).limit(1),
+    smarttalkAdmin.from("contacts").select("id").eq("organization_id", agent.organization_id).eq("brand_id", clientId).limit(1),
+    smarttalkAdmin.from("conversations").select("id").eq("organization_id", agent.organization_id).eq("brand_id", clientId).limit(1),
+    publicAdmin.from("cm_social_accounts").select("id").eq("client_id", clientId).limit(1),
+    publicAdmin.from("cm_whatsapp_accounts").select("id").eq("client_id", clientId).limit(1),
+  ]);
+  const checks = [channels, contacts, conversations, socialAccounts, whatsappAccounts];
+  if (checks.some((result) => result.error)) {
+    return Response.json({ error: "No fue posible verificar si la marca está vacía." }, { status: 500 });
+  }
+  if (checks.some((result) => Array.isArray(result.data) && result.data.length > 0)) {
+    return Response.json(
+      { error: "La marca contiene canales o información. Desactívala para no perder datos." },
+      { status: 409 },
+    );
+  }
+
+  const { error: deleteError } = await publicAdmin
+    .from("cm_clients")
+    .delete()
+    .eq("id", clientId)
+    .eq("smarttalk_organization_id", agent.organization_id);
+  if (deleteError) {
+    console.error("[cm/clients] empty brand delete failed", {
+      code: deleteError.code,
+      organizationId: agent.organization_id,
+      clientId,
+    });
+    return Response.json({ error: "No fue posible eliminar la marca vacía." }, { status: 500 });
+  }
+
+  return Response.json({ ok: true, deletedId: clientId });
 }

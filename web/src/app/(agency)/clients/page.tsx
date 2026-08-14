@@ -171,6 +171,7 @@ export default function ClientsPage() {
   const [showAddModal, setShowAddModal] = useState(false)
   // Marca sobre la que se pide confirmación para desactivar. null = modal cerrado.
   const [deactivateTarget, setDeactivateTarget] = useState<CMClient | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<CMClient | null>(null)
   const [lifecycleBusyId, setLifecycleBusyId] = useState<string | null>(null)
   const [lifecycleError, setLifecycleError] = useState<string | null>(null)
   // Refuerzo inmediato tras el POST: la respuesta del endpoint ya trae los
@@ -317,6 +318,30 @@ export default function ClientsPage() {
         : []
       setReconnectNotice((current) => ({ ...current, [client.id]: needsReconnection }))
       setDeactivateTarget(null)
+      await loadData()
+    } catch {
+      setLifecycleError('No fue posible contactar el servidor.')
+    } finally {
+      setLifecycleBusyId(null)
+    }
+  }
+
+  async function deleteEmptyBrand(client: CMClient) {
+    setLifecycleBusyId(client.id)
+    setLifecycleError(null)
+    try {
+      const response = await fetch('/api/cm/clients', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: client.id }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setLifecycleError(payload?.error || 'No fue posible eliminar la marca.')
+        return
+      }
+      setDeleteTarget(null)
+      setNotification({ type: 'success', message: 'Marca vacía eliminada correctamente.' })
       await loadData()
     } catch {
       setLifecycleError('No fue posible contactar el servidor.')
@@ -733,6 +758,14 @@ export default function ClientsPage() {
             const facebookConnected = isChannelConnected(channelState.messenger)
             const instagramConnected = isChannelConnected(channelState.instagram)
             const whatsappConnected = isChannelConnected(channelState.whatsapp)
+            const hasAnyChannel = Boolean(
+              channelState.messenger.channelId ||
+              channelState.instagram.channelId ||
+              channelState.whatsapp.channelId ||
+              social ||
+              whatsapp
+            )
+            const canDeleteEmptyBrand = client.status === 'onboarding' && !hasAnyChannel
             return (
               <div
                 key={client.id}
@@ -839,10 +872,7 @@ export default function ClientsPage() {
                 ) : (
                   <>
                 {/* Social Connection Status */}
-                {(((client.platforms || []).includes('Facebook')) ||
-                  facebookConnected ||
-                  needsActivation(channelState.messenger)) ? (
-                  facebookConnected ? (
+                {facebookConnected ? (
                     <div
                       data-testid="channel-connected-messenger"
                       className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3"
@@ -894,13 +924,9 @@ export default function ClientsPage() {
                       </svg>
                       Conectar Facebook
                     </button>
-                  )
-                ) : null}
+                  )}
 
-                {((client.platforms || []).includes('Instagram') ||
-                  instagramConnected ||
-                  needsActivation(channelState.instagram)) ? (
-                  instagramConnected ? (
+                {instagramConnected ? (
                     <div
                       data-testid="channel-connected-instagram"
                       className="mb-3 rounded-lg border border-pink-500/20 bg-pink-500/10 p-3"
@@ -953,13 +979,9 @@ export default function ClientsPage() {
                       </svg>
                       Conectar Instagram
                     </button>
-                  )
-                ) : null}
+                  )}
 
-                {((client.platforms || []).includes('WhatsApp') ||
-                  whatsappConnected ||
-                  needsActivation(channelState.whatsapp)) ? (
-                  whatsappConnected ? (
+                {whatsappConnected ? (
                     <div
                       data-testid="channel-connected-whatsapp"
                       className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3"
@@ -1020,8 +1042,7 @@ export default function ClientsPage() {
                         compact
                       />
                     </div>
-                  )
-                ) : null}
+                  )}
                   </>
                 )}
 
@@ -1034,7 +1055,7 @@ export default function ClientsPage() {
                   </span>
                 </div>
 
-                <div className="mt-3">
+                <div className={`mt-3 ${canDeleteEmptyBrand && !isPaused ? 'grid grid-cols-2 gap-2' : ''}`}>
                   {isPaused ? (
                     <button
                       type="button"
@@ -1046,18 +1067,34 @@ export default function ClientsPage() {
                       {lifecycleBusyId === client.id ? 'Reactivando…' : 'Reactivar'}
                     </button>
                   ) : (
-                    <button
-                      type="button"
-                      data-testid="brand-deactivate-button"
-                      onClick={() => {
-                        setLifecycleError(null)
-                        setDeactivateTarget(client)
-                      }}
-                      disabled={lifecycleBusyId === client.id}
-                      className="w-full rounded-lg border border-slate-600/50 bg-slate-800 px-3 py-2 text-xs font-medium text-slate-300 transition-colors hover:bg-slate-700 disabled:opacity-50"
-                    >
-                      Desactivar
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        data-testid="brand-deactivate-button"
+                        onClick={() => {
+                          setLifecycleError(null)
+                          setDeactivateTarget(client)
+                        }}
+                        disabled={lifecycleBusyId === client.id}
+                        className="w-full rounded-lg border border-slate-600/50 bg-slate-800 px-3 py-2 text-xs font-medium text-slate-300 transition-colors hover:bg-slate-700 disabled:opacity-50"
+                      >
+                        Desactivar
+                      </button>
+                      {canDeleteEmptyBrand && (
+                        <button
+                          type="button"
+                          data-testid="brand-delete-empty-button"
+                          onClick={() => {
+                            setLifecycleError(null)
+                            setDeleteTarget(client)
+                          }}
+                          disabled={lifecycleBusyId === client.id}
+                          className="w-full rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-300 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+                        >
+                          Eliminar
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -1107,6 +1144,51 @@ export default function ClientsPage() {
                 className="rounded-md border border-amber-500/40 bg-amber-500/20 px-4 py-2 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-500/30 disabled:opacity-50"
               >
                 {lifecycleBusyId === deactivateTarget.id ? 'Desactivando…' : 'Desactivar marca'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-brand-title"
+        >
+          <div
+            data-testid="brand-delete-empty-modal"
+            className="w-full max-w-md rounded-xl border border-red-500/30 bg-slate-900 p-6 shadow-xl"
+          >
+            <h2 id="delete-brand-title" className="text-base font-semibold text-slate-100">
+              Eliminar {deleteTarget.name}
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-slate-300">
+              Esta marca no tiene canales ni información. La eliminación es permanente y liberará su cupo del plan.
+            </p>
+            {lifecycleError && (
+              <p className="mt-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                {lifecycleError}
+              </p>
+            )}
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                disabled={lifecycleBusyId === deleteTarget.id}
+                className="rounded-md px-3 py-2 text-xs font-medium text-slate-400 transition-colors hover:text-slate-200 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                data-testid="brand-delete-empty-confirm"
+                onClick={() => void deleteEmptyBrand(deleteTarget)}
+                disabled={lifecycleBusyId === deleteTarget.id}
+                className="rounded-md border border-red-500/40 bg-red-500/20 px-4 py-2 text-xs font-semibold text-red-200 transition-colors hover:bg-red-500/30 disabled:opacity-50"
+              >
+                {lifecycleBusyId === deleteTarget.id ? 'Eliminando…' : 'Eliminar definitivamente'}
               </button>
             </div>
           </div>

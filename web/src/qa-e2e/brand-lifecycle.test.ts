@@ -610,4 +610,31 @@ describe("F · Interfaz de /clients", () => {
     expect(source).toContain("Agregado hace {timeAgo(client.created_at)}");
     expect(source).toContain("{client.posts_this_month} posts/mes");
   });
+
+  it("una marca creada sin plataformas conserva las tres acciones de conexión", () => {
+    const source = page();
+    expect(source).toContain("Conectar Facebook");
+    expect(source).toContain("Conectar Instagram");
+    expect(source).toContain("WhatsAppConnectButton");
+    expect(source).not.toContain("(client.platforms || []).includes('Facebook')");
+    expect(source).not.toContain("(client.platforms || []).includes('Instagram')");
+    expect(source).not.toContain("(client.platforms || []).includes('WhatsApp')");
+  });
+
+  it("sólo ofrece eliminación definitiva a una marca onboarding vacía", () => {
+    const source = page();
+    expect(source).toContain("client.status === 'onboarding' && !hasAnyChannel");
+    expect(source).toContain('data-testid="brand-delete-empty-button"');
+    expect(source).toContain('data-testid="brand-delete-empty-modal"');
+
+    const route = readFileSync(
+      join(process.cwd(), "src/app/api/cm/clients/route.ts"),
+      "utf8",
+    );
+    expect(route).toContain('brand.status !== "onboarding"');
+    for (const table of ["channels", "contacts", "conversations", "cm_social_accounts", "cm_whatsapp_accounts"]) {
+      expect(route).toContain(`from("${table}")`);
+    }
+    expect(route).toContain("La marca contiene canales o información");
+  });
 });
