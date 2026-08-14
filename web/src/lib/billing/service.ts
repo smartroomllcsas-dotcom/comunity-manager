@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { BRAND_STATUS_PAUSED } from "@/lib/smarttalk/brand-status";
 import { billingError, billingWarn } from "@/lib/billing/log";
+import { GLOBAL_ADMIN_EMAIL, isGlobalAdminEmail } from "@/lib/platform-admin";
 import type {
   BillingEnforcementMode,
   BillingFeatureCode,
@@ -135,6 +136,31 @@ async function currentUserIsSuperAdmin() {
       .maybeSingle();
     return agent?.is_super_admin === true;
   } catch {
+    return false;
+  }
+}
+
+async function organizationBelongsToPlatformOwner(organizationId: string) {
+  try {
+    const admin = createAdminClient();
+    const { data: agent, error } = await admin
+      .from("agents")
+      .select("email, is_super_admin")
+      .eq("organization_id", organizationId)
+      .eq("is_super_admin", true)
+      .eq("email", GLOBAL_ADMIN_EMAIL)
+      .limit(1)
+      .maybeSingle();
+
+    return (
+      !error &&
+      agent?.is_super_admin === true &&
+      typeof agent.email === "string" &&
+      isGlobalAdminEmail(agent.email)
+    );
+  } catch {
+    // Billing must never fail open for customer organizations when the lookup
+    // itself is unavailable.
     return false;
   }
 }
@@ -395,9 +421,14 @@ export async function checkBillingFeature(
     ? "hard"
     : parseMode(process.env.BILLING_ENFORCEMENT_MODE);
 
-  // The platform owner is outside customer plan limits, but the check remains
-  // in the backend so every channel and resource creation path is consistent.
-  if (await currentUserIsSuperAdmin()) {
+  // The platform owner is outside customer plan limits. Interactive requests
+  // can identify the signed-in superadmin directly; webhooks and workers have
+  // no user session, so they must identify the owner's organization instead.
+  // Customer organizations without a superadmin agent keep normal limits.
+  if (
+    (await currentUserIsSuperAdmin()) ||
+    (await organizationBelongsToPlatformOwner(input.organizationId))
+  ) {
     return makeDecision(normalizedInput, "off", fallbackPeriod, {
       reason: "unlimited",
       wouldBlock: false,
@@ -462,7 +493,10 @@ export async function checkBillingFeature(
       "id, status, current_period_start, current_period_end, trial_ends_at, grace_ends_at"
     )
     .eq("organization_id", input.organizationId)
-    .in("status", ["trial", "active", "past_due", "suspended"])
+    // Include terminal rows so a cancelled paid subscription cannot look like
+    // an organization that legitimately never needed a subscription (free
+    // plan). `isSubscriptionUsable` performs the final status decision.
+    .in("status", ["trial", "active", "past_due", "cancelled", "suspended"])
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

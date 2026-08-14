@@ -15,7 +15,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const h = vi.hoisted(() => {
-  const cfg: { tables: Record<string, { data: unknown; error: unknown }> } = { tables: {} };
+  const cfg: {
+    tables: Record<string, { data: unknown; error: unknown }>;
+    userId: string | null;
+  } = { tables: {}, userId: "user-1" };
 
   function makeBuilder(table: string) {
     const result = () => cfg.tables[table] ?? { data: null, error: null };
@@ -45,7 +48,11 @@ const h = vi.hoisted(() => {
     rpc: async () => ({ data: true, error: null }),
   };
   const server = {
-    auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
+    auth: {
+      getUser: async () => ({
+        data: { user: cfg.userId ? { id: cfg.userId } : null },
+      }),
+    },
   };
   return { cfg, admin, server };
 });
@@ -79,7 +86,15 @@ function setupTables(opts: {
       };
 
   h.cfg.tables = {
-    agents: { data: { is_super_admin: opts.superAdmin ?? false }, error: null },
+    agents: {
+      data: {
+        is_super_admin: opts.superAdmin ?? false,
+        email: opts.superAdmin
+          ? "leonelzc2005@gmail.com"
+          : "customer@example.invalid",
+      },
+      error: null,
+    },
     organizations: {
       data: {
         id: "org-1",
@@ -114,6 +129,7 @@ function check() {
 describe("checkBillingFeature enforcement", () => {
   beforeEach(() => {
     process.env.BILLING_ENFORCEMENT_MODE = "hard";
+    h.cfg.userId = "user-1";
   });
 
   it("límite -1: uso 9/10 permite la acción (llega justo al límite)", async () => {
@@ -151,6 +167,24 @@ describe("checkBillingFeature enforcement", () => {
     expect(decision.allowed).toBe(true);
     expect(decision.reason).toBe("unlimited");
     expect(decision.mode).toBe("off");
+  });
+
+  it("webhook sin sesión: la organización del superadmin continúa ilimitada", async () => {
+    h.cfg.userId = null;
+    setupTables({ superAdmin: true, usage: LIMIT * 100 });
+    const decision = await check();
+    expect(decision.allowed).toBe(true);
+    expect(decision.reason).toBe("unlimited");
+    expect(decision.mode).toBe("off");
+  });
+
+  it("webhook sin sesión: una organización cliente conserva sus límites", async () => {
+    h.cfg.userId = null;
+    setupTables({ superAdmin: false, usage: LIMIT });
+    const decision = await check();
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toBe("limit_reached");
+    expect(billingDeniedResponse(decision).status).toBe(402);
   });
 
   it("plan gratuito activo sin suscripción: aplica sus límites y permite mientras haya cupo", async () => {
