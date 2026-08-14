@@ -11,7 +11,6 @@ import {
   getUserProfile,
   getUserAdAccounts,
   subscribePageToApp,
-  subscribeInstagramAccountToApp,
 } from '@/lib/meta'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getCmClientAccess } from '@/lib/cm-client-access'
@@ -349,6 +348,16 @@ export async function finalizeMetaConnection(input: {
   // llegaba ni un mensaje. Ahora el veredicto del proveedor decide el estado
   // del canal y decide también qué se le dice al administrador.
   const activationTargets: ActivationTarget[] = []
+  // Facebook Login for Business instala Messenger e Instagram sobre la misma
+  // Página. Ambos canales comparten una sola llamada idempotente y, por tanto,
+  // el mismo veredicto; no tiene sentido golpear dos veces subscribed_apps.
+  let pageSubscription: Promise<unknown> | null = null
+  const subscribePageOnce = () => {
+    if (!pageSubscription) {
+      pageSubscription = subscribePageToApp(page.id, page.access_token)
+    }
+    return pageSubscription
+  }
   const messengerChannel = readyChannels.find((channel) => channel.type === 'facebook_messenger')
   if (messengerChannel && page.id && page.access_token) {
     activationTargets.push({
@@ -356,17 +365,22 @@ export async function finalizeMetaConnection(input: {
       asset: 'facebook_page',
       assetId: page.id,
       wasActive: messengerChannel.wasActive,
-      subscribe: () => subscribePageToApp(page.id, page.access_token),
+      subscribe: subscribePageOnce,
     })
   }
   const instagramChannel = readyChannels.find((channel) => channel.type === 'instagram')
-  if (instagramChannel && igAccount?.id && longToken.access_token) {
+  if (instagramChannel && igAccount?.id && page.id && page.access_token) {
     activationTargets.push({
       channelId: instagramChannel.id,
       asset: 'instagram_account',
       assetId: igAccount.id,
       wasActive: instagramChannel.wasActive,
-      subscribe: () => subscribeInstagramAccountToApp(igAccount.id, longToken.access_token),
+      // Este flujo usa Facebook Login for Business. Meta instala los webhooks
+      // de Messenger e Instagram sobre la Página vinculada, mediante el Page
+      // Access Token. `graph.instagram.com/{ig-id}/subscribed_apps` pertenece
+      // al Instagram Login directo y rechaza este token de Facebook con code
+      // 190, aunque sea nuevo y todavía no haya expirado.
+      subscribe: subscribePageOnce,
     })
   }
 

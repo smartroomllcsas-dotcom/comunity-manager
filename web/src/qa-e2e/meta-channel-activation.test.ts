@@ -126,12 +126,25 @@ vi.mock("@/lib/meta", async (importOriginal) => {
     getUserPages: async () => H.pages,
     getUserAdAccounts: async () => [],
     subscribePageToApp: async (pageId: string) => {
+      const channelRows = H.current!.store.channels as Array<Record<string, unknown>>;
+      const pageChannel = channelRows.find((row) => row.meta_business_id === pageId);
       H.flagAtSubscribe.push({
         key: `page:${pageId}`,
-        flag: (H.current!.store.channels as Array<Record<string, unknown>>)
+        flag: channelRows
           .filter((row) => row.meta_business_id === pageId)
           .map((row) => ((row.config || {}) as Record<string, unknown>).webhook_subscribed),
       });
+      const instagramChannel = channelRows.find(
+        (row) => row.brand_id === pageChannel?.brand_id && row.type === "instagram",
+      );
+      if (instagramChannel) {
+        H.flagAtSubscribe.push({
+          key: `ig-via-page:${instagramChannel.meta_business_id}`,
+          flag: [
+            ((instagramChannel.config || {}) as Record<string, unknown>).webhook_subscribed,
+          ],
+        });
+      }
       if (H.failPage === pageId) {
         throw new Error(
           `Meta API: (#200) Requires pages_manage_metadata permission access_token=EAAsecretodepagina1234567890 (code: 200)`,
@@ -459,12 +472,12 @@ describe("1 · Agencia con 10 marcas × Messenger + Instagram + WhatsApp", () =>
     }
   });
 
-  it("los 30 activos quedaron suscritos al webhook", async () => {
+  it("los canales quedaron instalados en Meta (Instagram comparte la Página)", async () => {
     await connectAll();
 
     for (const brand of BRANDS) {
       expect(H.subscribed).toContain(`page:${brand.pageId}`);
-      expect(H.subscribed).toContain(`ig:${brand.igId}`);
+      expect(H.subscribed).not.toContain(`ig:${brand.igId}`);
       expect(H.subscribed).toContain(`waba:${brand.wabaId}`);
     }
   });
@@ -598,14 +611,14 @@ describe("3 · Si el proveedor no queda suscrito, no hay «conectado»", () => {
     expect(H.current!.store.messages).toHaveLength(0);
   });
 
-  it("Instagram: si sólo falla Instagram, Messenger sí queda activo", async () => {
+  it("Instagram vía Facebook: si falla instalar la Página, ambos canales nuevos quedan en error", async () => {
     const brand = BRANDS[1];
-    H.failInstagram = brand.igId;
+    H.failPage = brand.pageId;
 
     const response = await connectMeta(brand);
 
     expect(location(response)).toContain("meta_error");
-    expect(channelOf(brand.id, "facebook_messenger")!.status).toBe("active");
+    expect(channelOf(brand.id, "facebook_messenger")!.status).toBe("error");
     expect(channelOf(brand.id, "instagram")!.status).toBe("error");
   });
 
@@ -796,7 +809,7 @@ describe("3 bis · Conectar un activo distinto sobre un canal activo", () => {
     expect(isChannelConnected((await clientsView(brand.id)).instagram)).toBe(true);
 
     const cuentaB = "ig-b-nueva";
-    H.failInstagram = cuentaB;
+    H.failPage = brand.pageId;
     await connectMeta({ ...brand, igId: cuentaB });
 
     const channels = await clientsView(brand.id);
@@ -854,7 +867,7 @@ describe("3 bis · Conectar un activo distinto sobre un canal activo", () => {
     expect(channelOf(brand.id, "instagram")!.status).toBe("active");
 
     const cuentaB = "ig-b-nueva";
-    H.failInstagram = cuentaB;
+    H.failPage = brand.pageId;
     const response = await connectMeta({ ...brand, igId: cuentaB });
 
     const channel = channelOf(brand.id, "instagram")!;
@@ -1958,7 +1971,7 @@ describe("11 · webhook_subscribed=false se escribe antes de llamar al proveedor
     const brand = BRANDS[1];
     await connectMeta(brand);
 
-    expect(flagAl(`ig:${brand.igId}`)).toEqual([false]);
+    expect(flagAl(`ig-via-page:${brand.igId}`)).toEqual([false]);
     expect(
       (channelOf(brand.id, "instagram")!.config as Record<string, unknown>).webhook_subscribed,
     ).toBe(true);

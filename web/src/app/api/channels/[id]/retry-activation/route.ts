@@ -152,7 +152,40 @@ export async function POST(
   } else if (channel.type === "instagram") {
     asset = "instagram_account";
     assetId = channel.meta_business_id || legacyId;
-    subscribe = () => subscribeInstagramAccountToApp(assetId as string, token);
+    if (config.connected_via === "instagram_business_login") {
+      // Instagram Login directo: token y host propios de Instagram.
+      subscribe = () => subscribeInstagramAccountToApp(assetId as string, token);
+    } else {
+      // Facebook Login for Business: la instalación se hace sobre la Página
+      // asociada usando el Page Access Token guardado en este canal. Los
+      // canales históricos no tienen `facebook_page_id`, por eso se conserva
+      // el respaldo de la fila legacy.
+      let facebookPageId =
+        typeof config.facebook_page_id === "string" ? config.facebook_page_id : null;
+      if (!facebookPageId) {
+        const { data: socialAccount } = await publicAdmin
+          .from("cm_social_accounts")
+          .select("page_id")
+          .eq("client_id", channel.brand_id)
+          .maybeSingle();
+        facebookPageId =
+          typeof (socialAccount as { page_id?: unknown } | null)?.page_id === "string"
+            ? ((socialAccount as { page_id: string }).page_id)
+            : null;
+      }
+      if (!facebookPageId) {
+        return Response.json(
+          {
+            error:
+              "No se encontró la página de Facebook asociada a este Instagram. Reconecta Meta desde la marca.",
+            code: "missing_facebook_page_id",
+          },
+          { status: 409 },
+        );
+      }
+      const pageId = facebookPageId;
+      subscribe = () => subscribePageToApp(pageId, token);
+    }
   } else if (channel.type === "whatsapp_business_api" || channel.type === "whatsapp_cloud_api") {
     asset = "whatsapp_phone";
     assetId = channel.whatsapp_business_account_id;

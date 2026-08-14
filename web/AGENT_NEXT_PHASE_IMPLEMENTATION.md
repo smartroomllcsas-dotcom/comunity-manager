@@ -6851,3 +6851,37 @@ el defecto de esta serie.
 
 **No se hizo commit, push ni despliegue. No se ejecutó SQL ni migración
 alguna.** Queda listo para revisión de Codex.
+
+---
+
+# Iteración 26 · Instagram usa el host y token de su flujo real
+
+## 184. Regresión observada después del despliegue
+
+Una reconexión de Instagram mediante Facebook Login for Business terminaba con
+«Token expirado», aunque el token recién emitido vencía en octubre de 2026. El
+token no estaba vencido: se estaba enviando un Page/Facebook token a
+`graph.instagram.com/{ig-id}/subscribed_apps`, endpoint reservado al Instagram
+Login directo. Meta devolvía OAuth code 190 y el parser lo etiquetaba de forma
+demasiado amplia como expiración.
+
+## 185. Corrección
+
+- Facebook Login for Business instala Messenger e Instagram una sola vez sobre
+  `/{page-id}/subscribed_apps`, con el Page Access Token.
+- Instagram Business Login directo conserva
+  `graph.instagram.com/{ig-id}/subscribed_apps` y su Instagram User Token.
+- El canal Instagram del flujo Facebook guarda `config.facebook_page_id` para
+  que «Reintentar activación» utilice la Página correcta sin repetir OAuth.
+- Los canales históricos recuperan ese Page ID desde `cm_social_accounts`.
+- OAuth code 190 ya no se afirma automáticamente como «token expirado»; sólo
+  los subcódigos 463 y 467 demuestran expiración.
+- La instalación de la Página se comparte entre Messenger e Instagram mediante
+  una única promesa, de modo que ambos reciben el mismo veredicto sin duplicar
+  llamadas.
+
+## 186. Validación
+
+Las 189 pruebas críticas pasan. La cobertura distingue explícitamente
+Instagram vía Facebook (instalación sobre Página) de Instagram Login directo
+(instalación sobre cuenta profesional).

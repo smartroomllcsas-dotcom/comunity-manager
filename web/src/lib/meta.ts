@@ -9,7 +9,6 @@ const INSTAGRAM_GRAPH_URL = 'https://graph.instagram.com'
 // Transient error codes that should be retried
 const TRANSIENT_ERROR_CODES = [1, 2, 4, 17]
 const TOKEN_EXPIRED_SUBCODES = [463, 467]
-const INVALID_TOKEN_SUBCODE = 190
 
 export interface MetaApiError {
   code: number
@@ -25,7 +24,10 @@ function parseMetaError(error: any): MetaApiError {
     subcode: error.error_subcode,
     message: error.message || 'Error desconocido de Meta API',
     isTransient: TRANSIENT_ERROR_CODES.includes(error.code),
-    isTokenExpired: TOKEN_EXPIRED_SUBCODES.includes(error.error_subcode) || error.code === INVALID_TOKEN_SUBCODE,
+    // OAuth code 190 significa token inválido en general; también aparece si
+    // se envía un token de Facebook al host de Instagram. Sólo los subcódigos
+    // 463/467 demuestran expiración real.
+    isTokenExpired: TOKEN_EXPIRED_SUBCODES.includes(error.error_subcode),
   }
 }
 

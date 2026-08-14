@@ -199,6 +199,11 @@ export async function ensureMetaChannelsReady(
         legacy_id: input.instagram.id,
         legacy_client_id: input.brandId,
         legacy_account_id: input.legacyAccountId,
+        // En Facebook Login for Business, Instagram recibe webhooks mediante
+        // la Página asociada y su Page Access Token. Se conserva el Page ID
+        // para que «Reintentar activación» use el endpoint correcto sin repetir
+        // todo el OAuth.
+        facebook_page_id: input.page.id,
         instagram_username: input.instagram.username || null,
       },
       connected_at: input.connectedAt,
