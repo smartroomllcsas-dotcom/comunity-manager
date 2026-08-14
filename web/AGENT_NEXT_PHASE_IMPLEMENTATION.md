@@ -7032,3 +7032,266 @@ No se modificó ninguna migración, tabla, flujo OAuth de Meta, suscripción de
 webhooks ni la asignación página/canal/marca.
 
 **No se hizo commit, push ni despliegue.** Queda listo para revisión de Codex.
+
+---
+
+# Aislamiento de WhatsApp por organización, marca y asesor
+
+## 192. Hallazgo
+
+> **Corrección posterior a la primera revisión (§192 bis).** La primera versión
+> de este trabajo dejaba fuera a los usuarios aceptados por invitación. Está
+> corregida y documentada más abajo; el resto de secciones ya refleja el
+> estado final.
+
+Las **escrituras** de WhatsApp ya autorizaban con `getCmClientAccess()`
+—`/api/whatsapp/subscribe`, `/api/whatsapp/register`,
+`/api/whatsapp/test-message` y `/auth/whatsapp/exchange`—. Dos **lecturas** se
+habían quedado en el modelo anterior a las agencias, cuando una marca pertenecía
+a un usuario y no a una organización:
+
+1. **`GET /api/whatsapp/accounts`** autorizaba con la cookie `cm_user_id` y
+   filtraba `cm_clients` por `user_id`.
+2. **`/clients/[clientId]/whatsapp`** consultaba `cm_clients` desde el navegador
+   y comparaba el propietario histórico con el usuario de la sesión; si no
+   coincidían, redirigía a `/clients`.
+
+El efecto es incoherente y difícil de diagnosticar: un administrador de agencia
+o un asesor con la marca asignada **podían conectar, suscribir y enviar
+mensajes**, pero no ver la cuenta ni entrar a la pantalla. La autorización de
+escritura y la de lectura no decían lo mismo.
+
+Además, el historial se consultaba directamente desde el navegador:
+
+```ts
+supabase.from('cm_chat_history').eq('client_context', `whatsapp:${clientId}`)
+```
+
+Esa consulta la firma la sesión del usuario, así que su alcance depende de las
+políticas RLS de la tabla y no de la autorización de marca del módulo; y el
+filtro lo compone el cliente, con el `clientId` de la barra de direcciones.
+
+## 192 bis. El bloqueo: los usuarios invitados no tienen `cm_users`
+
+La revisión encontró que la corrección anterior seguía dejando fuera a un grupo
+entero, y por una razón que las pruebas no podían ver.
+
+**Un usuario aceptado por invitación se crea en `smarttalk.agents` y en
+`brand_advisor_assignments`, pero no necesariamente en `public.cm_users`.** Esa
+tabla pertenece al modelo anterior a las agencias. Y tanto `getCmClientAccess()`
+como `listAccessibleCmClientIds()` abrían con:
+
+```ts
+if (!cmUser) return null;   // ← denegaba a todo invitado
+```
+
+Así que un administrador de agencia o un asesor asignado que hubieran entrado
+por invitación quedaban fuera igual que antes. El síntoma era desconcertante: la
+invitación se aceptaba, el usuario entraba en la plataforma, y la marca no
+aparecía por ningún lado.
+
+**Por qué las pruebas no lo vieron.** El fixture creaba una fila de `cm_users`
+para *todos* los perfiles, incluidos los que en producción no la tienen. Las
+pruebas describían un mundo que no existe, y en ese mundo el código funcionaba.
+
+### Corrección
+
+En `src/lib/cm-client-access.ts`, las dos funciones:
+
+- **Falta de `cm_users` deja de ser motivo de denegación.** Sólo se deniega
+  cuando no hay ni `cm_users` ni agente —que es no ser nadie aquí—:
+  `if (!cmUser && !agent) return null`.
+- **La propiedad histórica se evalúa sólo si existe `cm_users`:**
+  `const ownsClient = Boolean(cmUser) && client.user_id === cmUser.id`. Sin esa
+  fila no hay propiedad que comprobar, y el acceso debe llegar por organización.
+- **El filtro del listado** aplica organización aunque falte `cm_users`, evalúa
+  la propiedad sólo cuando la hay, y conserva la intersección con
+  `brand_advisor_assignments`.
+- **`cmUserId`** usa `cmUser?.id ?? client.user_id`. Cuando el acceso llega por
+  organización y el usuario no tiene fila propia, se opera con el propietario
+  histórico de la marca. Es una columna `NOT NULL REFERENCES cm_users(id)`, así
+  que el valor siempre existe y siempre es una clave válida para las tablas que
+  lo referencian —`cm_oauth_pending_selections.cm_user_id`,
+  `cm_whatsapp_accounts.user_id`—. **No se crea ningún usuario durante una
+  comprobación de permisos.**
+
+Consecuencia que conviene tener presente: dos invitados distintos sobre la misma
+marca comparten ese identificador legacy, así que una selección de página
+pendiente creada por uno puede consumirla el otro. Ambos están autorizados sobre
+esa marca, de modo que no abre ningún acceso nuevo; queda anotado en §196.
+
+### Fixture corregido
+
+Ahora **sólo el propietario histórico tiene fila en `cm_users`**. Los demás
+perfiles son invitados, que es lo que ocurre en producción. `seed(perfil, {
+withCmUser: true })` reproduce el caso contrario para comprobar que el camino
+antiguo sigue funcionando.
+
+## 193. Archivos modificados
+
+| Archivo | Cambio |
+|---|---|
+| `src/lib/cm-client-access.ts` | **Nuevo** `listAccessibleCmClientIds()`: versión «listado» de `getCmClientAccess`, con las mismas reglas. Devuelve `null` sin sesión y `[]` sin marcas, para que quien llame distinga 401 de lista vacía. **Y (§192 bis)** en ambas funciones: la falta de `cm_users` deja de denegar, la propiedad histórica se evalúa sólo si esa fila existe, y `cmUserId` cae al propietario histórico de la marca |
+| `src/app/api/whatsapp/accounts/route.ts` | Con `clientId` autoriza con `getCmClientAccess()` y consulta `.eq("client_id", access.clientId)`; sin él usa `listAccessibleCmClientIds()`. Proyección explícita `toPublicAccount()` |
+| `src/app/api/whatsapp/history/route.ts` | **Nuevo**. Autoriza primero, consulta después con `service_role`, compone el contexto en el servidor, ordena por `created_at` descendente y limita (12 por defecto, 100 máximo) |
+| `src/app/(agency)/clients/[clientId]/whatsapp/page.tsx` | Sin consultas de navegador a `cm_clients` ni `cm_chat_history`; sin comparación por propietario. Consume `/api/cm/clients`, `/api/whatsapp/accounts` y `/api/whatsapp/history`. Un 403 muestra «No autorizado» en vez de expulsar en silencio |
+| `src/qa-e2e/whatsapp-brand-access.test.ts` | **Nuevo**. 50 pruebas, con el fixture corregido: sólo el propietario histórico tiene fila en `cm_users` |
+
+Tres decisiones que conviene dejar escritas:
+
+- **El filtro usa `access.clientId`, no el parámetro recibido.** Aunque sean
+  iguales, filtrar por lo comprobado y no por lo enviado es lo que hace
+  imposible que un `clientId` manipulado se cuele.
+- **La respuesta se reconstruye campo a campo.** La lista blanca de columnas del
+  `select` ya deja fuera las credenciales, pero esa garantía vive en una cadena
+  de texto. Al escribir la proyección en código, la prueba de «nunca devuelve
+  tokens» comprueba algo real: el Supabase falso de las pruebas **no** proyecta
+  columnas, así que sin esto la garantía dependía sólo de PostgREST y ninguna
+  prueba la cubría de verdad.
+- **`cm_users` no gobierna el acceso, sólo la propiedad histórica.** El acceso
+  lo decide la organización del agente y, para los asesores, la asignación de
+  marca. Es la corrección de §192 bis.
+
+## 194. Matriz de permisos
+
+Sobre una marca de la organización cuyo `cm_clients.user_id` apunta a un
+**tercero** (el propietario histórico), y con todos los perfiles **sin fila en
+`cm_users`** salvo ese propietario —es decir, entrados por invitación—, que es
+el caso que fallaba:
+
+| Perfil | `accounts?clientId=` | `history?clientId=` | Listado sin `clientId` | Acciones POST |
+|---|---|---|---|---|
+| Superadministrador | 200 | 200 | Su organización y lo suyo | Permitidas |
+| Administrador de agencia | 200 | 200 | Marcas de su organización | Permitidas |
+| Asesor con la marca asignada | 200 | 200 | Sólo sus marcas asignadas | Permitidas |
+| Asesor sin la marca asignada | **403** | **403** | `[]` | **403** |
+| Usuario de otra organización | **403** | **403** | Sólo sus propias marcas | **403** |
+| Propietario histórico | 200 | 200 | Sus marcas | Permitidas |
+| Sin sesión | 403 | 403 | **401** | 403 |
+
+Nota sobre `cm_users`: la tabla **no interviene en la decisión de acceso**. Un
+perfil con fila propia y otro sin ella obtienen exactamente los mismos permisos;
+lo único que cambia es el identificador con el que se opera después (§192 bis).
+
+Nota sobre el superadministrador: conserva el alcance global en la comprobación
+**por marca** —`getCmClientAccess` le concede cualquiera—, mientras que el
+**listado** se mantiene acotado a su organización, igual que hace
+`GET /api/cm/clients`. Devolver todas las marcas de la plataforma en un listado
+de cuentas sería un cambio de comportamiento, no una corrección de permisos.
+
+## 195. Pruebas
+
+`src/qa-e2e/whatsapp-brand-access.test.ts`, 50 pruebas en seis bloques. Salvo el
+propietario histórico, **ningún perfil tiene fila en `cm_users`**: el fixture
+reproduce a los usuarios entrados por invitación, que es donde estaba el
+bloqueo.
+
+1. **Cuentas** — los seis perfiles; el `clientId` cambiado a mano devuelve 403
+   sin filtrar `PN-2` ni `PN-VECINA`; la cuenta devuelta siempre corresponde al
+   `clientId` solicitado; el listado de cada perfil trae exactamente lo suyo;
+   401 sin sesión; ninguna respuesta contiene el token, `access_token` ni `enc:`.
+2. **Historial** — mismos perfiles; cambiar el `clientId` no filtra el historial
+   ajeno; **un `client_context` enviado por el navegador se ignora**; no se
+   mezcla `campanas:<marca>`, que comparte la marca pero no el módulo; orden
+   descendente y límite respetados; 400 sin `clientId`.
+3. **Acciones existentes** — `subscribe` y `register` ejecutados de verdad con
+   perfil permitido y bloqueado; y comprobación de que las cuatro rutas siguen
+   usando `getCmClientAccess()` y filtrando por `client_id` exacto.
+4. **Contrato de la pantalla** — regresiones que impiden volver a comparar por
+   propietario, volver a consultar `cm_clients`/`cm_chat_history` desde el
+   navegador, o reintroducir la cookie de sesión en la ruta de cuentas.
+5. **Un número, una marca** — cada `phone_number_id` en un único canal y una
+   única marca, y la unicidad global sigue impuesta por `uq_channels_whatsapp_phone`
+   (migración 013).
+6. **Usuarios invitados sin `cm_users`** (§192 bis) — bloque nuevo, con la
+   ausencia de la fila **comprobada en el propio almacén** en cada caso:
+   administrador invitado accede a cuenta, historial y listado; asesor asignado
+   invitado accede y su listado sigue acotado a su marca; asesor no asignado y
+   otra organización reciben 403 en ambas rutas; las acciones POST siguen
+   funcionando para los invitados autorizados y bloqueadas para el resto;
+   ninguna respuesta expone `access_token`, `access_token_ciphertext` ni el
+   token; sin `cm_users` se opera con el propietario histórico y con `cm_users`
+   propio se usa ese identificador; el camino antiguo (`withCmUser: true`)
+   conserva exactamente los mismos permisos; y sin agente **ni** `cm_users` no
+   hay acceso.
+
+**La detección se comprobó de verdad, dos veces:**
+
+- reponiendo la versión anterior de `/api/whatsapp/accounts`, **12 de 50 pruebas
+  fallan**;
+- reponiendo el `if (!cmUser) return null` de `cm-client-access.ts`, **14 de 50
+  fallan**.
+
+Restauradas las correcciones, las 50 pasan.
+
+### Resultados
+
+```text
+npx vitest run src/qa-e2e/whatsapp-brand-access.test.ts
+ Test Files  1 passed (1)
+      Tests  50 passed (50)
+
+npm test
+ Test Files  43 passed | 1 skipped (44)
+      Tests  1036 passed | 4 skipped (1040)
+# tests 25   # pass 6   # fail 0   # skipped 19   (node --test)
+
+npx next build
+✓ Compiled successfully in 14.3s
+├ ƒ /api/whatsapp/history          ← la ruta nueva queda registrada
+
+npm run lint
+0 errores (ninguna advertencia nueva)
+
+git diff --check
+(sin salida)
+```
+
+## 196. Riesgos y pendientes
+
+1. **Un usuario sin fila en `smarttalk.agents` no entra a la pantalla.** La
+   página resuelve la marca contra `/api/cm/clients`, que exige agente. No es
+   una regresión nueva: ese usuario tampoco podía usar `/clients`, porque el
+   listado ya dependía del mismo endpoint. La ruta de cuentas sí sigue
+   admitiéndolo por propiedad histórica, de modo que la API no se ha estrechado.
+2. **El historial sigue leyendo `cm_chat_history` por `client_context`**, que es
+   una convención de texto, no una clave foránea. Se compone en el servidor y
+   está cubierto por pruebas, pero una marca cuyo historial se hubiera guardado
+   con otro prefijo no aparecería. No se cambió el modelo de datos.
+3. **No se tocaron las políticas RLS de `cm_chat_history`.** La lectura pasa
+   ahora por `service_role` tras autorizar, así que la ruta no depende de ellas;
+   si otro consumidor sigue leyendo esa tabla desde el navegador, conserva su
+   comportamiento anterior.
+4. El listado del superadministrador queda acotado a su organización (§194).
+5. **Dos invitados sobre la misma marca comparten el `cmUserId` legacy**
+   (§192 bis): al no tener fila propia en `cm_users`, ambos operan con el
+   propietario histórico. La consecuencia práctica es que una selección de
+   página pendiente creada por uno puede consumirla el otro. Los dos están
+   autorizados sobre esa marca, así que no abre ningún acceso nuevo, pero deja
+   de distinguir *quién* la inició. Cerrarlo del todo exigiría crear la fila de
+   `cm_users` al aceptar la invitación —un cambio de alta de usuarios, no de
+   permisos—, y por eso queda anotado en vez de improvisado aquí.
+6. **`cm_users` sigue siendo obligatoria para el modo local MySQL**, cuyo camino
+   (`isLocalMysql`) conserva el filtro por la cookie `cm_user_id` sin cambios.
+
+## 197. Lo que NO se modificó
+
+Confirmado explícitamente, por revisión del diff:
+
+- **OAuth de Meta** — sin cambios.
+- **WhatsApp Embedded Signup** (`/auth/whatsapp/exchange`) — sin cambios; sólo
+  se comprueba en pruebas que sigue usando `getCmClientAccess()`.
+- **Suscripción de webhooks** — sin cambios.
+- **Recepción y flujo de mensajes** — sin cambios.
+- **Asignación página/canal/marca** — sin cambios.
+- **Migraciones y tablas** — ninguna creada ni ejecutada.
+- **Datos de producción** — no se tocaron.
+
+También sin cambios: el **alta de usuarios por invitación**. La corrección de
+§192 bis adapta la lectura de permisos a cómo se crean hoy esos usuarios; no
+toca el proceso de invitación ni crea filas en `cm_users`.
+
+`git status` muestra exactamente seis archivos: los cinco de §193 más este
+documento.
+
+**No se hizo commit, push ni despliegue.** Queda listo para revisión de Codex.
