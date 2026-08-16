@@ -9,6 +9,7 @@ import type { Activity, NewActivity } from '../schemas/activity';
 import type { KnowledgeNode, NewKnowledgeNode } from '../schemas/knowledge-node';
 import type { KnowledgeEdge, NewKnowledgeEdge } from '../schemas/knowledge-edge';
 import type { KnowledgeKind, NewKnowledgeKind } from '../schemas/knowledge-kind';
+import type { AgentTemplate } from '../schemas/agent-template';
 
 // Helper: returns a new nested Map for an org if it doesn't exist
 function ensureOrg<T>(store: Map<string, Map<string, T>>, orgId: string): Map<string, T> {
@@ -22,6 +23,7 @@ let autoNumId = 1000;
 function nextNumId() { return autoNumId++; }
 
 export function createInMemoryRepository(): OSRepository {
+  const templatesStore = new Map<string, AgentTemplate>();
   const agents = new Map<string, Map<string, Agent>>();
   const goals = new Map<string, Map<string, Goal>>();
   const skills = new Map<string, Map<string, Skill>>();
@@ -268,6 +270,20 @@ export function createInMemoryRepository(): OSRepository {
           if (k?.system) throw new Error('Cannot delete system kinds');
           store.delete(id);
         },
+      },
+    },
+    templates: {
+      async all() {
+        return [...templatesStore.values()].sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0) || a.name.localeCompare(b.name));
+      },
+      async byId(id) { return templatesStore.get(id) ?? null; },
+      async byCategory(category) {
+        return [...templatesStore.values()].filter(t => t.category === category).sort((a, b) => a.name.localeCompare(b.name));
+      },
+      async incrementInstalls(id) {
+        const t = templatesStore.get(id);
+        if (!t) return;
+        templatesStore.set(id, { ...t, installsCount: t.installsCount + 1 });
       },
     },
   };

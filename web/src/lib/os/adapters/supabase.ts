@@ -11,6 +11,7 @@ import { ActivitySchema, type Activity, type NewActivity } from '../schemas/acti
 import { KnowledgeNodeSchema, type KnowledgeNode, type NewKnowledgeNode } from '../schemas/knowledge-node';
 import { KnowledgeEdgeSchema, type KnowledgeEdge, type NewKnowledgeEdge } from '../schemas/knowledge-edge';
 import { KnowledgeKindSchema, type KnowledgeKind, type NewKnowledgeKind } from '../schemas/knowledge-kind';
+import { AgentTemplateSchema, type AgentTemplate } from '../schemas/agent-template';
 
 // ─── Error ───────────────────────────────────────────────────────────────────
 
@@ -634,7 +635,40 @@ export function createSupabaseRepository(sb: SupabaseClient): OSRepository {
         },
       },
     },
+    templates: {
+      async all() {
+        const { data, error } = await sb.from('os_agent_templates').select('*').order('featured', { ascending: false }).order('name');
+        if (error) throw new RepoError('templates.all', error);
+        return (data ?? []).map(r => rowToTemplate(r as Record<string, unknown>));
+      },
+      async byId(id) {
+        const { data, error } = await sb.from('os_agent_templates').select('*').eq('id', id).maybeSingle();
+        if (error) throw new RepoError('templates.byId', error);
+        return data ? rowToTemplate(data as Record<string, unknown>) : null;
+      },
+      async byCategory(category) {
+        const { data, error } = await sb.from('os_agent_templates').select('*').eq('category', category).order('name');
+        if (error) throw new RepoError('templates.byCategory', error);
+        return (data ?? []).map(r => rowToTemplate(r as Record<string, unknown>));
+      },
+      async incrementInstalls(id) {
+        const { data } = await sb.from('os_agent_templates').select('installs_count').eq('id', id).maybeSingle();
+        const current = (data as { installs_count?: number } | null)?.installs_count ?? 0;
+        await sb.from('os_agent_templates').update({ installs_count: current + 1 }).eq('id', id);
+      },
+    },
   };
+}
+
+function rowToTemplate(r: Record<string, unknown>): AgentTemplate {
+  return AgentTemplateSchema.parse({
+    id: r.id, publisher: r.publisher, name: r.name, description: r.description,
+    category: r.category, icon: r.icon, tier: r.tier, model: r.model,
+    tools: r.tools ?? [], constitution: r.constitution ?? {},
+    suggestedSkills: r.suggested_skills ?? [], suggestedGoals: r.suggested_goals ?? [],
+    installsCount: Number(r.installs_count ?? 0), featured: !!r.featured,
+    createdAt: r.created_at,
+  });
 }
 
 // ─── Knowledge Kind mappers ───────────────────────────────────────────────────

@@ -9,8 +9,10 @@ import type { Activity, NewActivity } from './schemas/activity';
 import type { KnowledgeNode, NewKnowledgeNode, NodeKind } from './schemas/knowledge-node';
 import type { KnowledgeEdge, NewKnowledgeEdge } from './schemas/knowledge-edge';
 import type { KnowledgeKind, NewKnowledgeKind } from './schemas/knowledge-kind';
+import type { AgentTemplate } from './schemas/agent-template';
 
 export type { Agent, Goal, Skill, Workflow, AgentRun, NewAgentRun, Connector, Activity, NewActivity };
+export type { AgentTemplate };
 export type { NewAgent } from './schemas/agent';
 export type { NewGoal } from './schemas/goal';
 export type { NewSkill } from './schemas/skill';
@@ -80,5 +82,11 @@ export interface OSRepository {
       /** Rejects if system=true */
       delete(orgId: string, id: string): Promise<void>;
     };
+  };
+  templates: {
+    all(): Promise<AgentTemplate[]>;
+    byId(id: string): Promise<AgentTemplate | null>;
+    byCategory(category: string): Promise<AgentTemplate[]>;
+    incrementInstalls(id: string): Promise<void>;
   };
 }
