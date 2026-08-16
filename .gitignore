@@ -13,3 +13,6 @@ Thumbs.db
 
 # Git worktrees (superpowers isolated workspaces)
 .worktrees/
+
+# Superpowers transient files (brainstorm mockups, server state)
+.superpowers/
