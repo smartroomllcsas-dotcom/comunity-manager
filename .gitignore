@@ -16,3 +16,8 @@ Thumbs.db
 
 # Superpowers transient files (brainstorm mockups, server state)
 .superpowers/
+
+# Playwright E2E artifacts
+web/playwright-report/
+web/test-results/
+web/tests/e2e/.auth/
