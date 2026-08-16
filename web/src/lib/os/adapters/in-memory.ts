@@ -6,6 +6,8 @@ import type { Workflow } from '../schemas/workflow';
 import type { AgentRun, NewAgentRun } from '../schemas/agent-run';
 import type { Connector, ConnectorStatus } from '../schemas/connector';
 import type { Activity, NewActivity } from '../schemas/activity';
+import type { KnowledgeNode, NewKnowledgeNode } from '../schemas/knowledge-node';
+import type { KnowledgeEdge, NewKnowledgeEdge } from '../schemas/knowledge-edge';
 
 // Helper: returns a new nested Map for an org if it doesn't exist
 function ensureOrg<T>(store: Map<string, Map<string, T>>, orgId: string): Map<string, T> {
@@ -26,6 +28,8 @@ export function createInMemoryRepository(): OSRepository {
   const agentRuns = new Map<string, Map<string, AgentRun>>();
   const connectors = new Map<string, Map<string, Connector>>();
   const activityStore = new Map<string, Map<string, Activity>>();
+  const knowledgeNodes = new Map<string, Map<string, KnowledgeNode>>();
+  const knowledgeEdges = new Map<string, Map<string, KnowledgeEdge>>();
 
   return {
     // ── AGENTS ──────────────────────────────────────────────────────────────
@@ -170,6 +174,73 @@ export function createInMemoryRepository(): OSRepository {
       subscribe(_orgId, _cb) {
         // No-op in memory — no realtime
         return () => {};
+      },
+    },
+
+    // ── KNOWLEDGE ─────────────────────────────────────────────────────────────
+    knowledge: {
+      nodes: {
+        async all(orgId) {
+          return [...ensureOrg(knowledgeNodes, orgId).values()]
+            .sort((a, b) => b.weight - a.weight);
+        },
+        async byKind(orgId, kind) {
+          return [...ensureOrg(knowledgeNodes, orgId).values()]
+            .filter(n => n.kind === kind)
+            .sort((a, b) => b.weight - a.weight);
+        },
+        async byId(orgId, id) {
+          return ensureOrg(knowledgeNodes, orgId).get(id) ?? null;
+        },
+        async upsert(orgId, node) {
+          const now = new Date().toISOString();
+          const existing = ensureOrg(knowledgeNodes, orgId).get(node.id);
+          const stored: KnowledgeNode = {
+            ...node,
+            orgId,
+            summary: node.summary ?? '',
+            props: node.props ?? {},
+            source: node.source ?? null,
+            sourceId: node.sourceId ?? null,
+            firstSeenAt: existing?.firstSeenAt ?? node.firstSeenAt ?? now,
+            lastSeenAt: node.lastSeenAt ?? now,
+            weight: node.weight ?? 1.0,
+            vector: node.vector ?? null,
+          };
+          ensureOrg(knowledgeNodes, orgId).set(node.id, stored);
+        },
+        async touch(orgId, id) {
+          const store = ensureOrg(knowledgeNodes, orgId);
+          const n = store.get(id);
+          if (!n) return;
+          store.set(id, { ...n, lastSeenAt: new Date().toISOString() });
+        },
+      },
+      edges: {
+        async forNode(orgId, nodeId) {
+          return [...ensureOrg(knowledgeEdges, orgId).values()]
+            .filter(e => e.fromNodeId === nodeId || e.toNodeId === nodeId);
+        },
+        async insert(orgId, edge) {
+          const id = nextNumId();
+          const stored: KnowledgeEdge = {
+            id,
+            orgId,
+            fromNodeId: edge.fromNodeId,
+            toNodeId: edge.toNodeId,
+            relation: edge.relation,
+            weight: edge.weight ?? 1.0,
+            meta: edge.meta ?? {},
+            createdAt: edge.createdAt ?? new Date().toISOString(),
+          };
+          ensureOrg(knowledgeEdges, orgId).set(String(id), stored);
+        },
+        async byRelation(orgId, relation, limit = 50) {
+          return [...ensureOrg(knowledgeEdges, orgId).values()]
+            .filter(e => e.relation === relation)
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+            .slice(0, limit);
+        },
       },
     },
   };

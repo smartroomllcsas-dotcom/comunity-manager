@@ -5,3 +5,5 @@ export * from './workflow';
 export * from './agent-run';
 export * from './connector';
 export * from './activity';
+export * from './knowledge-node';
+export * from './knowledge-edge';

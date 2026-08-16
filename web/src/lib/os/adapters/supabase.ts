@@ -8,6 +8,8 @@ import { WorkflowSchema, type Workflow } from '../schemas/workflow';
 import { AgentRunSchema, type AgentRun, type NewAgentRun } from '../schemas/agent-run';
 import { ConnectorSchema, type Connector, type ConnectorStatus } from '../schemas/connector';
 import { ActivitySchema, type Activity, type NewActivity } from '../schemas/activity';
+import { KnowledgeNodeSchema, type KnowledgeNode, type NewKnowledgeNode, type NodeKind } from '../schemas/knowledge-node';
+import { KnowledgeEdgeSchema, type KnowledgeEdge, type NewKnowledgeEdge } from '../schemas/knowledge-edge';
 
 // ─── Error ───────────────────────────────────────────────────────────────────
 
@@ -520,5 +522,145 @@ export function createSupabaseRepository(sb: SupabaseClient): OSRepository {
         return () => { sb.removeChannel(channel); };
       },
     },
+
+    // ── KNOWLEDGE ────────────────────────────────────────────────────────────
+    knowledge: {
+      nodes: {
+        async all(orgId) {
+          const { data, error } = await sb
+            .from('os_knowledge_nodes')
+            .select('*')
+            .eq('org_id', orgId)
+            .order('weight', { ascending: false });
+          if (error) throw new RepoError('knowledge.nodes.all', error);
+          return z.array(KnowledgeNodeSchema).parse((data ?? []).map(rowToNode));
+        },
+        async byKind(orgId, kind) {
+          const { data, error } = await sb
+            .from('os_knowledge_nodes')
+            .select('*')
+            .eq('org_id', orgId)
+            .eq('kind', kind)
+            .order('weight', { ascending: false });
+          if (error) throw new RepoError('knowledge.nodes.byKind', error);
+          return (data ?? []).map(rowToNode);
+        },
+        async byId(orgId, id) {
+          const { data, error } = await sb
+            .from('os_knowledge_nodes')
+            .select('*')
+            .eq('org_id', orgId)
+            .eq('id', id)
+            .maybeSingle();
+          if (error) throw new RepoError('knowledge.nodes.byId', error);
+          return data ? rowToNode(data as Record<string, unknown>) : null;
+        },
+        async upsert(orgId, node) {
+          const { error } = await sb
+            .from('os_knowledge_nodes')
+            .upsert(nodeToRow(orgId, node));
+          if (error) throw new RepoError('knowledge.nodes.upsert', error);
+        },
+        async touch(orgId, id) {
+          const { error } = await sb
+            .from('os_knowledge_nodes')
+            .update({ last_seen_at: new Date().toISOString() })
+            .eq('org_id', orgId)
+            .eq('id', id);
+          if (error) throw new RepoError('knowledge.nodes.touch', error);
+        },
+      },
+      edges: {
+        async forNode(orgId, nodeId) {
+          const { data, error } = await sb
+            .from('os_knowledge_edges')
+            .select('*')
+            .eq('org_id', orgId)
+            .or(`from_node_id.eq.${nodeId},to_node_id.eq.${nodeId}`);
+          if (error) throw new RepoError('knowledge.edges.forNode', error);
+          return (data ?? []).map(rowToEdge);
+        },
+        async insert(orgId, edge) {
+          const { error } = await sb
+            .from('os_knowledge_edges')
+            .insert(edgeToRow(orgId, edge));
+          if (error) throw new RepoError('knowledge.edges.insert', error);
+        },
+        async byRelation(orgId, relation, limit = 50) {
+          const { data, error } = await sb
+            .from('os_knowledge_edges')
+            .select('*')
+            .eq('org_id', orgId)
+            .eq('relation', relation)
+            .order('created_at', { ascending: false })
+            .limit(limit);
+          if (error) throw new RepoError('knowledge.edges.byRelation', error);
+          return (data ?? []).map(rowToEdge);
+        },
+      },
+    },
+  };
+}
+
+// ─── Knowledge Node mappers ───────────────────────────────────────────────────
+
+function rowToNode(r: Record<string, unknown>): KnowledgeNode {
+  return KnowledgeNodeSchema.parse({
+    id: r.id,
+    orgId: r.org_id,
+    kind: r.kind,
+    label: r.label,
+    summary: r.summary,
+    props: r.props,
+    source: r.source ?? null,
+    sourceId: r.source_id ?? null,
+    firstSeenAt: r.first_seen_at,
+    lastSeenAt: r.last_seen_at,
+    weight: Number(r.weight),
+    vector: r.vector ?? null,
+  });
+}
+
+function nodeToRow(orgId: string, node: NewKnowledgeNode) {
+  return {
+    id: node.id,
+    org_id: orgId,
+    kind: node.kind,
+    label: node.label,
+    summary: node.summary ?? '',
+    props: node.props ?? {},
+    source: node.source ?? null,
+    source_id: node.sourceId ?? null,
+    first_seen_at: node.firstSeenAt ?? new Date().toISOString(),
+    last_seen_at: node.lastSeenAt ?? new Date().toISOString(),
+    weight: node.weight ?? 1.0,
+    vector: node.vector ?? null,
+  };
+}
+
+// ─── Knowledge Edge mappers ───────────────────────────────────────────────────
+
+function rowToEdge(r: Record<string, unknown>): KnowledgeEdge {
+  return KnowledgeEdgeSchema.parse({
+    id: r.id,
+    orgId: r.org_id,
+    fromNodeId: r.from_node_id,
+    toNodeId: r.to_node_id,
+    relation: r.relation,
+    weight: Number(r.weight),
+    meta: r.meta,
+    createdAt: r.created_at,
+  });
+}
+
+function edgeToRow(orgId: string, edge: NewKnowledgeEdge) {
+  return {
+    org_id: orgId,
+    from_node_id: edge.fromNodeId,
+    to_node_id: edge.toNodeId,
+    relation: edge.relation,
+    weight: edge.weight ?? 1.0,
+    meta: edge.meta ?? {},
+    created_at: edge.createdAt ?? new Date().toISOString(),
   };
 }
