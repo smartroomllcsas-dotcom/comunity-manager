@@ -38,7 +38,7 @@ export const communityOsFlag = flag<boolean>({
   decide({ entities }) {
     if (entities?.userEmail && FULL_ROLLOUT_EMAILS.has(entities.userEmail)) return true;
     if (entities?.orgId && BETA_COHORT_ORGS.has(entities.orgId)) return true;
-    if (entities?.orgIds?.some(id => BETA_COHORT_ORGS.has(id))) return true;
+    if (entities?.orgIds?.some((id: string) => BETA_COHORT_ORGS.has(id))) return true;
     return entities?.betaCohorts?.includes('community-os') ?? false;
   },
 });
