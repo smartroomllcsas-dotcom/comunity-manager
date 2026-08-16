@@ -40,20 +40,25 @@ export const identify = dedupe(async (): Promise<UserEntities> => {
       data: { user: authUser },
     } = await supabase.auth.getUser();
 
-    // ── 2. CM custom session (cm_user_id cookie → cm_client_id as orgId) ──
+    // ── 2. CM legacy session (cm_user_id cookie → public.cm_users → cm_clients) ──
+    // The CM legacy dashboard uses its own auth (password_hash in public.cm_users),
+    // NOT Supabase Auth. When a user logs in via the legacy flow, only the cm_user_id
+    // cookie is set — supabase.auth.getUser() returns null. We must resolve email +
+    // orgId from public.cm_users + public.cm_clients directly.
     const cmUserId = cookieStore.get('cm_user_id')?.value
       ? decodeURIComponent(cookieStore.get('cm_user_id')!.value)
       : null;
 
     let orgId: string | null = null;
+    let orgIds: string[] = [];
+    let legacyEmail: string | null = null;
 
     if (cmUserId) {
-      // Query cm_users table (schema: smarttalk) to get cm_client_id
-      const sbSmartalk = createServerClient(
+      // Use the anon client on the default (public) schema
+      const sbPublic = createServerClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
         {
-          db: { schema: 'smarttalk' },
           cookies: {
             getAll: () => cookieStore.getAll(),
             setAll: () => {},
@@ -61,23 +66,33 @@ export const identify = dedupe(async (): Promise<UserEntities> => {
         }
       );
 
-      const { data: cmUser } = await sbSmartalk
+      // public.cm_users has (id, email, ...) — no cm_client_id column here
+      const { data: cmUser } = await sbPublic
         .from('cm_users')
-        .select('cm_client_id, email')
+        .select('id, email')
         .eq('id', cmUserId)
-        .single();
+        .maybeSingle();
 
-      orgId = cmUser?.cm_client_id ?? null;
+      if (cmUser?.email) legacyEmail = cmUser.email;
+
+      // Orgs live in public.cm_clients with FK user_id → cm_users.id
+      const { data: cmClients } = await sbPublic
+        .from('cm_clients')
+        .select('id')
+        .eq('user_id', cmUserId);
+
+      orgIds = (cmClients ?? []).map((c) => c.id as string);
+      orgId = orgIds[0] ?? null;
     }
 
-    const email = authUser?.email ?? null;
+    const email = authUser?.email ?? legacyEmail;
     const userId = authUser?.id ?? cmUserId ?? null;
 
     return {
       userId,
       userEmail: email,
       orgId,
-      orgIds: orgId ? [orgId] : [],
+      orgIds,
       betaCohorts: [], // Sprint 2: query os_beta_cohorts
     };
   } catch {
