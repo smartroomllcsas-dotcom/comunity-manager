@@ -46,6 +46,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.0.0",
     "@types/pg": "^8.20.0",
     "@types/react": "^19.0.0",
@@ -54,6 +55,7 @@
     "eslint-config-next": "^16.2.12",
     "inngest-cli": "^1.40.0",
     "js-yaml": "^4.1.0",
+    "jsonwebtoken": "^9.0.3",
     "pg": "^8.22.0",
     "postcss": "^8.5.18",
     "supabase": "2.109.0",
