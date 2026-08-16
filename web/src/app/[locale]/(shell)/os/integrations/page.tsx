@@ -113,7 +113,7 @@ export default async function OsIntegrationsPage() {
                         <dd className="truncate text-zinc-300">{String(v)}</dd>
                       </div>
                     ))}
-                  {result.meta.note && (
+                  {Boolean(result.meta.note) && (
                     <p className="text-xs italic text-zinc-600">{String(result.meta.note)}</p>
                   )}
                 </dl>

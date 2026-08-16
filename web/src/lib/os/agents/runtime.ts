@@ -1,4 +1,5 @@
-import type { Agent, AgentRun } from '@/lib/os/schemas';
+import type { Agent } from '@/lib/os/schemas/agent';
+import type { AgentRun } from '@/lib/os/schemas/agent-run';
 
 export interface AgentRuntime {
   run(agent: Agent, input: unknown): Promise<{ output: unknown; run: AgentRun }>;

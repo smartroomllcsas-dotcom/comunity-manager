@@ -4,7 +4,6 @@ import { communityOsFlag } from '@/lib/flags';
 import { getOSRepositoryForRequest, requireOrgIdFromRequest } from '@/lib/os/server';
 
 const NewActivityBodySchema = z.object({
-  orgId: z.string().uuid().optional(),
   kind: z.string(),
   actorId: z.string().nullable().optional(),
   at: z.string().datetime().optional(),
@@ -36,7 +35,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const parsed = NewActivityBodySchema.parse(body);
     const repo = await getOSRepositoryForRequest();
-    const inserted = await repo.activity.insert(orgId, { ...parsed, orgId });
+    const inserted = await repo.activity.insert(orgId, parsed);
     return NextResponse.json({ ok: true, activity: inserted });
   } catch (e: any) {
     if (e.name === 'ZodError') return NextResponse.json({ error: 'invalid_input', details: e.issues }, { status: 400 });

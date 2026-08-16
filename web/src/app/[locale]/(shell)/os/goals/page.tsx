@@ -138,7 +138,7 @@ export default async function OsGoalsPage() {
                 </div>
 
                 {/* evidence on breach */}
-                {g.lastStatus === 'breach' && g.lastEvidence && (
+                {g.lastStatus === 'breach' && Boolean(g.lastEvidence) && (
                   <details className="mt-1">
                     <summary className="cursor-pointer text-xs text-red-400 hover:text-red-300">
                       Ver evidencia

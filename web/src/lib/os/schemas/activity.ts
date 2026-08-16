@@ -12,7 +12,7 @@ export const ActivitySchema = z.object({
 });
 
 export type Activity = z.infer<typeof ActivitySchema>;
-export type NewActivity = Omit<Activity, 'id' | 'at' | 'summary' | 'payload'> & {
+export type NewActivity = Omit<Activity, 'id' | 'orgId' | 'at' | 'summary' | 'payload'> & {
   at?: string;
   summary?: string;
   payload?: Record<string, unknown>;
