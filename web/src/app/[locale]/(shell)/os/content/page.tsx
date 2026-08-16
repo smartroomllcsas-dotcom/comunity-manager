@@ -1,12 +1,81 @@
 import { getTranslations } from 'next-intl/server';
+import { createClient as createSbClient } from '@supabase/supabase-js';
 import { PostComposerShell } from './PostComposerShell';
+import { requireOrgIdFromRequest } from '@/lib/os/server';
 import type { SocialPost } from '@/lib/os/schemas';
 
-// TODO Sprint 2: replace with real cm_posts query (status IN ('draft','scheduled'))
-const PLACEHOLDER_DRAFTS: SocialPost[] = [];
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function getPublicAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error('Missing Supabase env vars');
+  return createSbClient(url.trim(), key.trim(), {
+    auth: { autoRefreshToken: false, persistSession: false },
+    db: { schema: 'public' },
+  });
+}
+
+type CmPost = {
+  id: string;
+  content: string | null;
+  platforms: string[] | null;
+  status: string | null;
+  scheduled_date: string | null;
+  created_at: string | null;
+  updated_at?: string | null;
+  published_at?: string | null;
+};
+
+/** Maps a cm_scheduled_posts row → SocialPost shape for PostComposer */
+function toSocialPost(row: CmPost): SocialPost {
+  return {
+    id: row.id,
+    caption: row.content ?? '',
+    platforms: (row.platforms ?? []) as SocialPost['platforms'],
+    mediaUrl: null,
+    scheduledFor: row.scheduled_date ?? null,
+    status: (row.status as SocialPost['status']) ?? 'draft',
+    createdAt: row.created_at ?? new Date().toISOString(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
 
 export default async function OsContentPage() {
   const t = await getTranslations('os.content');
+
+  // Resolve client_id for this session (orgId === cm_client_id in this app)
+  let clientId: string | null = null;
+  try {
+    clientId = await requireOrgIdFromRequest();
+  } catch {
+    // unauthenticated — show empty state gracefully
+  }
+
+  let drafts: SocialPost[] = [];
+  let scheduled: SocialPost[] = [];
+  let published: SocialPost[] = [];
+
+  if (clientId) {
+    const sb = getPublicAdmin();
+    const { data } = await sb
+      .from('cm_scheduled_posts')
+      .select('id, content, platforms, status, scheduled_date, created_at, published_at')
+      .eq('client_id', clientId)
+      .neq('status', 'deleted')
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    const rows: CmPost[] = data ?? [];
+    drafts    = rows.filter(r => r.status === 'draft').map(toSocialPost);
+    scheduled = rows.filter(r => r.status === 'scheduled').map(toSocialPost);
+    published = rows.filter(r => r.status === 'published').slice(0, 10).map(toSocialPost);
+  }
 
   return (
     <main className="content">
@@ -17,40 +86,70 @@ export default async function OsContentPage() {
         </div>
       </div>
 
+      {/* Composer — passes real drafts so PostComposer can show them inline */}
       <section className="mt-6">
         <h2 className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-os-dim">{t('compose')}</h2>
-        {/* PostComposerShell is a client component that injects the onSubmit handler */}
-        <PostComposerShell initialPosts={PLACEHOLDER_DRAFTS} />
+        <PostComposerShell initialPosts={drafts} />
       </section>
 
+      {/* Scheduled */}
       <section className="mt-8">
-        <h2 className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-os-dim">Drafts</h2>
-        {PLACEHOLDER_DRAFTS.length === 0 ? (
-          <p className="rounded-lg-t border border-os-border bg-os-surface px-4 py-8 text-center font-mono text-[11px] text-os-dim">
-            {t('emptyState')}
-          </p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {PLACEHOLDER_DRAFTS.map((post) => (
-              <div key={post.id} className="rounded-lg-t border border-os-border bg-os-surface px-4 py-3">
-                <p className="text-[13px] text-os-text">{post.caption}</p>
-                <div className="mt-1.5 flex gap-2 font-mono text-[9.5px] text-os-dim">
-                  {post.platforms.map((p) => <span key={p}>{p}</span>)}
-                  {post.scheduledFor && <span>· {new Date(post.scheduledFor).toLocaleString()}</span>}
+        <h2 className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-os-dim">
+          Programados ({scheduled.length})
+        </h2>
+        <ul className="divide-y divide-os-border rounded border border-os-border">
+          {scheduled.length === 0 ? (
+            <li className="px-4 py-8 text-center font-mono text-[11px] text-os-dim">
+              Sin posts programados
+            </li>
+          ) : (
+            scheduled.map(p => (
+              <li key={p.id} className="px-4 py-3 text-[13px]">
+                <div className="flex items-center gap-2">
+                  {p.platforms.map(pl => (
+                    <span key={pl} className="rounded bg-os-surface px-1.5 py-0.5 font-mono text-[9px] uppercase text-os-dim">
+                      {pl}
+                    </span>
+                  ))}
+                  {p.scheduledFor && (
+                    <span className="font-mono text-[10px] text-accent">
+                      {new Date(p.scheduledFor).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}
+                    </span>
+                  )}
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+                <p className="mt-1.5 line-clamp-2 text-os-text">{p.caption}</p>
+              </li>
+            ))
+          )}
+        </ul>
       </section>
 
-      {/* Calendar view placeholder — Sprint 2 renders a real calendar */}
+      {/* Published (recent) */}
       <section className="mt-8">
-        <h2 className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-os-dim">Calendar</h2>
-        <div className="rounded-lg-t border border-os-border bg-os-surface px-4 py-10 text-center font-mono text-[11px] text-os-dim">
-          {/* TODO Sprint 2: render weekly/monthly publishing calendar from cm_posts */}
-          Calendar view coming in Sprint 2
-        </div>
+        <h2 className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-os-dim">
+          Publicados recientes ({published.length})
+        </h2>
+        <ul className="divide-y divide-os-border rounded border border-os-border">
+          {published.length === 0 ? (
+            <li className="px-4 py-8 text-center font-mono text-[11px] text-os-dim">
+              Sin posts publicados
+            </li>
+          ) : (
+            published.map(p => (
+              <li key={p.id} className="px-4 py-3 text-[13px]">
+                <div className="flex items-center gap-2">
+                  {p.platforms.map(pl => (
+                    <span key={pl} className="rounded bg-os-surface px-1.5 py-0.5 font-mono text-[9px] uppercase text-os-dim">
+                      {pl}
+                    </span>
+                  ))}
+                  <span className="font-mono text-[10px] text-green-400">{p.createdAt ? new Date(p.createdAt).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }) : ''}</span>
+                </div>
+                <p className="mt-1.5 line-clamp-2 text-os-text">{p.caption}</p>
+              </li>
+            ))
+          )}
+        </ul>
       </section>
     </main>
   );
