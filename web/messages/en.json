@@ -16,8 +16,26 @@
     },
     "agents": { "title": "Agents" },
     "goals": { "title": "Standing goals" },
-    "skills": { "title": "Skills" },
-    "funnel": { "title": "Funnel" },
+    "skills": {
+      "title": "Skills",
+      "subtitle": "Active capabilities of Community OS agents",
+      "status": {
+        "live": "Live",
+        "learning": "Learning",
+        "planned": "Planned"
+      },
+      "emptyState": "No skills registered yet."
+    },
+    "funnel": {
+      "title": "Funnel",
+      "subtitle": "Neural pipeline view · leads orbiting their stages",
+      "stages": {
+        "new": "New",
+        "qualified": "Qualified",
+        "hot": "Hot",
+        "closed": "Closed"
+      }
+    },
     "content": { "title": "Content" },
     "social": { "title": "Social" },
     "integrations": { "title": "Integrations" },
