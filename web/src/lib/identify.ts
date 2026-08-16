@@ -1,6 +1,20 @@
 import { dedupe } from 'flags/next';
 import { createServerClient } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
+
+/**
+ * Service-role client for identify() only. Needed because public.cm_users has RLS
+ * enabled, and identify() runs before any user JWT is bound. Never used for
+ * client-facing mutations — read-only helper strictly for flag evaluation.
+ */
+function serviceClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+}
 
 export interface UserEntities {
   userId: string | null;
@@ -54,20 +68,11 @@ export const identify = dedupe(async (): Promise<UserEntities> => {
     let legacyEmail: string | null = null;
 
     if (cmUserId) {
-      // Use the anon client on the default (public) schema
-      const sbPublic = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-          cookies: {
-            getAll: () => cookieStore.getAll(),
-            setAll: () => {},
-          },
-        }
-      );
+      // Use service-role client — public.cm_users has RLS on and there is no
+      // JWT bound at this point, so anon queries return 0 rows.
+      const sb = serviceClient();
 
-      // public.cm_users has (id, email, ...) — no cm_client_id column here
-      const { data: cmUser } = await sbPublic
+      const { data: cmUser } = await sb
         .from('cm_users')
         .select('id, email')
         .eq('id', cmUserId)
@@ -76,7 +81,7 @@ export const identify = dedupe(async (): Promise<UserEntities> => {
       if (cmUser?.email) legacyEmail = cmUser.email;
 
       // Orgs live in public.cm_clients with FK user_id → cm_users.id
-      const { data: cmClients } = await sbPublic
+      const { data: cmClients } = await sb
         .from('cm_clients')
         .select('id')
         .eq('user_id', cmUserId);
