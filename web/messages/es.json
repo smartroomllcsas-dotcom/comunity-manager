@@ -64,6 +64,12 @@
       "subtitle": "Automatizaciones multi-paso",
       "emptyState": "Sin workflows. Sprint 3 traerá el editor visual — por ahora, insertar manualmente vía SQL o POST /api/os/workflows.",
       "newWorkflow": "Nuevo workflow"
+    },
+    "brain": {
+      "title": "Brain",
+      "subtitle": "Grafo de conocimiento vivo",
+      "emptyState": "Brain vacío. Corre el ingestor para popular desde CM.",
+      "nodeCount": "{count} nodos"
     }
   }
 }

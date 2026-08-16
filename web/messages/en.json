@@ -64,6 +64,12 @@
       "subtitle": "Multi-step automations",
       "emptyState": "No workflows. Sprint 3 will bring the visual editor — for now, insert manually via SQL or POST /api/os/workflows.",
       "newWorkflow": "New workflow"
+    },
+    "brain": {
+      "title": "Brain",
+      "subtitle": "Live knowledge graph",
+      "emptyState": "Brain is empty. Run the ingestor to populate from CM.",
+      "nodeCount": "{count} nodes"
     }
   }
 }
