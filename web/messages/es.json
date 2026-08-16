@@ -58,6 +58,12 @@
     },
     "command": {
       "title": "Command palette"
+    },
+    "workflows": {
+      "title": "Workflows",
+      "subtitle": "Automatizaciones multi-paso",
+      "emptyState": "Sin workflows. Sprint 3 traerá el editor visual — por ahora, insertar manualmente vía SQL o POST /api/os/workflows.",
+      "newWorkflow": "Nuevo workflow"
     }
   }
 }
