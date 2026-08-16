@@ -97,13 +97,14 @@ function buildFollowerSeries(history: MetricRow[]): FollowerPoint[] {
 }
 
 function buildPieItems(history: MetricRow[]): { items: PieItem[]; total: number } {
-  // Latest snapshot per platform
-  const latest: Record<string, number> = {};
+  // Latest snapshot per platform (tracked in two parallel maps for type safety)
+  const latestFollowers: Record<string, number> = {};
+  const latestAt: Record<string, string> = {};
   for (const row of history) {
-    const existing = latest[row.platform];
-    if (!existing || row.snapshot_at > (latest[`${row.platform}__at`] ?? '')) {
-      latest[row.platform] = row.followers ?? 0;
-      latest[`${row.platform}__at`] = row.snapshot_at as unknown as number;
+    const prevAt = latestAt[row.platform];
+    if (!prevAt || row.snapshot_at > prevAt) {
+      latestFollowers[row.platform] = row.followers ?? 0;
+      latestAt[row.platform] = row.snapshot_at;
     }
   }
   const platformLabel: Record<string, string> = {
@@ -111,14 +112,12 @@ function buildPieItems(history: MetricRow[]): { items: PieItem[]; total: number 
     linkedin: 'LinkedIn', x: 'X / Twitter', youtube: 'YouTube',
     threads: 'Threads', pinterest: 'Pinterest',
   };
-  const items: PieItem[] = Object.entries(latest)
-    .filter(([k]) => !k.endsWith('__at'))
-    .map(([platform, value]) => ({
-      key: platform,
-      label: platformLabel[platform] ?? platform,
-      value: value as number,
-    }));
-  const total = items.reduce((s, i) => s + i.value, 0);
+  const items: PieItem[] = Object.entries(latestFollowers).map(([platform, value]) => ({
+    key: platform,
+    label: platformLabel[platform] ?? platform,
+    value,
+  }));
+  const total = items.reduce((s, i) => s + (i.value ?? 0), 0);
   return { items, total };
 }
 
