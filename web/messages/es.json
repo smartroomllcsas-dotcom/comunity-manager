@@ -70,6 +70,33 @@
       "subtitle": "Grafo de conocimiento vivo",
       "emptyState": "Brain vacío. Corre el ingestor para popular desde CM.",
       "nodeCount": "{count} nodos"
+    },
+    "observability": {
+      "title": "Observabilidad",
+      "subtitle": "Ejecuciones de agentes, costos, crons y salud de conectores",
+      "cards": {
+        "agentRuns": "Ejecuciones agentes (24h)",
+        "successRate": "Tasa de éxito",
+        "costToday": "Costo hoy",
+        "sinceMidnight": "Desde medianoche",
+        "cost7d": "Costo (7d)",
+        "rollingWeek": "Últimos 7 días",
+        "activity24h": "Eventos de actividad (24h)",
+        "events": "Eventos",
+        "goalsBreach": "Goals en breach",
+        "goalsBreachAlert": "Requiere atención",
+        "connectors": "Conectores",
+        "connectorsHint": "live / error"
+      },
+      "cronTable": {
+        "title": "Últimas ejecuciones cron",
+        "empty": "No hay ejecuciones cron registradas.",
+        "endpoint": "Endpoint",
+        "at": "Fecha/hora",
+        "status": "Estado",
+        "ok": "OK",
+        "err": "ERROR"
+      }
     }
   }
 }
