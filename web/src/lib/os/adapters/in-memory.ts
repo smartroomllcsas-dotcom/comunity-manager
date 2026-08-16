@@ -8,6 +8,7 @@ import type { Connector, ConnectorStatus } from '../schemas/connector';
 import type { Activity, NewActivity } from '../schemas/activity';
 import type { KnowledgeNode, NewKnowledgeNode } from '../schemas/knowledge-node';
 import type { KnowledgeEdge, NewKnowledgeEdge } from '../schemas/knowledge-edge';
+import type { KnowledgeKind, NewKnowledgeKind } from '../schemas/knowledge-kind';
 
 // Helper: returns a new nested Map for an org if it doesn't exist
 function ensureOrg<T>(store: Map<string, Map<string, T>>, orgId: string): Map<string, T> {
@@ -30,6 +31,7 @@ export function createInMemoryRepository(): OSRepository {
   const activityStore = new Map<string, Map<string, Activity>>();
   const knowledgeNodes = new Map<string, Map<string, KnowledgeNode>>();
   const knowledgeEdges = new Map<string, Map<string, KnowledgeEdge>>();
+  const knowledgeKinds = new Map<string, Map<string, KnowledgeKind>>();
 
   return {
     // ── AGENTS ──────────────────────────────────────────────────────────────
@@ -240,6 +242,31 @@ export function createInMemoryRepository(): OSRepository {
             .filter(e => e.relation === relation)
             .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
             .slice(0, limit);
+        },
+      },
+      kinds: {
+        async all(orgId) {
+          return [...ensureOrg(knowledgeKinds, orgId).values()]
+            .sort((a, b) => (b.system ? 1 : 0) - (a.system ? 1 : 0) || a.id.localeCompare(b.id));
+        },
+        async upsert(orgId, kind) {
+          const store = ensureOrg(knowledgeKinds, orgId);
+          const existing = store.get(kind.id);
+          const stored: KnowledgeKind = {
+            ...kind,
+            orgId,
+            color: kind.color ?? '#5ec9f8',
+            description: kind.description ?? '',
+            system: kind.system ?? existing?.system ?? false,
+            createdAt: existing?.createdAt ?? new Date().toISOString(),
+          };
+          store.set(kind.id, stored);
+        },
+        async delete(orgId, id) {
+          const store = ensureOrg(knowledgeKinds, orgId);
+          const k = store.get(id);
+          if (k?.system) throw new Error('Cannot delete system kinds');
+          store.delete(id);
         },
       },
     },

@@ -7,3 +7,4 @@ export * from './connector';
 export * from './activity';
 export * from './knowledge-node';
 export * from './knowledge-edge';
+export * from './knowledge-kind';

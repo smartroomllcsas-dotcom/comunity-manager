@@ -4,18 +4,24 @@ import { BrainCore } from '@/components/os/brain/BrainCore';
 import { NeuralGraph } from '@/components/os/brain/NeuralGraph';
 import type { KnowledgeNode } from '@/lib/os/schemas/knowledge-node';
 import type { KnowledgeEdge } from '@/lib/os/schemas/knowledge-edge';
+import type { KnowledgeKind } from '@/lib/os/schemas/knowledge-kind';
+import Link from 'next/link';
 
 export default async function BrainPage() {
   const t = await getTranslations('os.brain');
 
   let nodes: KnowledgeNode[] = [];
   let edges: KnowledgeEdge[] = [];
+  let kinds: KnowledgeKind[] = [];
 
   try {
     const orgId = await requireOrgIdFromRequest();
     const repo  = await getOSRepositoryForRequest();
 
-    nodes = await repo.knowledge.nodes.all(orgId);
+    [nodes, kinds] = await Promise.all([
+      repo.knowledge.nodes.all(orgId),
+      repo.knowledge.kinds.all(orgId),
+    ]);
 
     if (nodes.length > 0) {
       // Fetch edges for first 100 nodes to keep payload bounded
@@ -41,11 +47,16 @@ export default async function BrainPage() {
           <h1 className="page-title">{t('title')}</h1>
           <p className="page-sub">{t('subtitle')}</p>
         </div>
-        {nodes.length > 0 && (
-          <span className="ml-auto text-sm text-zinc-400">
-            {t('nodeCount', { count: nodes.length })}
-          </span>
-        )}
+        <div className="ml-auto flex items-center gap-3">
+          {nodes.length > 0 && (
+            <span className="text-sm text-zinc-400">
+              {t('nodeCount', { count: nodes.length })}
+            </span>
+          )}
+          <Link href="/os/brain/kinds" className="btn btn-sm">
+            Manage kinds
+          </Link>
+        </div>
       </div>
 
       {nodes.length === 0 ? (
@@ -61,7 +72,7 @@ export default async function BrainPage() {
             <BrainCore nodes={nodes} />
           </section>
           <section className="mt-8">
-            <NeuralGraph nodes={nodes} edges={edges} />
+            <NeuralGraph nodes={nodes} edges={edges} kinds={kinds} />
           </section>
         </>
       )}
