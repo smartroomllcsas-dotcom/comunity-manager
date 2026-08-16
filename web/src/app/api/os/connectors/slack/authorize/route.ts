@@ -14,6 +14,7 @@
 import { NextResponse } from 'next/server';
 import { communityOsFlag } from '@/lib/flags';
 import { requireOrgIdFromRequest } from '@/lib/os/server';
+import { signState } from '@/lib/os/oauth-state';
 
 const SLACK_AUTHORIZE_URL = 'https://slack.com/oauth/v2/authorize';
 
@@ -46,8 +47,8 @@ export async function GET(req: Request) { // req used for redirect URL base
     return NextResponse.json({ error: e.message }, { status: 401 });
   }
 
-  // Sprint 2: state = "<orgId>" (plain).  Sprint 3: sign with HMAC using APPROVAL_HMAC_SECRET.
-  const state = orgId;
+  // Sprint 3: HMAC-signed state — CSRF hardening.
+  const state = signState({ orgId, provider: 'slack' });
 
   const params = new URLSearchParams({
     client_id: clientId,
