@@ -84,6 +84,10 @@ export default async function OsContentPage() {
           <h1 className="page-title">{t('title')}</h1>
           <p className="page-sub">{t('subtitle')}</p>
         </div>
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-2.5 py-1 font-mono text-[10px] text-green-400">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-400" />
+          Cron activo — publica cada minuto los scheduled listos
+        </span>
       </div>
 
       {/* Composer — passes real drafts so PostComposer can show them inline */}
