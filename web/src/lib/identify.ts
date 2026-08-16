@@ -94,6 +94,16 @@ export const identify = dedupe(async (): Promise<UserEntities> => {
     const email = rawEmail ? rawEmail.trim().toLowerCase() : null;
     const userId = authUser?.id ?? cmUserId ?? null;
 
+    // TEMP diagnostic (remove after Community OS visibility confirmed in prod)
+    console.log('[identify] result', {
+      hasCookie: !!cmUserId,
+      cmUserIdPrefix: cmUserId ? cmUserId.slice(0, 8) : null,
+      authUserEmail: authUser?.email ?? null,
+      legacyEmail,
+      finalEmail: email,
+      orgCount: orgIds.length,
+    });
+
     return {
       userId,
       userEmail: email,
@@ -101,7 +111,8 @@ export const identify = dedupe(async (): Promise<UserEntities> => {
       orgIds,
       betaCohorts: [], // Sprint 2: query os_beta_cohorts
     };
-  } catch {
+  } catch (e) {
+    console.error('[identify] threw', e instanceof Error ? e.message : String(e));
     return { userId: null, userEmail: null, orgId: null, orgIds: [], betaCohorts: [] };
   }
 });
