@@ -1,10 +1,29 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { PresenceStack } from './PresenceStack';
+import type { PresenceUser } from '@/hooks/useOsPresence';
 
-export function OsTopbar() {
+export function OsTopbar({ orgId }: { orgId?: string }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [me, setMe] = useState<Omit<PresenceUser, 'since'> | null>(null);
+
+  useEffect(() => {
+    if (!orgId) return;
+    fetch('/api/os/presence')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.userId) setMe({ ...data, route: pathname });
+      })
+      .catch(() => {});
+  }, [orgId]);
+
+  // Keep route in sync as user navigates
+  useEffect(() => {
+    if (me) setMe(prev => prev ? { ...prev, route: pathname } : prev);
+  }, [pathname]);
 
   // Derive section label from pathname
   const section = (() => {
@@ -36,6 +55,7 @@ export function OsTopbar() {
           <span className="live-dot" />
           7 canales activos
         </div>
+        {orgId && me && <PresenceStack orgId={orgId} me={me} />}
         <div className="lang-toggle">
           <button
             aria-pressed={isEs}
