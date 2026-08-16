@@ -5,6 +5,7 @@ import type { Agent } from '@/lib/os/schemas/agent';
 import type { AgentRun } from '@/lib/os/schemas/agent-run';
 import { ConductorPanel } from './ConductorPanel';
 import { ConstitutionEditor } from './ConstitutionEditor';
+import { useTextToSpeech } from '@/hooks/useTextToSpeech';
 
 interface AgentDetailPanelProps {
   agent: Agent;
@@ -53,6 +54,8 @@ export function AgentDetailPanel({ agent: initialAgent, initialRuns = [] }: Agen
   const [agent, setAgent] = useState<Agent>(initialAgent);
   const [runs, setRuns] = useState<AgentRun[]>(initialRuns);
   const [loadingRuns, setLoadingRuns] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const tts = useTextToSpeech();
 
   // Fetch latest runs from API
   useEffect(() => {
@@ -121,7 +124,47 @@ export function AgentDetailPanel({ agent: initialAgent, initialRuns = [] }: Agen
       <div className="panel">
         <div className="panel-head">
           <div className="panel-title">Recent runs</div>
-          <div className="panel-meta">{loadingRuns ? 'loading…' : `${runs.length} shown`}</div>
+          <div className="flex items-center gap-2">
+            {tts.supported && runs.length > 0 && (() => {
+              const lastRun = runs[0];
+              const lastText = lastRun?.summary || (lastRun?.ok === true ? 'pass' : lastRun?.ok === false ? 'fail' : null);
+              if (!lastText) return null;
+              return (
+                <button
+                  type="button"
+                  title="Leer última respuesta en voz alta"
+                  aria-label="Leer última respuesta"
+                  onClick={() => {
+                    if (speaking) {
+                      tts.stop();
+                      setSpeaking(false);
+                    } else {
+                      const lang = navigator.language?.startsWith('es') ? 'es-ES' : 'en-US';
+                      tts.speak(lastText, { lang });
+                      setSpeaking(true);
+                      // reset flag after ~5s (no onend on speechSynthesis utterance in all browsers)
+                      setTimeout(() => setSpeaking(false), 5000);
+                    }
+                  }}
+                  className={`flex h-6 w-6 items-center justify-center rounded transition-colors ${
+                    speaking
+                      ? 'bg-accent/20 text-accent animate-pulse'
+                      : 'text-os-dim hover:text-os-muted hover:bg-os-surface2'
+                  }`}
+                >
+                  {/* Speaker SVG icon */}
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                    {speaking
+                      ? <path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14" />
+                      : <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                    }
+                  </svg>
+                </button>
+              );
+            })()}
+            <div className="panel-meta">{loadingRuns ? 'loading…' : `${runs.length} shown`}</div>
+          </div>
         </div>
         <div className="feed">
           {runs.length === 0 && !loadingRuns && (
