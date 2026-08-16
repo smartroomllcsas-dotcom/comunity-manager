@@ -1,8 +1,6 @@
-/**
- * Notion connector stub — FounderOS integration, not yet configured in CM.
- * Returns not_configured until a Notion OAuth flow is implemented.
- */
+import { Client } from '@notionhq/client';
 import type { ConnectorAdapter, ProbeResult } from '../base';
+import { getSupabaseServiceClient } from '@/lib/os/supabase-service';
 
 export const notionAdapter: ConnectorAdapter = {
   id: 'notion',
@@ -10,10 +8,37 @@ export const notionAdapter: ConnectorAdapter = {
   kind: 'oauth',
   provider: 'notion',
 
-  async probe(_orgId: string): Promise<ProbeResult> {
-    return {
-      status: 'not_configured',
-      meta: { note: 'Notion integration not yet implemented — FounderOS stub' },
-    };
+  async probe(orgId: string): Promise<ProbeResult> {
+    try {
+      const sb = getSupabaseServiceClient();
+      const { data } = await sb
+        .from('os_connectors')
+        .select('config, status')
+        .eq('org_id', orgId)
+        .eq('id', 'notion')
+        .maybeSingle();
+
+      if (!data || !(data.config as any)?.access_token) {
+        return { status: 'not_configured' };
+      }
+
+      const notion = new Client({ auth: (data.config as any).access_token });
+      const me = await notion.users.me({});
+
+      return {
+        status: 'live',
+        meta: {
+          workspaceName: (data.config as any).workspace_name,
+          botName: (me as any).name ?? null,
+          note: null,
+        },
+      };
+    } catch (e: any) {
+      return {
+        status: 'error',
+        error: e.message,
+        meta: { note: 'token invalid — reconnect' },
+      };
+    }
   },
 };
