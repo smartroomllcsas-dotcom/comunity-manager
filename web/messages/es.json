@@ -18,8 +18,19 @@
     "goals": { "title": "Standing goals" },
     "skills": { "title": "Skills" },
     "funnel": { "title": "Funnel" },
-    "content": { "title": "Contenido" },
-    "social": { "title": "Social" },
+    "content": {
+      "title": "Contenido",
+      "subtitle": "Redacta, programa y revisa publicaciones para todas tus cuentas",
+      "emptyState": "No hay borradores todavía — usa el compositor para crear el primero",
+      "compose": "Componer"
+    },
+    "social": {
+      "title": "Social",
+      "subtitle": "Métricas de audiencia y consistencia de publicación",
+      "followers": "Seguidores",
+      "audience": "Audiencia",
+      "pillars": "Pilares de contenido"
+    },
     "integrations": { "title": "Integraciones" },
     "command": { "title": "Command palette" }
   }
