@@ -14,10 +14,32 @@
       "communityOs": "Community OS",
       "new": "NEW"
     },
-    "agents": { "title": "Agents" },
-    "goals": { "title": "Standing goals" },
-    "skills": { "title": "Skills" },
-    "funnel": { "title": "Funnel" },
+    "agents": {
+      "title": "Agents"
+    },
+    "goals": {
+      "title": "Standing goals"
+    },
+    "skills": {
+      "title": "Skills",
+      "subtitle": "Active capabilities of Community OS agents",
+      "status": {
+        "live": "Live",
+        "learning": "Learning",
+        "planned": "Planned"
+      },
+      "emptyState": "No skills registered yet."
+    },
+    "funnel": {
+      "title": "Funnel",
+      "subtitle": "Neural pipeline view · leads orbiting their stages",
+      "stages": {
+        "new": "New",
+        "qualified": "Qualified",
+        "hot": "Hot",
+        "closed": "Closed"
+      }
+    },
     "content": {
       "title": "Content",
       "subtitle": "Draft, schedule and review posts across all your accounts",
@@ -31,7 +53,11 @@
       "audience": "Audience",
       "pillars": "Content pillars"
     },
-    "integrations": { "title": "Integrations" },
-    "command": { "title": "Command palette" }
+    "integrations": {
+      "title": "Integrations"
+    },
+    "command": {
+      "title": "Command palette"
+    }
   }
 }

@@ -14,10 +14,32 @@
       "communityOs": "Community OS",
       "new": "NEW"
     },
-    "agents": { "title": "Agentes" },
-    "goals": { "title": "Standing goals" },
-    "skills": { "title": "Skills" },
-    "funnel": { "title": "Funnel" },
+    "agents": {
+      "title": "Agentes"
+    },
+    "goals": {
+      "title": "Standing goals"
+    },
+    "skills": {
+      "title": "Skills",
+      "subtitle": "Capacidades activas de los agentes del Community OS",
+      "status": {
+        "live": "Activo",
+        "learning": "Aprendiendo",
+        "planned": "Planificado"
+      },
+      "emptyState": "No hay skills registradas todavía."
+    },
+    "funnel": {
+      "title": "Funnel",
+      "subtitle": "Vista neural del pipeline · leads orbitando sus etapas",
+      "stages": {
+        "new": "Nuevos",
+        "qualified": "Calificados",
+        "hot": "Calientes",
+        "closed": "Cerrados"
+      }
+    },
     "content": {
       "title": "Contenido",
       "subtitle": "Redacta, programa y revisa publicaciones para todas tus cuentas",
@@ -31,7 +53,11 @@
       "audience": "Audiencia",
       "pillars": "Pilares de contenido"
     },
-    "integrations": { "title": "Integraciones" },
-    "command": { "title": "Command palette" }
+    "integrations": {
+      "title": "Integraciones"
+    },
+    "command": {
+      "title": "Command palette"
+    }
   }
 }
