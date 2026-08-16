@@ -51,10 +51,15 @@ export const communityOsFlag = flag<boolean>({
   defaultValue: false,
   async decide({ entities }) {
     const cohort = await loadCohort('community-os');
-    if (cohort.fullRollout) return true;
-    if (entities?.userEmail && cohort.emails.has(entities.userEmail)) return true;
-    if (entities?.orgId && cohort.orgIds.has(entities.orgId)) return true;
-    if (entities?.orgIds?.some((id: string) => cohort.orgIds.has(id))) return true;
-    return false;
+    const emailArr = Array.from(cohort.emails);
+    const email = entities?.userEmail ?? null;
+    let decided = false;
+    let reason = 'default_false';
+    if (cohort.fullRollout) { decided = true; reason = 'full_rollout'; }
+    else if (email && cohort.emails.has(email)) { decided = true; reason = 'email_match'; }
+    else if (entities?.orgId && cohort.orgIds.has(entities.orgId)) { decided = true; reason = 'orgId_match'; }
+    else if (entities?.orgIds?.some((id: string) => cohort.orgIds.has(id))) { decided = true; reason = 'orgIds_some_match'; }
+    console.log('[flag.community-os] decide', { entities, cohortEmails: emailArr, decided, reason });
+    return decided;
   },
 });
