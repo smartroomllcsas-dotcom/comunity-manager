@@ -14,6 +14,7 @@ const SUBNAV_ITEMS = [
   { href: '/os/workflows',   label: 'Workflows' },
   { href: '/os/integrations', label: 'Integrations' },
   { href: '/os/observability', label: 'Observability' },
+  { href: '/os/analytics',   label: 'Analytics' },
   { href: '/os/settings/cohorts', label: 'Settings' },
   { href: '/os/settings/theme',   label: 'Theme' },
 ];
