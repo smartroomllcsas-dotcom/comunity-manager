@@ -49,7 +49,11 @@ const bottomNav = [
   { href: "/settings", label: "Configuración", icon: Settings },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  showCommunityOs?: boolean;
+}
+
+export function Sidebar({ showCommunityOs = false }: SidebarProps) {
   const pathname = usePathname();
   const { data: currentAgent } = useCurrentAgent();
   // El cierre de sesión pasa por AuthProvider: además de `signOut()` limpia la
@@ -171,6 +175,53 @@ export function Sidebar() {
             );
           })}
         </nav>
+
+        {/* Community OS link — gated by flag (prop from Server layout) */}
+        {showCommunityOs && (
+          <div className={cn("py-2", expanded ? "px-2" : "flex justify-center")}>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Link
+                    href="/es/os"
+                    aria-label="Community OS"
+                    aria-current={
+                      pathname?.startsWith('/es/os') || pathname?.startsWith('/en/os')
+                        ? 'page'
+                        : undefined
+                    }
+                    className={cn(
+                      "nav-item-community-os relative flex h-10 items-center rounded-lg transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(70%_0.14_250)] focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                      expanded ? "w-full justify-start gap-3 px-3" : "w-10 justify-center"
+                    )}
+                  />
+                }
+              >
+                {/* Star icon from mockup */}
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="icon-lg flex-shrink-0"
+                  aria-hidden="true"
+                  style={{ color: 'oklch(70% 0.14 250)' }}
+                >
+                  <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8 5.8 21.3l2.4-7.4L2 9.4h7.6L12 2z" />
+                </svg>
+                {expanded && (
+                  <>
+                    <span className="truncate text-sm font-medium">Community OS</span>
+                    <span className="pill-new-cm">NEW</span>
+                  </>
+                )}
+              </TooltipTrigger>
+              <TooltipContent side="right" sideOffset={8}>
+                Community OS
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        )}
 
         {/* Bottom navigation */}
         <div
