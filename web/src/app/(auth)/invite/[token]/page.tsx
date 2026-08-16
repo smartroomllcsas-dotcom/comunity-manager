@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
-import { getInvitation, acceptInvitation } from "./actions";
+import { invitationAction } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,7 +26,7 @@ export default function InvitePage() {
 
   useEffect(() => {
     async function load() {
-      const result = await getInvitation(token);
+      const result = await invitationAction("get", token);
       if (result.error) {
         setError(result.error);
       } else if (result.data) {
@@ -40,7 +40,7 @@ export default function InvitePage() {
   async function handleSubmit(formData: FormData) {
     setLoading(true);
     setError(null);
-    const result = await acceptInvitation(token, formData);
+    const result = await invitationAction("accept", token, formData);
     if (result?.error) {
       setError(result.error);
       setLoading(false);

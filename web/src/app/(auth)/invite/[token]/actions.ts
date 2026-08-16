@@ -5,7 +5,30 @@ import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { redirect } from "next/navigation";
 
-export async function getInvitation(token: string) {
+/**
+ * Single dispatcher entry point. Works around @vercel/next@4.21.x lambda-grouping
+ * defect that mis-attributes NEXT_MISSING_LAMBDA when 2+ Server Actions from the
+ * same file are imported into a single Client Component.
+ */
+export async function invitationAction(
+  type: "get",
+  token: string,
+): Promise<Awaited<ReturnType<typeof getInvitation>>>;
+export async function invitationAction(
+  type: "accept",
+  token: string,
+  formData: FormData,
+): Promise<Awaited<ReturnType<typeof acceptInvitation>>>;
+export async function invitationAction(
+  type: "get" | "accept",
+  token: string,
+  formData?: FormData,
+) {
+  if (type === "get") return getInvitation(token);
+  return acceptInvitation(token, formData!);
+}
+
+async function getInvitation(token: string) {
   const admin = createAdminClient();
 
   const { data: invitation, error } = await admin
@@ -44,7 +67,7 @@ export async function getInvitation(token: string) {
   };
 }
 
-export async function acceptInvitation(token: string, formData: FormData) {
+async function acceptInvitation(token: string, formData: FormData) {
   const supabase = await createClient();
   const admin = createAdminClient();
   const name = formData.get("name") as string;
