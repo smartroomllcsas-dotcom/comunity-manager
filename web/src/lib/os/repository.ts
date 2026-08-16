@@ -8,6 +8,7 @@ import type { ConnectorStatus } from './schemas/connector';
 import type { Activity, NewActivity } from './schemas/activity';
 import type { KnowledgeNode, NewKnowledgeNode, NodeKind } from './schemas/knowledge-node';
 import type { KnowledgeEdge, NewKnowledgeEdge } from './schemas/knowledge-edge';
+import type { KnowledgeKind, NewKnowledgeKind } from './schemas/knowledge-kind';
 
 export type { Agent, Goal, Skill, Workflow, AgentRun, NewAgentRun, Connector, Activity, NewActivity };
 export type { NewAgent } from './schemas/agent';
@@ -16,6 +17,7 @@ export type { NewSkill } from './schemas/skill';
 export type { NewWorkflow } from './schemas/workflow';
 export type { NewConnector } from './schemas/connector';
 export type { KnowledgeNode, NewKnowledgeNode, NodeKind, KnowledgeEdge, NewKnowledgeEdge };
+export type { KnowledgeKind, NewKnowledgeKind };
 
 export type Unsubscribe = () => void;
 
@@ -62,7 +64,7 @@ export interface OSRepository {
   knowledge: {
     nodes: {
       all(orgId: string): Promise<KnowledgeNode[]>;
-      byKind(orgId: string, kind: NodeKind): Promise<KnowledgeNode[]>;
+      byKind(orgId: string, kind: string): Promise<KnowledgeNode[]>;
       byId(orgId: string, id: string): Promise<KnowledgeNode | null>;
       upsert(orgId: string, node: NewKnowledgeNode): Promise<void>;
       touch(orgId: string, id: string): Promise<void>;   // update last_seen_at
@@ -71,6 +73,12 @@ export interface OSRepository {
       forNode(orgId: string, nodeId: string): Promise<KnowledgeEdge[]>;
       insert(orgId: string, edge: NewKnowledgeEdge): Promise<void>;
       byRelation(orgId: string, relation: string, limit?: number): Promise<KnowledgeEdge[]>;
+    };
+    kinds: {
+      all(orgId: string): Promise<KnowledgeKind[]>;
+      upsert(orgId: string, kind: NewKnowledgeKind): Promise<void>;
+      /** Rejects if system=true */
+      delete(orgId: string, id: string): Promise<void>;
     };
   };
 }

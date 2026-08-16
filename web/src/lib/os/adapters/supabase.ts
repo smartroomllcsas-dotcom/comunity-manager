@@ -8,8 +8,9 @@ import { WorkflowSchema, type Workflow } from '../schemas/workflow';
 import { AgentRunSchema, type AgentRun, type NewAgentRun } from '../schemas/agent-run';
 import { ConnectorSchema, type Connector, type ConnectorStatus } from '../schemas/connector';
 import { ActivitySchema, type Activity, type NewActivity } from '../schemas/activity';
-import { KnowledgeNodeSchema, type KnowledgeNode, type NewKnowledgeNode, type NodeKind } from '../schemas/knowledge-node';
+import { KnowledgeNodeSchema, type KnowledgeNode, type NewKnowledgeNode } from '../schemas/knowledge-node';
 import { KnowledgeEdgeSchema, type KnowledgeEdge, type NewKnowledgeEdge } from '../schemas/knowledge-edge';
+import { KnowledgeKindSchema, type KnowledgeKind, type NewKnowledgeKind } from '../schemas/knowledge-kind';
 
 // ─── Error ───────────────────────────────────────────────────────────────────
 
@@ -598,7 +599,68 @@ export function createSupabaseRepository(sb: SupabaseClient): OSRepository {
           return (data ?? []).map(rowToEdge);
         },
       },
+      kinds: {
+        async all(orgId) {
+          const { data, error } = await sb
+            .from('os_knowledge_kinds')
+            .select('*')
+            .eq('org_id', orgId)
+            .order('system', { ascending: false })
+            .order('id');
+          if (error) throw new RepoError('knowledge.kinds.all', error);
+          return (data ?? []).map(rowToKind);
+        },
+        async upsert(orgId, kind) {
+          const { error } = await sb
+            .from('os_knowledge_kinds')
+            .upsert(kindToRow(orgId, kind));
+          if (error) throw new RepoError('knowledge.kinds.upsert', error);
+        },
+        async delete(orgId, id) {
+          // Reject system kinds
+          const { data } = await sb
+            .from('os_knowledge_kinds')
+            .select('system')
+            .eq('org_id', orgId)
+            .eq('id', id)
+            .maybeSingle();
+          if (data?.system) throw new RepoError('knowledge.kinds.delete', 'Cannot delete system kinds');
+          const { error } = await sb
+            .from('os_knowledge_kinds')
+            .delete()
+            .eq('org_id', orgId)
+            .eq('id', id);
+          if (error) throw new RepoError('knowledge.kinds.delete', error);
+        },
+      },
     },
+  };
+}
+
+// ─── Knowledge Kind mappers ───────────────────────────────────────────────────
+
+function rowToKind(r: Record<string, unknown>): KnowledgeKind {
+  return KnowledgeKindSchema.parse({
+    id:          r.id,
+    orgId:       r.org_id,
+    label:       r.label,
+    color:       r.color,
+    icon:        r.icon ?? null,
+    description: r.description ?? '',
+    system:      r.system ?? false,
+    createdAt:   r.created_at,
+  });
+}
+
+function kindToRow(orgId: string, kind: NewKnowledgeKind) {
+  return {
+    id:          kind.id,
+    org_id:      orgId,
+    label:       kind.label,
+    color:       kind.color ?? '#5ec9f8',
+    icon:        kind.icon ?? null,
+    description: kind.description ?? '',
+    system:      kind.system ?? false,
   };
 }
 

@@ -3,19 +3,23 @@
 import { useEffect, useRef } from 'react';
 import type { KnowledgeNode } from '@/lib/os/schemas/knowledge-node';
 import type { KnowledgeEdge } from '@/lib/os/schemas/knowledge-edge';
+import type { KnowledgeKind } from '@/lib/os/schemas/knowledge-kind';
 
 interface NeuralGraphProps {
   nodes: KnowledgeNode[];
   edges: KnowledgeEdge[];
+  /** Dynamic kinds from os_knowledge_kinds. Falls back to static defaults if omitted. */
+  kinds?: KnowledgeKind[];
 }
 
-const KIND_HUE: Record<string, string> = {
-  contact:  '#3b82f6',
-  topic:    '#8b5cf6',
-  decision: '#f59e0b',
-  event:    '#10b981',
-  tag:      '#71717a',
-  custom:   '#f43f5e',
+/** Static fallback palette used when kinds are not loaded yet */
+const FALLBACK_HUE: Record<string, string> = {
+  contact:  '#5ec9f8',
+  topic:    '#a78bfa',
+  decision: '#3df08c',
+  event:    '#f59e0b',
+  tag:      '#f472b6',
+  custom:   '#888888',
 };
 
 interface NodePos {
@@ -32,8 +36,14 @@ interface NodePos {
  * Minimal canvas-based force-directed graph.
  * No external deps — pure geometry.
  */
-export function NeuralGraph({ nodes, edges }: NeuralGraphProps) {
+export function NeuralGraph({ nodes, edges, kinds }: NeuralGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Build color lookup: dynamic kinds override static fallbacks
+  const colorMap: Record<string, string> = { ...FALLBACK_HUE };
+  if (kinds) {
+    for (const k of kinds) colorMap[k.id] = k.color;
+  }
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -126,7 +136,7 @@ export function NeuralGraph({ nodes, edges }: NeuralGraphProps) {
 
       // Nodes
       for (const p of pts) {
-        const color = KIND_HUE[p.kind] ?? '#888';
+        const color = colorMap[p.kind] ?? '#888';
         const r = 5;
 
         ctx.beginPath();
@@ -149,7 +159,7 @@ export function NeuralGraph({ nodes, edges }: NeuralGraphProps) {
 
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [nodes, edges]);
+  }, [nodes, edges, kinds]);
 
   if (nodes.length === 0) return null;
 
@@ -161,10 +171,10 @@ export function NeuralGraph({ nodes, edges }: NeuralGraphProps) {
         style={{ display: 'block' }}
       />
       <div className="absolute bottom-3 right-3 flex flex-wrap gap-2">
-        {Object.entries(KIND_HUE).map(([kind, color]) => (
+        {Object.entries(colorMap).map(([kind, color]) => (
           <span key={kind} className="flex items-center gap-1 text-xs text-zinc-400">
             <span className="inline-block h-2 w-2 rounded-full" style={{ background: color }} />
-            {kind}
+            {kinds?.find(k => k.id === kind)?.label ?? kind}
           </span>
         ))}
       </div>

@@ -69,7 +69,15 @@
       "title": "Brain",
       "subtitle": "Live knowledge graph",
       "emptyState": "Brain is empty. Run the ingestor to populate from CM.",
-      "nodeCount": "{count} nodes"
+      "nodeCount": "{count} nodes",
+      "kinds": {
+        "title": "Knowledge Kinds",
+        "subtitle": "Manage node kinds — colors, icons and labels per org.",
+        "manageKinds": "Manage kinds",
+        "newKind": "New custom kind",
+        "system": "system",
+        "custom": "custom"
+      }
     },
     "observability": {
       "title": "Observability",

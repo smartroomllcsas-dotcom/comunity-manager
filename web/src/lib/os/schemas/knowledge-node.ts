@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+/** Legacy enum kept for reference; DB constraint has been dropped — kind is now any text */
 const NODE_KINDS = ['contact','topic','decision','event','tag','custom'] as const;
 export const NodeKind = z.enum(NODE_KINDS);
 export type NodeKind = z.infer<typeof NodeKind>;
@@ -7,7 +8,8 @@ export type NodeKind = z.infer<typeof NodeKind>;
 export const KnowledgeNodeSchema = z.object({
   id: z.string(),
   orgId: z.string().uuid(),
-  kind: NodeKind,
+  /** Free-form text validated at app layer via os_knowledge_kinds table */
+  kind: z.string(),
   label: z.string(),
   summary: z.string().default(''),
   props: z.record(z.string(), z.unknown()).default({}),

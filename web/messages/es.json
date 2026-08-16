@@ -69,7 +69,15 @@
       "title": "Brain",
       "subtitle": "Grafo de conocimiento vivo",
       "emptyState": "Brain vacío. Corre el ingestor para popular desde CM.",
-      "nodeCount": "{count} nodos"
+      "nodeCount": "{count} nodos",
+      "kinds": {
+        "title": "Tipos de nodo",
+        "subtitle": "Gestiona los tipos de nodo — colores, íconos y etiquetas por org.",
+        "manageKinds": "Gestionar tipos",
+        "newKind": "Nuevo tipo personalizado",
+        "system": "sistema",
+        "custom": "personalizado"
+      }
     },
     "observability": {
       "title": "Observabilidad",
