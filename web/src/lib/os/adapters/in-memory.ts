@@ -8,6 +8,7 @@ import type { Connector, ConnectorStatus } from '../schemas/connector';
 import type { Activity, NewActivity } from '../schemas/activity';
 import type { KnowledgeNode, NewKnowledgeNode } from '../schemas/knowledge-node';
 import type { KnowledgeEdge, NewKnowledgeEdge } from '../schemas/knowledge-edge';
+import type { AgentTemplate } from '../schemas/agent-template';
 
 // Helper: returns a new nested Map for an org if it doesn't exist
 function ensureOrg<T>(store: Map<string, Map<string, T>>, orgId: string): Map<string, T> {
@@ -20,6 +21,60 @@ function nextId() { return String(autoId++); }
 let autoNumId = 1000;
 function nextNumId() { return autoNumId++; }
 
+const SEED_TEMPLATES: AgentTemplate[] = [
+  {
+    id: 'tpl-community-manager',
+    publisher: 'official',
+    name: 'Community Manager',
+    description: 'Monitors and responds to community messages across channels.',
+    category: 'community',
+    icon: null,
+    tier: 'lead',
+    model: 'claude-sonnet-4-6',
+    tools: ['read_messages', 'send_message'],
+    constitution: {},
+    suggestedSkills: [],
+    suggestedGoals: [],
+    installsCount: 42,
+    featured: true,
+    createdAt: '2026-08-01T00:00:00.000Z',
+  },
+  {
+    id: 'tpl-content-writer',
+    publisher: 'official',
+    name: 'Content Writer',
+    description: 'Drafts social posts and blog content based on brand voice.',
+    category: 'content',
+    icon: null,
+    tier: 'specialist',
+    model: 'claude-sonnet-4-6',
+    tools: ['draft_post', 'search_web'],
+    constitution: {},
+    suggestedSkills: [],
+    suggestedGoals: [],
+    installsCount: 18,
+    featured: false,
+    createdAt: '2026-08-01T00:00:00.000Z',
+  },
+  {
+    id: 'tpl-analytics-reporter',
+    publisher: 'official',
+    name: 'Analytics Reporter',
+    description: 'Aggregates KPIs and generates weekly performance reports.',
+    category: 'analytics',
+    icon: null,
+    tier: 'worker',
+    model: 'claude-sonnet-4-6',
+    tools: ['query_analytics'],
+    constitution: {},
+    suggestedSkills: [],
+    suggestedGoals: [],
+    installsCount: 7,
+    featured: false,
+    createdAt: '2026-08-01T00:00:00.000Z',
+  },
+];
+
 export function createInMemoryRepository(): OSRepository {
   const agents = new Map<string, Map<string, Agent>>();
   const goals = new Map<string, Map<string, Goal>>();
@@ -30,6 +85,9 @@ export function createInMemoryRepository(): OSRepository {
   const activityStore = new Map<string, Map<string, Activity>>();
   const knowledgeNodes = new Map<string, Map<string, KnowledgeNode>>();
   const knowledgeEdges = new Map<string, Map<string, KnowledgeEdge>>();
+  const templatesStore = new Map<string, AgentTemplate>(
+    SEED_TEMPLATES.map(t => [t.id, { ...t }])
+  );
 
   return {
     // ── AGENTS ──────────────────────────────────────────────────────────────
@@ -241,6 +299,27 @@ export function createInMemoryRepository(): OSRepository {
             .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
             .slice(0, limit);
         },
+      },
+    },
+
+    // ── TEMPLATES ─────────────────────────────────────────────────────────────
+    templates: {
+      async all() {
+        return [...templatesStore.values()]
+          .sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0) || a.name.localeCompare(b.name));
+      },
+      async byId(id) {
+        return templatesStore.get(id) ?? null;
+      },
+      async byCategory(category) {
+        return [...templatesStore.values()]
+          .filter(t => t.category === category)
+          .sort((a, b) => a.name.localeCompare(b.name));
+      },
+      async incrementInstalls(id) {
+        const t = templatesStore.get(id);
+        if (!t) return;
+        templatesStore.set(id, { ...t, installsCount: t.installsCount + 1 });
       },
     },
   };

@@ -98,6 +98,20 @@
         "err": "ERROR"
       }
     },
+    "marketplace": {
+      "title": "Marketplace",
+      "subtitle": "Browse and install agent templates",
+      "install": "Install",
+      "installed": "Installed",
+      "categories": {
+        "community": "Community",
+        "content": "Content",
+        "analytics": "Analytics",
+        "social": "Social",
+        "support": "Support",
+        "sales": "Sales"
+      }
+    },
     "analytics": {
       "title": "Analytics",
       "subtitle": "OS KPIs · last {days} days",

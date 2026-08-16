@@ -10,6 +10,7 @@ import { ConnectorSchema, type Connector, type ConnectorStatus } from '../schema
 import { ActivitySchema, type Activity, type NewActivity } from '../schemas/activity';
 import { KnowledgeNodeSchema, type KnowledgeNode, type NewKnowledgeNode, type NodeKind } from '../schemas/knowledge-node';
 import { KnowledgeEdgeSchema, type KnowledgeEdge, type NewKnowledgeEdge } from '../schemas/knowledge-edge';
+import { AgentTemplateSchema, type AgentTemplate } from '../schemas/agent-template';
 
 // ─── Error ───────────────────────────────────────────────────────────────────
 
@@ -523,6 +524,48 @@ export function createSupabaseRepository(sb: SupabaseClient): OSRepository {
       },
     },
 
+    // ── TEMPLATES ────────────────────────────────────────────────────────────
+    templates: {
+      async all() {
+        const { data, error } = await sb
+          .from('os_agent_templates')
+          .select('*')
+          .order('featured', { ascending: false })
+          .order('name');
+        if (error) throw new RepoError('templates.all', error);
+        return (data ?? []).map(rowToTemplate);
+      },
+      async byId(id) {
+        const { data, error } = await sb
+          .from('os_agent_templates')
+          .select('*')
+          .eq('id', id)
+          .maybeSingle();
+        if (error) throw new RepoError('templates.byId', error);
+        return data ? rowToTemplate(data as Record<string, unknown>) : null;
+      },
+      async byCategory(category) {
+        const { data, error } = await sb
+          .from('os_agent_templates')
+          .select('*')
+          .eq('category', category)
+          .order('name');
+        if (error) throw new RepoError('templates.byCategory', error);
+        return (data ?? []).map(rowToTemplate);
+      },
+      async incrementInstalls(id) {
+        const { data } = await sb
+          .from('os_agent_templates')
+          .select('installs_count')
+          .eq('id', id)
+          .maybeSingle();
+        await sb
+          .from('os_agent_templates')
+          .update({ installs_count: ((data as Record<string, unknown> | null)?.installs_count as number ?? 0) + 1 })
+          .eq('id', id);
+      },
+    },
+
     // ── KNOWLEDGE ────────────────────────────────────────────────────────────
     knowledge: {
       nodes: {
@@ -663,4 +706,26 @@ function edgeToRow(orgId: string, edge: NewKnowledgeEdge) {
     meta: edge.meta ?? {},
     created_at: edge.createdAt ?? new Date().toISOString(),
   };
+}
+
+// ─── Agent Template mapper ────────────────────────────────────────────────────
+
+function rowToTemplate(r: Record<string, unknown>): AgentTemplate {
+  return AgentTemplateSchema.parse({
+    id: r.id,
+    publisher: r.publisher ?? 'official',
+    name: r.name,
+    description: r.description ?? '',
+    category: r.category,
+    icon: r.icon ?? null,
+    tier: r.tier ?? 'worker',
+    model: r.model ?? 'claude-sonnet-4-6',
+    tools: r.tools ?? [],
+    constitution: r.constitution ?? {},
+    suggestedSkills: r.suggested_skills ?? [],
+    suggestedGoals: r.suggested_goals ?? [],
+    installsCount: Number(r.installs_count ?? 0),
+    featured: r.featured ?? false,
+    createdAt: r.created_at,
+  });
 }

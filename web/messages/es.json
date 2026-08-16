@@ -98,6 +98,20 @@
         "err": "ERROR"
       }
     },
+    "marketplace": {
+      "title": "Marketplace",
+      "subtitle": "Explora e instala plantillas de agentes",
+      "install": "Instalar",
+      "installed": "Instalado",
+      "categories": {
+        "community": "Comunidad",
+        "content": "Contenido",
+        "analytics": "Analítica",
+        "social": "Social",
+        "support": "Soporte",
+        "sales": "Ventas"
+      }
+    },
     "analytics": {
       "title": "Analytics",
       "subtitle": "KPIs del OS · últimos {days} días",

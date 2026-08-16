@@ -8,6 +8,7 @@ import type { ConnectorStatus } from './schemas/connector';
 import type { Activity, NewActivity } from './schemas/activity';
 import type { KnowledgeNode, NewKnowledgeNode, NodeKind } from './schemas/knowledge-node';
 import type { KnowledgeEdge, NewKnowledgeEdge } from './schemas/knowledge-edge';
+import type { AgentTemplate } from './schemas/agent-template';
 
 export type { Agent, Goal, Skill, Workflow, AgentRun, NewAgentRun, Connector, Activity, NewActivity };
 export type { NewAgent } from './schemas/agent';
@@ -16,6 +17,7 @@ export type { NewSkill } from './schemas/skill';
 export type { NewWorkflow } from './schemas/workflow';
 export type { NewConnector } from './schemas/connector';
 export type { KnowledgeNode, NewKnowledgeNode, NodeKind, KnowledgeEdge, NewKnowledgeEdge };
+export type { AgentTemplate };
 
 export type Unsubscribe = () => void;
 
@@ -72,5 +74,11 @@ export interface OSRepository {
       insert(orgId: string, edge: NewKnowledgeEdge): Promise<void>;
       byRelation(orgId: string, relation: string, limit?: number): Promise<KnowledgeEdge[]>;
     };
+  };
+  templates: {
+    all(): Promise<AgentTemplate[]>;
+    byId(id: string): Promise<AgentTemplate | null>;
+    byCategory(category: string): Promise<AgentTemplate[]>;
+    incrementInstalls(id: string): Promise<void>;
   };
 }
