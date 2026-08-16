@@ -1,7 +1,12 @@
 import type { NextConfig } from 'next'
 
+// `standalone` output is for Docker/self-hosted images (produces .next/standalone/).
+// On Vercel we need the default output so the Vercel builder can convert routes to lambdas.
+// The VERCEL env var is always set to "1" on Vercel builds.
+const isVercel = process.env.VERCEL === '1'
+
 const nextConfig: NextConfig = {
-  output: 'standalone',
+  ...(isVercel ? {} : { output: 'standalone' as const }),
   outputFileTracingRoot: process.cwd(),
   serverExternalPackages: ['ffmpeg-static'],
   outputFileTracingIncludes: {
