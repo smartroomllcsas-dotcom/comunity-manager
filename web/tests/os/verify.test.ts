@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { verify } from '@/lib/os/agents/verify';
 import { updateTrust } from '@/lib/os/agents/trust';
+import { createStubRuntime } from '@/lib/os/agents/runtime';
 import type { Agent } from '@/lib/os/schemas/agent';
 
 // ── verify ──────────────────────────────────────────────────────────────────
@@ -111,5 +112,52 @@ describe('updateTrust', () => {
     const updated = updateTrust(agent, 'run-1', 'pass');
     expect(agent.trustLedger).toHaveLength(0);
     expect(updated.trustLedger).toHaveLength(1);
+  });
+});
+
+// ── createStubRuntime ────────────────────────────────────────────────────────
+
+describe('createStubRuntime', () => {
+  it('returns correct shape without calling Claude API', async () => {
+    const agent = makeAgent();
+    const runtime = createStubRuntime();
+    const result = await runtime.run(agent, { prompt: 'hello' });
+
+    // verifyResult
+    expect(result.verifyResult.pass).toBe(true);
+
+    // run shape
+    expect(result.run.orgId).toBe(agent.orgId);
+    expect(result.run.agentId).toBe(agent.id);
+    expect(result.run.ok).toBe(true);
+    expect(result.run.tokensIn).toBe(0);
+    expect(result.run.tokensOut).toBe(0);
+    expect(result.run.costUsd).toBe(0);
+    expect(result.run.summary).toBe('stub run');
+    expect(result.run.id).toMatch(/^stub-/);
+
+    // output echoes input
+    const output = result.output as Record<string, unknown>;
+    expect((output.echo as Record<string, unknown>).prompt).toBe('hello');
+    expect(output.agent).toBe(agent.name);
+  });
+
+  it('startedAt and finishedAt are valid ISO strings', async () => {
+    const agent = makeAgent();
+    const runtime = createStubRuntime();
+    const { run } = await runtime.run(agent, { prompt: 'test' });
+
+    expect(() => new Date(run.startedAt)).not.toThrow();
+    expect(new Date(run.startedAt).toISOString()).toBe(run.startedAt);
+    expect(run.finishedAt).toBeDefined();
+  });
+
+  it('each run gets a unique id', async () => {
+    const agent = makeAgent();
+    const runtime = createStubRuntime();
+    const r1 = await runtime.run(agent, { prompt: 'a' });
+    await new Promise(res => setTimeout(res, 2));
+    const r2 = await runtime.run(agent, { prompt: 'b' });
+    expect(r1.run.id).not.toBe(r2.run.id);
   });
 });
