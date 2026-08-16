@@ -3,6 +3,7 @@ import { getMessages } from 'next-intl/server';
 import { notFound } from 'next/navigation';
 import { locales, type Locale } from '@/../i18n';
 import '@/styles/os.css';
+import { CommandPalette } from '@/components/os/CommandPalette';
 
 export default async function ShellLayout({
   children,
@@ -17,6 +18,7 @@ export default async function ShellLayout({
   return (
     <NextIntlClientProvider locale={locale} messages={messages}>
       {children}
+      <CommandPalette />
     </NextIntlClientProvider>
   );
 }
