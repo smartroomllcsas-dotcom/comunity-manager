@@ -70,6 +70,30 @@
       "subtitle": "Grafo de conocimiento vivo",
       "emptyState": "Brain vacío. Corre el ingestor para popular desde CM.",
       "nodeCount": "{count} nodos"
+    },
+    "analytics": {
+      "title": "Analytics",
+      "subtitle": "KPIs del OS · últimos {days} días",
+      "emptyState": "Sin datos aún — configura un org para ver métricas.",
+      "goalsHealth": "Salud de goals (diario)",
+      "topAgents": "Top agentes",
+      "cronReliability": "Confiabilidad de crons",
+      "noAgentRuns": "Sin ejecuciones de agentes en el período.",
+      "noCronData": "Sin datos de crons en el período.",
+      "kpi": {
+        "runs": "Ejecuciones de agentes",
+        "cost": "Costo total (USD)",
+        "successRate": "Tasa de éxito",
+        "costPerMsg": "Costo por mensaje"
+      },
+      "col": {
+        "agent": "Agente",
+        "runs": "Runs",
+        "successRate": "Éxito",
+        "endpoint": "Endpoint",
+        "failures": "Fallos",
+        "failRate": "Tasa de fallo"
+      }
     }
   }
 }

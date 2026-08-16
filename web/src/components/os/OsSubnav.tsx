@@ -13,6 +13,7 @@ const SUBNAV_ITEMS = [
   { href: '/os/social',      label: 'Social' },
   { href: '/os/workflows',   label: 'Workflows' },
   { href: '/os/integrations', label: 'Integrations' },
+  { href: '/os/analytics',   label: 'Analytics' },
   { href: '/os/settings/cohorts', label: 'Settings' },
 ];
 

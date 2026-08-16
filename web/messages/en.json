@@ -70,6 +70,30 @@
       "subtitle": "Live knowledge graph",
       "emptyState": "Brain is empty. Run the ingestor to populate from CM.",
       "nodeCount": "{count} nodes"
+    },
+    "analytics": {
+      "title": "Analytics",
+      "subtitle": "OS KPIs · last {days} days",
+      "emptyState": "No data yet — configure an org to see metrics.",
+      "goalsHealth": "Goals health (daily)",
+      "topAgents": "Top agents",
+      "cronReliability": "Cron reliability",
+      "noAgentRuns": "No agent runs in this period.",
+      "noCronData": "No cron data in this period.",
+      "kpi": {
+        "runs": "Agent runs",
+        "cost": "Total cost (USD)",
+        "successRate": "Success rate",
+        "costPerMsg": "Cost per message"
+      },
+      "col": {
+        "agent": "Agent",
+        "runs": "Runs",
+        "successRate": "Success",
+        "endpoint": "Endpoint",
+        "failures": "Failures",
+        "failRate": "Fail rate"
+      }
     }
   }
 }
