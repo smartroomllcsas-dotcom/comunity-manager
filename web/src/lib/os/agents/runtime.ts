@@ -20,7 +20,7 @@ export interface AgentRuntime {
   run(agent: Agent, input: RunInput): Promise<RuntimeResult>;
 }
 
-function buildSystemPrompt(agent: Agent): string {
+export function buildSystemPrompt(agent: Agent): string {
   const c = agent.constitution || {};
   const rules: string[] = [];
   if (c.max_msg_per_hour) rules.push(`No enviar más de ${c.max_msg_per_hour} mensajes por hora.`);
