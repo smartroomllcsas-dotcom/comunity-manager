@@ -118,7 +118,7 @@ function StatPopout({ metric, onClose }: { metric: 'audience' | 'dms'; onClose: 
   useEffect(() => {
     let cancelled = false;
     // TODO Sprint 2: wire to /api/os/social/series
-    fetch(`/api/social/series?metric=${metric}`)
+    fetch(`/api/os/social/series?metric=${metric}`)
       .then((r) => r.json())
       .then((body: { series: LabelledSeries[] }) => { if (!cancelled) setData(body.series ?? []); })
       .catch(() => !cancelled && setData([]));
