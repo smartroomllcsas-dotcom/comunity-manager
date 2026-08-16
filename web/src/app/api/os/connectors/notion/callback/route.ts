@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServiceClient } from '@/lib/os/supabase-service';
+import { verifyState } from '@/lib/os/oauth-state';
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -10,10 +11,12 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'missing code or state' }, { status: 400 });
   }
 
-  const orgId = state.split('.')[0]; // TODO HMAC verify
-  if (!orgId) {
-    return NextResponse.json({ error: 'invalid state' }, { status: 400 });
+  // Sprint 3: verify HMAC-signed state — rejects tampered/expired/wrong-provider tokens.
+  const validated = verifyState(state, 'notion');
+  if (!validated) {
+    return NextResponse.json({ error: 'invalid or expired state' }, { status: 401 });
   }
+  const orgId = validated.orgId;
 
   const clientId = process.env.NOTION_CLIENT_ID;
   const clientSecret = process.env.NOTION_CLIENT_SECRET;

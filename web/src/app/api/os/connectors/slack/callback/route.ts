@@ -20,6 +20,7 @@ import { NextResponse } from 'next/server';
 import { WebClient } from '@slack/web-api';
 import { communityOsFlag } from '@/lib/flags';
 import { getSupabaseServiceClient } from '@/lib/os/supabase-service';
+import { verifyState } from '@/lib/os/oauth-state';
 
 export async function GET(req: Request) {
   const enabled = await communityOsFlag();
@@ -52,11 +53,12 @@ export async function GET(req: Request) {
     );
   }
 
-  // Sprint 2: state IS the orgId (plain). Sprint 3: verify HMAC signature.
-  const orgId = state;
-  if (!orgId) {
-    return NextResponse.json({ error: 'invalid state: could not extract orgId' }, { status: 400 });
+  // Sprint 3: verify HMAC-signed state — rejects tampered/expired/wrong-provider tokens.
+  const validated = verifyState(state, 'slack');
+  if (!validated) {
+    return NextResponse.json({ error: 'invalid or expired state' }, { status: 401 });
   }
+  const orgId = validated.orgId;
 
   try {
     const client = new WebClient();

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireOrgIdFromRequest } from '@/lib/os/server';
+import { signState } from '@/lib/os/oauth-state';
 
 export async function GET(req: Request) {
   try {
@@ -9,7 +10,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'NOTION_CLIENT_ID not configured' }, { status: 500 });
     }
     const redirectUri = process.env.NOTION_OAUTH_REDIRECT_URL!;
-    const state = `${orgId}.${Date.now()}`;
+    const state = signState({ orgId, provider: 'notion' });
     const params = new URLSearchParams({
       client_id: clientId,
       response_type: 'code',
