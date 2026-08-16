@@ -150,7 +150,7 @@ describe('OSRepository (in-memory)', () => {
 
   it('activity: insert + recent returns item', async () => {
     await repo.activity.insert(ORG_A, {
-      orgId: ORG_A, kind: 'agent.run.complete', summary: 'Done', payload: { agentId: 'a1' },
+      kind: 'agent.run.complete', summary: 'Done', payload: { agentId: 'a1' },
     });
     const items = await repo.activity.recent(ORG_A);
     expect(items).toHaveLength(1);
@@ -164,7 +164,7 @@ describe('OSRepository (in-memory)', () => {
   });
 
   it('activity: ORG ISOLATION', async () => {
-    await repo.activity.insert(ORG_A, { orgId: ORG_A, kind: 'test', payload: {} });
+    await repo.activity.insert(ORG_A, { kind: 'test', payload: {} });
     expect(await repo.activity.recent(ORG_B)).toHaveLength(0);
   });
 });
