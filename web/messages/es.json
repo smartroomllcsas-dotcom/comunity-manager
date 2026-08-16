@@ -58,6 +58,12 @@
     },
     "command": {
       "title": "Command palette"
+    },
+    "brain": {
+      "title": "Brain",
+      "subtitle": "Grafo de conocimiento vivo",
+      "emptyState": "Brain vacío. Corre el ingestor para popular desde CM.",
+      "nodeCount": "{count} nodos"
     }
   }
 }

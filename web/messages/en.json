@@ -58,6 +58,12 @@
     },
     "command": {
       "title": "Command palette"
+    },
+    "brain": {
+      "title": "Brain",
+      "subtitle": "Live knowledge graph",
+      "emptyState": "Brain is empty. Run the ingestor to populate from CM.",
+      "nodeCount": "{count} nodes"
     }
   }
 }
