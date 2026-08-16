@@ -4,6 +4,7 @@ import { communityOsFlag } from '@/lib/flags';
 import { requireOrgIdFromRequest } from '@/lib/os/server';
 import { getSupabaseServiceClient } from '@/lib/os/supabase-service';
 import Stripe from 'stripe';
+import { wrapSecret } from '@/lib/os/crypto';
 
 const BodySchema = z.object({
   apiKey: z.string().startsWith('rk_').or(z.string().startsWith('sk_')),
@@ -29,8 +30,7 @@ export async function POST(req: Request) {
         config: {
           account_id: acct.id,
           business_name: (acct as any).business_profile?.name ?? null,
-          // TODO: move api_key to Supabase Vault (Sprint 3)
-          api_key: apiKey,
+          api_key: wrapSecret(apiKey),
         },
         last_check_at: new Date().toISOString(),
       },

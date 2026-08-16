@@ -6,6 +6,7 @@
 import Stripe from 'stripe';
 import type { ConnectorAdapter, ProbeResult } from '../base';
 import { getSupabaseServiceClient } from '@/lib/os/supabase-service';
+import { unwrapSecret } from '@/lib/os/crypto';
 
 export const stripeAdapter: ConnectorAdapter = {
   id: 'stripe',
@@ -23,8 +24,10 @@ export const stripeAdapter: ConnectorAdapter = {
       .maybeSingle();
     const cfg = (data?.config ?? {}) as any;
     if (!cfg.api_key) return { status: 'not_configured' };
+    const apiKey = unwrapSecret(cfg.api_key);
+    if (!apiKey) return { status: 'not_configured' };
     try {
-      const stripe = new Stripe(cfg.api_key, { apiVersion: '2024-06-20' as any });
+      const stripe = new Stripe(apiKey, { apiVersion: '2024-06-20' as any });
       const acct = await stripe.accounts.retrieve();
       return {
         status: 'live',

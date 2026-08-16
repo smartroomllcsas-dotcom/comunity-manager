@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServiceClient } from '@/lib/os/supabase-service';
 import { verifyState } from '@/lib/os/oauth-state';
+import { wrapSecret } from '@/lib/os/crypto';
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -57,7 +58,7 @@ export async function GET(req: Request) {
       provider: 'notion',
       status: 'live',
       config: {
-        access_token: data.access_token,
+        access_token: wrapSecret(data.access_token),
         workspace_name: data.workspace_name,
         workspace_id: data.workspace_id,
         bot_id: data.bot_id,

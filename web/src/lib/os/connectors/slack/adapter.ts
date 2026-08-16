@@ -5,6 +5,7 @@
 import { WebClient } from '@slack/web-api';
 import type { ConnectorAdapter, ProbeResult } from '../base';
 import { getSupabaseServiceClient } from '@/lib/os/supabase-service';
+import { unwrapSecret } from '@/lib/os/crypto';
 
 export const slackAdapter: ConnectorAdapter = {
   id: 'slack',
@@ -22,7 +23,9 @@ export const slackAdapter: ConnectorAdapter = {
         .eq('id', 'slack')
         .maybeSingle();
 
-      const accessToken = (data?.config as any)?.access_token as string | undefined;
+      const rawToken = (data?.config as any)?.access_token as string | undefined;
+      if (!rawToken) return { status: 'not_configured' };
+      const accessToken = unwrapSecret(rawToken);
       if (!accessToken) return { status: 'not_configured' };
 
       const client = new WebClient(accessToken);
