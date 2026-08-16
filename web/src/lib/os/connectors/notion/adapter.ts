@@ -1,6 +1,7 @@
 import { Client } from '@notionhq/client';
 import type { ConnectorAdapter, ProbeResult } from '../base';
 import { getSupabaseServiceClient } from '@/lib/os/supabase-service';
+import { unwrapSecret } from '@/lib/os/crypto';
 
 export const notionAdapter: ConnectorAdapter = {
   id: 'notion',
@@ -22,7 +23,10 @@ export const notionAdapter: ConnectorAdapter = {
         return { status: 'not_configured' };
       }
 
-      const notion = new Client({ auth: (data.config as any).access_token });
+      const accessToken = unwrapSecret((data.config as any).access_token);
+      if (!accessToken) return { status: 'not_configured' };
+
+      const notion = new Client({ auth: accessToken });
       const me = await notion.users.me({});
 
       return {

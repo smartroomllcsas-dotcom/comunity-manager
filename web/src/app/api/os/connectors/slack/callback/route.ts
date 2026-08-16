@@ -20,6 +20,7 @@ import { NextResponse } from 'next/server';
 import { WebClient } from '@slack/web-api';
 import { communityOsFlag } from '@/lib/flags';
 import { getSupabaseServiceClient } from '@/lib/os/supabase-service';
+import { wrapSecret } from '@/lib/os/crypto';
 
 export async function GET(req: Request) {
   const enabled = await communityOsFlag();
@@ -85,7 +86,7 @@ export async function GET(req: Request) {
         provider: 'slack',
         status: 'live',
         config: {
-          access_token: accessToken,
+          access_token: wrapSecret(accessToken),
           team_name: teamName ?? null,
           team_id: teamId ?? null,
           bot_user_id: botUserId ?? null,
