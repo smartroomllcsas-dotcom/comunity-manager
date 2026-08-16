@@ -59,6 +59,24 @@ interface MetricRow {
   followers_delta_30d: number;
 }
 
+interface PillarRow {
+  id: string;
+  name: string;
+  color: string;
+  post_count: number;
+}
+
+interface PostRow {
+  scheduled_date: string;
+  platform: string;
+  status: string;
+}
+
+interface MentionRow {
+  id: string;
+  created_at: string;
+}
+
 async function fetchSocialData(orgId: string) {
   const sb = serviceClient();
 
@@ -70,17 +88,57 @@ async function fetchSocialData(orgId: string) {
     .eq('status', 'active');
 
   // Last 90 days of snapshots for the history chart
-  const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+  const since90 = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
   const { data: history } = await sb
     .from('cm_metrics_account')
     .select('platform, snapshot_at, followers, followers_delta_30d')
     .eq('organization_id', orgId)
-    .gte('snapshot_at', since)
+    .gte('snapshot_at', since90)
     .order('snapshot_at', { ascending: true });
+
+  // ── Sprint 3: content pillars for PillarRadar ──────────────────────────
+  // orgId == cm_client_id in the CM data model (see identify.ts)
+  const { data: pillars } = await sb
+    .from('cm_content_pillars')
+    .select('id, name, color, post_count')
+    .eq('client_id', orgId)
+    .order('post_count', { ascending: false });
+
+  // ── Sprint 3: published + scheduled posts last 90d for AudienceConsistency ─
+  const since90d = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const { data: posts } = await sb
+    .from('cm_scheduled_posts')
+    .select('scheduled_date, platform, status')
+    .eq('client_id', orgId)
+    .in('status', ['published', 'scheduled'])
+    .gte('scheduled_date', since90d)
+    .order('scheduled_date', { ascending: true });
+
+  // ── Sprint 3: DM count from cm_mentions (source_type = 'dm') last 30d ──
+  const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const since60 = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: dms30 } = await sb
+    .from('cm_mentions')
+    .select('id, created_at')
+    .eq('client_id', orgId)
+    .eq('source_type', 'dm')
+    .gte('created_at', since30);
+  // prior 30d window (30–60 days ago) for growth calc
+  const { data: dms60 } = await sb
+    .from('cm_mentions')
+    .select('id, created_at')
+    .eq('client_id', orgId)
+    .eq('source_type', 'dm')
+    .gte('created_at', since60)
+    .lt('created_at', since30);
 
   return {
     accounts: accounts ?? [],
     history: (history ?? []) as MetricRow[],
+    pillars: (pillars ?? []) as PillarRow[],
+    posts: (posts ?? []) as PostRow[],
+    dms30: (dms30 ?? []) as MentionRow[],
+    dms60: (dms60 ?? []) as MentionRow[],
   };
 }
 
@@ -136,6 +194,56 @@ function buildGrowth(history: MetricRow[]): SocialGrowth {
   return { d7: null, d30: parseFloat(d30.toFixed(2)), d60: null, allTime: null };
 }
 
+// ── Sprint 3 builders ─────────────────────────────────────────────────────
+
+/**
+ * Map cm_content_pillars rows into PillarAxis[].
+ * score = normalized post_count (0–100, relative to the most-active pillar).
+ * roster/freshness/sop approximate the same value until post-level signals land.
+ */
+function buildPillarAxes(pillars: PillarRow[]): PillarAxis[] {
+  if (!pillars.length) return PLACEHOLDER_PILLAR_AXES;
+  const maxCount = Math.max(...pillars.map((p) => p.post_count ?? 0), 1);
+  return pillars.map((p) => {
+    const score = Math.round(((p.post_count ?? 0) / maxCount) * 100);
+    return {
+      id: p.id,
+      label: p.name,
+      color: p.color ?? '#3df08c',
+      score,
+      roster: score,    // TODO Sprint 4: derive from cm_metrics_post per pillar
+      freshness: score,
+      sop: score,
+    };
+  });
+}
+
+/**
+ * Map cm_scheduled_posts rows into PostDay[] for AudienceConsistency.
+ * PostDay = { date: string; platforms: string[] }
+ */
+function buildPostDays(posts: PostRow[]): PostDay[] {
+  // Group platforms by date
+  const byDate = new Map<string, Set<string>>();
+  for (const p of posts) {
+    if (!byDate.has(p.scheduled_date)) byDate.set(p.scheduled_date, new Set());
+    byDate.get(p.scheduled_date)!.add(p.platform);
+  }
+  return Array.from(byDate.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, platforms]) => ({ date, platforms: Array.from(platforms) }));
+}
+
+/**
+ * Build DM growth metric from two consecutive 30-day windows of cm_mentions DMs.
+ */
+function buildDmGrowth(dms30: MentionRow[], dms60: MentionRow[]): SocialGrowth {
+  const cur = dms30.length;
+  const prior = dms60.length;
+  const d30 = prior > 0 ? parseFloat((((cur - prior) / prior) * 100).toFixed(1)) : null;
+  return { d7: null, d30, d60: null, allTime: null };
+}
+
 // ---------------------------------------------------------------------------
 // Page component
 // ---------------------------------------------------------------------------
@@ -152,9 +260,16 @@ export default async function OsSocialPage() {
   let platformsCount                  = 3;
   let isPlaceholder                   = true;
 
+  // Sprint 3: real pillar / postDays / DM data
+  let pillarAxes: PillarAxis[]  = PLACEHOLDER_PILLAR_AXES;
+  let postDays: PostDay[]       = [];
+  let dmGrowth: SocialGrowth    = PLACEHOLDER_DM_GROWTH;
+  let dmCount                   = 148; // placeholder total DMs until we accumulate history
+  const dmThreads: DmThread[]   = [];  // TODO Sprint 4: surface individual DM threads
+
   try {
     const orgId = await requireOrgIdFromRequest();
-    const { accounts, history } = await fetchSocialData(orgId);
+    const { accounts, history, pillars, posts, dms30, dms60 } = await fetchSocialData(orgId);
 
     if (history.length > 0) {
       isPlaceholder  = false;
@@ -165,15 +280,25 @@ export default async function OsSocialPage() {
       audienceGrowth = buildGrowth(history);
       platformsCount = accounts.length || pie.items.length;
     }
+
+    // PillarRadar — real pillars from cm_content_pillars
+    if (pillars.length > 0) {
+      pillarAxes = buildPillarAxes(pillars);
+    }
+
+    // AudienceConsistency — post publishing cadence from cm_scheduled_posts
+    if (posts.length > 0) {
+      postDays = buildPostDays(posts);
+    }
+
+    // DM count + growth from cm_mentions source_type='dm'
+    if (dms30.length > 0 || dms60.length > 0) {
+      dmCount  = dms30.length;
+      dmGrowth = buildDmGrowth(dms30, dms60);
+    }
   } catch {
     // Unauthenticated preview or DB unavailable — keep placeholders
   }
-
-  // DMs: not yet in cm_metrics_account; keep placeholder until Sprint 3
-  // TODO Sprint 3: pull from cm_mentions / cm_chat_history DM threads
-  const dmGrowth: SocialGrowth = PLACEHOLDER_DM_GROWTH;
-  const dmThreads: DmThread[]  = [];
-  const postDays: PostDay[]    = [];
 
   return (
     <main className="content">
@@ -189,7 +314,7 @@ export default async function OsSocialPage() {
         <SocialStatStrip
           audienceTotal={pieTotal}
           audienceGrowth={audienceGrowth}
-          totalDms={148}
+          totalDms={dmCount}
           dmGrowth={dmGrowth}
           platformsCount={platformsCount}
           dmThreads={dmThreads}
@@ -204,7 +329,6 @@ export default async function OsSocialPage() {
           {/* Source: cm_metrics_account · organization_id · last 90d */}
           {isPlaceholder && (
             <p className="mb-1 font-mono text-[9px] text-os-muted">
-              {/* TODO Sprint 3: connect real social accounts to populate live data */}
               demo data · connect accounts to see live metrics
             </p>
           )}
@@ -218,9 +342,8 @@ export default async function OsSocialPage() {
           <AudiencePie items={pieItems} total={pieTotal} donutPx={160} />
         </section>
 
-        {/* Audience consistency (lazy-loaded SVG chart) */}
+        {/* Audience consistency — Source: cm_scheduled_posts · client_id · last 90d */}
         <section className="lg:col-span-2">
-          {/* TODO Sprint 3: audience from cm_metrics_account, postDays from cm_scheduled_posts */}
           <AudienceConsistencyLazy
             audience={[]}
             postDays={postDays}
@@ -228,12 +351,15 @@ export default async function OsSocialPage() {
           />
         </section>
 
-        {/* Pillar radar */}
+        {/* Pillar radar — Source: cm_content_pillars · client_id · post_count score */}
         <section className="rounded-lg-t border border-os-border bg-os-surface px-5 py-[18px] lg:col-span-2">
           <h2 className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-os-dim">{t('pillars')}</h2>
-          {/* TODO Sprint 3: derive axes from cm_content_pillars + cm_metrics_post engagement */}
           <div className="flex justify-center">
-            <PillarRadar axes={PLACEHOLDER_PILLAR_AXES} health={69} warnings={1} />
+            <PillarRadar
+              axes={pillarAxes}
+              health={Math.round(pillarAxes.reduce((s, a) => s + a.score, 0) / Math.max(pillarAxes.length, 1))}
+              warnings={pillarAxes.filter((a) => a.score < 30).length}
+            />
           </div>
         </section>
       </div>
