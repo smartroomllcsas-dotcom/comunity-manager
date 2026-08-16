@@ -78,7 +78,7 @@ export const identify = dedupe(async (): Promise<UserEntities> => {
         .eq('id', cmUserId)
         .maybeSingle();
 
-      if (cmUser?.email) legacyEmail = cmUser.email;
+      if (cmUser?.email) legacyEmail = cmUser.email.trim().toLowerCase();
 
       // Orgs live in public.cm_clients with FK user_id → cm_users.id
       const { data: cmClients } = await sb
@@ -90,7 +90,8 @@ export const identify = dedupe(async (): Promise<UserEntities> => {
       orgId = orgIds[0] ?? null;
     }
 
-    const email = authUser?.email ?? legacyEmail;
+    const rawEmail = authUser?.email ?? legacyEmail;
+    const email = rawEmail ? rawEmail.trim().toLowerCase() : null;
     const userId = authUser?.id ?? cmUserId ?? null;
 
     return {
