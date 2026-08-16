@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { ingestForOrg } from '@/lib/os/brain/ingest';
 import { createSupabaseRepository } from '@/lib/os/adapters/supabase';
 import { getSupabaseServiceClient } from '@/lib/os/supabase-service';
+import { verifyCronAuth } from '@/lib/os/cron-auth';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -15,8 +16,7 @@ export const maxDuration = 300;
  * and runs ingestForOrg for each one using the service-role client.
  */
 export async function GET(req: Request) {
-  const auth = req.headers.get('authorization');
-  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!verifyCronAuth(req.headers.get('authorization'))) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
@@ -41,10 +41,10 @@ export async function GET(req: Request) {
     try {
       const stats = await ingestForOrg(repo, orgId);
       results.push({ orgId, ...stats });
-      console.log('[cron/os-brain-ingest] orgId=%s stats=%o', orgId, stats);
     } catch (e: any) {
-      console.error('[cron/os-brain-ingest] orgId=%s error=%s', orgId, e.message);
-      results.push({ orgId, error: e.message });
+      // Log error message without orgId to avoid tenant fingerprinting in log services
+      console.error('[cron/os-brain-ingest] error=%s', e?.message ?? 'unknown');
+      results.push({ orgId, error: 'ingest_failed' });
     }
   }
 

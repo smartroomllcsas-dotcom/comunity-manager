@@ -15,3 +15,6 @@ CREATE TABLE os_cohorts (
 INSERT INTO os_cohorts (id, label, description, full_rollout, emails)
 VALUES ('community-os', 'Community OS', 'Access to /os/* namespace', false, ARRAY['leonelzc2005@gmail.com', 'leonel.zc2005@gmail.com'])
 ON CONFLICT (id) DO NOTHING;
+
+-- DOWN (Sprint 3 cohorts rollback):
+-- DROP TABLE IF EXISTS os_cohorts CASCADE;

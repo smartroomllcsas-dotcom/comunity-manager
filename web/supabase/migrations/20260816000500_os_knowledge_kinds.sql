@@ -38,3 +38,9 @@ ON CONFLICT DO NOTHING;
 
 -- Relax the CHECK constraint — validation moves to app layer via os_knowledge_kinds lookup
 ALTER TABLE os_knowledge_nodes DROP CONSTRAINT IF EXISTS os_knowledge_nodes_kind_check;
+
+-- DOWN (Sprint 5 knowledge kinds rollback):
+-- Restore the CHECK constraint before dropping (idempotent):
+-- ALTER TABLE os_knowledge_nodes ADD CONSTRAINT os_knowledge_nodes_kind_check
+--   CHECK (kind IN ('contact','topic','decision','event','tag','custom'));
+-- DROP TABLE IF EXISTS os_knowledge_kinds CASCADE;

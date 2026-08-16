@@ -43,30 +43,48 @@ export async function GET(req: Request) {
     }),
   });
 
-  const data = await tokenRes.json();
+  try {
+    const data = await tokenRes.json();
 
-  if (!data.access_token) {
-    return NextResponse.json({ error: 'oauth_failed', details: data }, { status: 500 });
-  }
+    if (!data.access_token) {
+      // Log the full response internally; do NOT return provider payload to the client
+      // (may include refresh tokens, workspace hints, or error strings with sensitive data).
+      console.error('[notion.callback] token exchange failed:', JSON.stringify(data).slice(0, 500));
+      const dest = new URL('/es/os/integrations', req.url);
+      dest.searchParams.set('notion', 'error');
+      dest.searchParams.set('code', 'oauth_failed');
+      return NextResponse.redirect(dest.toString());
+    }
 
-  const sb = getSupabaseServiceClient();
-  await sb.from('os_connectors').upsert(
-    {
-      id: 'notion',
-      org_id: orgId,
-      kind: 'oauth',
-      provider: 'notion',
-      status: 'live',
-      config: {
-        access_token: wrapSecret(data.access_token),
-        workspace_name: data.workspace_name,
-        workspace_id: data.workspace_id,
-        bot_id: data.bot_id,
+    const sb = getSupabaseServiceClient();
+    const { error: upsertError } = await sb.from('os_connectors').upsert(
+      {
+        id: 'notion',
+        org_id: orgId,
+        kind: 'oauth',
+        provider: 'notion',
+        status: 'live',
+        config: {
+          access_token: wrapSecret(data.access_token),
+          workspace_name: data.workspace_name,
+          workspace_id: data.workspace_id,
+          bot_id: data.bot_id,
+        },
+        last_check_at: new Date().toISOString(),
       },
-      last_check_at: new Date().toISOString(),
-    },
-    { onConflict: 'org_id,id' },
-  );
+      { onConflict: 'org_id,id' },
+    );
 
-  return NextResponse.redirect(new URL('/es/os/integrations?notion=connected', req.url));
+    if (upsertError) throw new Error('db_upsert_failed');
+
+    const dest = new URL('/es/os/integrations', req.url);
+    dest.searchParams.set('notion', 'connected');
+    return NextResponse.redirect(dest.toString());
+  } catch (e: unknown) {
+    console.error('[notion.callback] failed:', e instanceof Error ? e.message : String(e));
+    const dest = new URL('/es/os/integrations', req.url);
+    dest.searchParams.set('notion', 'error');
+    dest.searchParams.set('code', 'oauth_failed');
+    return NextResponse.redirect(dest.toString());
+  }
 }

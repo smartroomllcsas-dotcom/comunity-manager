@@ -66,3 +66,8 @@ LEFT JOIN (SELECT org_id, to_node_id, count(*) AS deg_in FROM os_knowledge_edges
   ON inn.org_id = n.org_id AND inn.to_node_id = n.id;
 
 ALTER VIEW os_knowledge_nodes_enriched SET (security_invoker = true);
+
+-- DOWN (Sprint 2 brain rollback):
+-- DROP VIEW IF EXISTS os_knowledge_nodes_enriched;
+-- DROP TABLE IF EXISTS os_knowledge_edges CASCADE;
+-- DROP TABLE IF EXISTS os_knowledge_nodes CASCADE;

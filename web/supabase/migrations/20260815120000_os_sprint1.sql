@@ -149,3 +149,14 @@ FROM os_activity a
 LEFT JOIN os_agents ag ON ag.id = a.actor_id AND ag.org_id = a.org_id;
 
 ALTER VIEW os_activity_enriched SET (security_invoker = true);
+
+-- DOWN (Sprint 1 rollback):
+-- DROP VIEW IF EXISTS os_activity_enriched;
+-- DROP TABLE IF EXISTS os_activity      CASCADE;
+-- DROP TABLE IF EXISTS os_connectors    CASCADE;
+-- DROP TABLE IF EXISTS os_agent_runs    CASCADE;
+-- DROP TABLE IF EXISTS os_workflows     CASCADE;
+-- DROP TABLE IF EXISTS os_skills        CASCADE;
+-- DROP TABLE IF EXISTS os_goals         CASCADE;
+-- DROP TABLE IF EXISTS os_agents        CASCADE;
+-- DROP FUNCTION IF EXISTS os_current_org() CASCADE;

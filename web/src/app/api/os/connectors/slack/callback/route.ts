@@ -71,7 +71,8 @@ export async function GET(req: Request) {
     });
 
     if (!result.ok) {
-      throw new Error((result as any).error ?? 'Slack oauth.v2.access returned ok=false');
+      console.error('[slack.callback] oauth.v2.access failed:', (result as any).error);
+      throw new Error('oauth_failed');
     }
 
     const accessToken = (result as any).access_token as string;
@@ -103,11 +104,13 @@ export async function GET(req: Request) {
     const dest = new URL('/es/os/integrations', req.url);
     dest.searchParams.set('slack', 'connected');
     return NextResponse.redirect(dest.toString());
-  } catch (e: any) {
-    // Redirect with error so the UI can surface it without a raw JSON page
+  } catch (e: unknown) {
+    // Log full error server-side; expose only a stable code to the client to avoid leaking
+    // OAuth provider messages, token hints, or DB errors via URL/logs surface.
+    console.error('[slack.callback] failed:', e instanceof Error ? e.message : String(e));
     const dest = new URL('/es/os/integrations', req.url);
     dest.searchParams.set('slack', 'error');
-    dest.searchParams.set('slack_err', encodeURIComponent(e.message ?? 'unknown'));
+    dest.searchParams.set('code', 'oauth_failed');
     return NextResponse.redirect(dest.toString());
   }
 }

@@ -7,3 +7,6 @@ CREATE TABLE IF NOT EXISTS os_org_theme (
 ALTER TABLE os_org_theme ENABLE ROW LEVEL SECURITY;
 CREATE POLICY os_org_theme_read ON os_org_theme FOR SELECT USING (org_id = os_current_org());
 CREATE POLICY os_org_theme_write ON os_org_theme FOR ALL USING (org_id = os_current_org()) WITH CHECK (org_id = os_current_org());
+
+-- DOWN (Sprint 4 theme rollback):
+-- DROP TABLE IF EXISTS os_org_theme CASCADE;

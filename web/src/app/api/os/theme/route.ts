@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { communityOsFlag } from '@/lib/flags';
-import { requireOrgIdFromRequest, getOSRepositoryForRequest } from '@/lib/os/server';
+import { requireOrgIdFromRequest } from '@/lib/os/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
@@ -43,8 +43,9 @@ export async function GET() {
       accent_hue: data?.accent_hue ?? 250,
       theme_mode: data?.theme_mode ?? 'dark',
     });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 401 });
+  } catch (e: unknown) {
+    console.error('[os/theme.GET] failed:', e instanceof Error ? e.message : String(e));
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 }
 
@@ -62,11 +63,14 @@ export async function PUT(req: Request) {
       theme_mode: parsed.theme_mode,
       updated_at: new Date().toISOString(),
     });
-    if (error) throw new Error(error.message);
+    if (error) throw new Error('db_upsert_failed');
     return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    if (e.name === 'ZodError')
-      return NextResponse.json({ error: 'invalid_input', details: e.issues }, { status: 400 });
-    return NextResponse.json({ error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    if (err.name === 'ZodError') {
+      return NextResponse.json({ error: 'invalid_input' }, { status: 400 });
+    }
+    console.error('[os/theme.PUT] failed:', err.message);
+    return NextResponse.json({ error: 'theme_update_failed' }, { status: 500 });
   }
 }
