@@ -1,0 +1,26 @@
+{
+  "os": {
+    "console": {
+      "title": "Consola",
+      "subtitle": "Vista viva del OS · canales, agentes, actividad y metas de {brand}",
+      "pulse": {
+        "channelsActive": "Canales activos",
+        "messagesToday": "Mensajes hoy",
+        "agentsActive": "Agentes activos",
+        "standingGoals": "Standing goals"
+      }
+    },
+    "sidebar": {
+      "communityOs": "Community OS",
+      "new": "NEW"
+    },
+    "agents": { "title": "Agentes" },
+    "goals": { "title": "Standing goals" },
+    "skills": { "title": "Skills" },
+    "funnel": { "title": "Funnel" },
+    "content": { "title": "Contenido" },
+    "social": { "title": "Social" },
+    "integrations": { "title": "Integraciones" },
+    "command": { "title": "Command palette" }
+  }
+}
