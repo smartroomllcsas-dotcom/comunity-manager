@@ -13,7 +13,9 @@
     "prebuild": "npm run skills:index",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
-    "e2e:report": "playwright show-report"
+    "e2e:report": "playwright show-report",
+    "loadtest:sentinel": "tsx scripts/loadtest-os.ts --scenario=sentinel --count=50 --concurrency=5",
+    "loadtest:ingest": "tsx scripts/loadtest-os.ts --scenario=ingest --count=20 --concurrency=3"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
