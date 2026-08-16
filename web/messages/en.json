@@ -70,6 +70,33 @@
       "subtitle": "Live knowledge graph",
       "emptyState": "Brain is empty. Run the ingestor to populate from CM.",
       "nodeCount": "{count} nodes"
+    },
+    "observability": {
+      "title": "Observability",
+      "subtitle": "Agent runs, cost, cron executions and connector health",
+      "cards": {
+        "agentRuns": "Agent runs (24h)",
+        "successRate": "Success rate",
+        "costToday": "Cost today",
+        "sinceMidnight": "Since midnight",
+        "cost7d": "Cost (7d)",
+        "rollingWeek": "Rolling week",
+        "activity24h": "Activity events (24h)",
+        "events": "Events",
+        "goalsBreach": "Goals breach",
+        "goalsBreachAlert": "Attention required",
+        "connectors": "Connectors",
+        "connectorsHint": "live / error"
+      },
+      "cronTable": {
+        "title": "Last cron executions",
+        "empty": "No cron runs recorded yet.",
+        "endpoint": "Endpoint",
+        "at": "Time",
+        "status": "Status",
+        "ok": "OK",
+        "err": "ERROR"
+      }
     }
   }
 }
