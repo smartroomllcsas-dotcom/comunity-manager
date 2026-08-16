@@ -50,6 +50,10 @@
     {
       "path": "/api/cron/os-brain-ingest",
       "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/os-skills-runner",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
