@@ -1,44 +1,60 @@
 import { flag } from 'flags/next';
 import { identify } from './identify';
+import { getSupabaseServiceClient } from './os/supabase-service';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Community OS rollout policy
 //
-// 1. FULL_ROLLOUT_EMAILS: users who ALWAYS see Community OS (owners, admins).
-//    Add an email here to give a user the OS immediately in all their orgs.
-//
-// 2. BETA_COHORT_ORGS: org IDs whose members see the OS regardless of the
-//    user-level betaCohorts array. Add a UUID here to onboard a whole org to
-//    the OS beta without editing individual user records.
-//
-// 3. betaCohorts (per-user, from identify()): expected to include the string
-//    "community-os" for users manually added to the beta list. Populated by
-//    an admin UI (Sprint 3) or manually via SQL until then.
-//
-// GA plan: once we've validated with ~10 orgs, change decide() to always
-// return true and delete the two constants below.
+// Cohort data lives in `os_cohorts` table — no redeploy needed to add users.
+// Sprint 3: flags.ts reads from DB with 30s in-process cache.
+// GA plan: once validated with ~10 orgs, set full_rollout=true via cohort UI.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const FULL_ROLLOUT_EMAILS = new Set<string>([
-  'leonel.zc2005@gmail.com',
-  // add teammate emails here as they onboard
-]);
+interface CohortData {
+  emails: Set<string>;
+  orgIds: Set<string>;
+  fullRollout: boolean;
+}
 
-const BETA_COHORT_ORGS = new Set<string>([
-  // add org UUIDs here to enable Community OS for entire orgs
-  // e.g. 'a1b2c3d4-...',
-]);
+let cohortCache: { data: CohortData | null; fetchedAt: number } = {
+  data: null,
+  fetchedAt: 0,
+};
+const CACHE_TTL_MS = 30_000;
+
+async function loadCohort(id: string): Promise<CohortData> {
+  if (cohortCache.data && Date.now() - cohortCache.fetchedAt < CACHE_TTL_MS) {
+    return cohortCache.data;
+  }
+
+  const sb = getSupabaseServiceClient();
+  const { data } = await sb
+    .from('os_cohorts')
+    .select('emails, org_ids, full_rollout')
+    .eq('id', id)
+    .maybeSingle();
+
+  const result: CohortData = {
+    emails: new Set<string>(data?.emails ?? []),
+    orgIds: new Set<string>(data?.org_ids ?? []),
+    fullRollout: data?.full_rollout ?? false,
+  };
+
+  cohortCache = { data: result, fetchedAt: Date.now() };
+  return result;
+}
 
 export const communityOsFlag = flag<boolean>({
   key: 'community-os',
   identify,
-  description:
-    'Community OS shell — new /os/* namespace with fused FounderOS + Agentic-OS features',
+  description: 'Community OS shell (managed via os_cohorts table)',
   defaultValue: false,
-  decide({ entities }) {
-    if (entities?.userEmail && FULL_ROLLOUT_EMAILS.has(entities.userEmail)) return true;
-    if (entities?.orgId && BETA_COHORT_ORGS.has(entities.orgId)) return true;
-    if (entities?.orgIds?.some((id: string) => BETA_COHORT_ORGS.has(id))) return true;
-    return entities?.betaCohorts?.includes('community-os') ?? false;
+  async decide({ entities }) {
+    const cohort = await loadCohort('community-os');
+    if (cohort.fullRollout) return true;
+    if (entities?.userEmail && cohort.emails.has(entities.userEmail)) return true;
+    if (entities?.orgId && cohort.orgIds.has(entities.orgId)) return true;
+    if (entities?.orgIds?.some((id: string) => cohort.orgIds.has(id))) return true;
+    return false;
   },
 });
