@@ -49,6 +49,9 @@ import {
   Key,
   Hash,
   ClipboardList,
+  Cpu,
+  FlaskConical,
+  ServerCog,
 } from "lucide-react";
 import {
   Tooltip,
@@ -126,31 +129,75 @@ const CM_SECTIONS: NavSection[] = [
   },
 ];
 
-const OS_SECTION: NavSection = {
-  label: "Community OS",
+// Community OS — 5 grupos matching FounderOS-DEMO (NAV_OPERATE / NAV_AGENTS /
+// NAV_INTELLIGENCE / NAV_SYSTEM / NAV_LIBRARY). Los labels y el orden replican
+// `F:\Proyectos\FounderOS-DEMO\lib\nav.ts` — Personas queda bajo Variants por
+// convención del sidebar upstream, y Goals se mantiene bajo Operate como
+// concepto Community-Manager específico.
+const OS_OPERATE: NavSection = {
+  label: "OS · Operate",
   accent: true,
   items: [
-    { href: "/es/os", label: "Consola", icon: Home },
-    { href: "/es/os/agents", label: "Agentes", icon: Bot },
-    { href: "/es/os/goals", label: "Objetivos", icon: Target },
-    { href: "/es/os/skills", label: "Skills", icon: Sparkles },
+    { href: "/es/os", label: "Home", icon: Home },
+    { href: "/es/os/comms", label: "Comms", icon: Inbox },
     { href: "/es/os/funnel", label: "Funnel", icon: GitBranch },
-    { href: "/es/os/content", label: "Contenido", icon: FileText },
-    { href: "/es/os/social", label: "Social", icon: Share2 },
     { href: "/es/os/workflows", label: "Workflows", icon: Workflow },
-    { href: "/es/os/comms", label: "Comms unificado", icon: Inbox },
-    { href: "/es/os/tasks", label: "Tareas", icon: CheckSquare },
-    { href: "/es/os/roadmap", label: "Roadmap", icon: Map },
-    { href: "/es/os/personas", label: "Personas", icon: Users2 },
-    { href: "/es/os/org", label: "Organización", icon: Building2 },
-    { href: "/es/os/finances", label: "Finanzas", icon: DollarSign },
-    { href: "/es/os/reference", label: "Referencia", icon: BookOpen },
-    { href: "/es/os/brain", label: "Brain", icon: Brain },
-    { href: "/es/os/integrations", label: "Integraciones", icon: Plug },
-    { href: "/es/os/observability", label: "Observabilidad", icon: Activity },
-    { href: "/es/os/analytics", label: "Analytics", icon: TrendingUp },
+    { href: "/es/os/social", label: "Social", icon: Share2 },
+    { href: "/es/os/content", label: "Content", icon: FileText },
+    { href: "/es/os/finances", label: "Finances", icon: DollarSign },
+    { href: "/es/os/goals", label: "Goals", icon: Target },
   ],
 };
+
+const OS_AGENTS: NavSection = {
+  label: "OS · Agents",
+  accent: true,
+  items: [
+    { href: "/es/os/agents", label: "Agents", icon: Bot },
+    { href: "/es/os/tasks", label: "Tasks", icon: CheckSquare },
+    { href: "/es/os/skills", label: "Skills", icon: Sparkles },
+    { href: "/es/os/org", label: "Org Chart", icon: Building2 },
+  ],
+};
+
+const OS_INTELLIGENCE: NavSection = {
+  label: "OS · Intelligence",
+  accent: true,
+  items: [
+    { href: "/es/os/brain", label: "G-Brain", icon: Brain },
+    { href: "/es/os/intelligence", label: "Intelligence", icon: Cpu },
+  ],
+};
+
+const OS_SYSTEM: NavSection = {
+  label: "OS · System",
+  accent: true,
+  items: [
+    { href: "/es/os/integrations", label: "Connections", icon: Plug },
+    { href: "/es/os/roadmap", label: "Roadmap", icon: Map },
+    { href: "/es/os/analytics", label: "Analytics", icon: TrendingUp },
+    { href: "/es/os/reference", label: "Reference Model", icon: BookOpen },
+    { href: "/es/os/observability", label: "Observability", icon: Activity },
+    { href: "/es/os/system", label: "System", icon: ServerCog },
+  ],
+};
+
+const OS_VARIANTS: NavSection = {
+  label: "OS · Variants",
+  accent: true,
+  items: [
+    { href: "/es/os/personas", label: "Personas", icon: Users2 },
+    { href: "/es/os/variants", label: "Variants", icon: FlaskConical },
+  ],
+};
+
+const OS_SECTIONS: NavSection[] = [
+  OS_OPERATE,
+  OS_AGENTS,
+  OS_INTELLIGENCE,
+  OS_SYSTEM,
+  OS_VARIANTS,
+];
 
 const BOTTOM_ITEMS: NavItem[] = [
   { href: "/settings", label: "Configuración", icon: Settings },
@@ -167,7 +214,7 @@ export function Sidebar({ showCommunityOs = false }: SidebarProps) {
   const router = useRouter();
 
   const sections = useMemo<NavSection[]>(
-    () => (showCommunityOs ? [...CM_SECTIONS, OS_SECTION] : CM_SECTIONS),
+    () => (showCommunityOs ? [...CM_SECTIONS, ...OS_SECTIONS] : CM_SECTIONS),
     [showCommunityOs]
   );
 

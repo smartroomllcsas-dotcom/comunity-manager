@@ -1,33 +1,195 @@
-import Link from 'next/link';
-import { Inbox, MessageSquare, Send, Hash, Mail, Phone } from 'lucide-react';
+import { MessageSquare, Mail, Hash, Camera, Phone, Inbox } from 'lucide-react';
+import { requireOrgIdFromRequest } from '@/lib/os/server';
+import { resolveBrandIds } from '@/lib/os/scope';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { CommsTabs } from '@/components/os/comms/CommsTabs';
+import type { CommsThread } from '@/app/api/os/comms/threads/route';
 
-export default function OsCommsPage() {
-  const lanes = [
+export const dynamic = 'force-dynamic';
+
+interface SourceStatus {
+  id: string;
+  name: string;
+  icon: typeof MessageSquare;
+  connected: boolean;
+  count: number;
+}
+
+/**
+ * Load initial threads on the server so the page renders with data on first
+ * paint. The CommsTabs client component then keeps them fresh via SWR polling
+ * against /api/os/comms/threads.
+ * Never throws — auth errors return an empty inbox with a hint banner.
+ */
+async function loadInitial(
+  orgId: string
+): Promise<{
+  threads: CommsThread[];
+  channelStats: Map<string, { connected: boolean; count: number }>;
+}> {
+  const stats = new Map<string, { connected: boolean; count: number }>();
+  try {
+    const brandIds = await resolveBrandIds(orgId);
+    if (brandIds.length === 0) return { threads: [], channelStats: stats };
+
+    const admin = createAdminClient('smarttalk');
+    const { data: channels } = await admin
+      .from('channels')
+      .select('id, brand_id, type, status')
+      .in('brand_id', brandIds);
+
+    const chanRows = channels ?? [];
+    for (const c of chanRows) {
+      const key = String(c.type ?? '').toLowerCase();
+      const cur = stats.get(key) ?? { connected: false, count: 0 };
+      cur.count += 1;
+      const rawStatus = String(c.status ?? '').toLowerCase();
+      if (rawStatus === 'active' || rawStatus === 'connected' || rawStatus === 'live') {
+        cur.connected = true;
+      }
+      stats.set(key, cur);
+    }
+
+    const channelIds = chanRows.map((c) => c.id as string);
+    if (channelIds.length === 0) return { threads: [], channelStats: stats };
+
+    const { data: conversations } = await admin
+      .from('conversations')
+      .select(
+        'id, contact_id, channel_id, last_message_at, unread_count, status, priority, subject, preview, updated_at, created_at'
+      )
+      .in('channel_id', channelIds)
+      .order('last_message_at', { ascending: false, nullsFirst: false })
+      .limit(50);
+
+    const convRows = conversations ?? [];
+    if (convRows.length === 0) return { threads: [], channelStats: stats };
+
+    const contactIds = Array.from(
+      new Set(convRows.map((c) => c.contact_id).filter((v): v is string => !!v))
+    );
+    const contactById = new Map<
+      string,
+      { name: string | null; phone: string | null; email: string | null }
+    >();
+    if (contactIds.length > 0) {
+      const { data: contacts } = await admin
+        .from('contacts')
+        .select('id, name, phone, email')
+        .in('id', contactIds);
+      for (const c of contacts ?? []) {
+        contactById.set(c.id as string, c as { name: string | null; phone: string | null; email: string | null });
+      }
+    }
+
+    const channelById = new Map(chanRows.map((c) => [c.id as string, c]));
+    const threads: CommsThread[] = convRows.map((c) => {
+      const channel = c.channel_id ? channelById.get(c.channel_id) : undefined;
+      const contact = c.contact_id ? contactById.get(c.contact_id) : undefined;
+      const unread = (c.unread_count as number | null) ?? 0;
+      const rawPriority = String(c.priority ?? '').toLowerCase();
+      const priority: CommsThread['priority'] =
+        rawPriority === 'urgent' || rawPriority === 'high'
+          ? 'urgent'
+          : rawPriority === 'low'
+            ? 'low'
+            : unread >= 5
+              ? 'urgent'
+              : 'normal';
+      const contactName =
+        contact?.name?.trim() ||
+        contact?.phone ||
+        contact?.email ||
+        (c.subject as string | null) ||
+        'Sin nombre';
+      return {
+        id: c.id as string,
+        channelId: c.channel_id as string | null,
+        channelType: String(channel?.type ?? 'unknown').toLowerCase(),
+        brandId: (channel?.brand_id as string | null) ?? null,
+        contactId: c.contact_id as string | null,
+        contactName,
+        preview: ((c.preview as string | null) ?? '').slice(0, 200),
+        lastMessageAt:
+          (c.last_message_at as string | null) ??
+          (c.updated_at as string | null) ??
+          (c.created_at as string | null) ??
+          new Date(0).toISOString(),
+        unread,
+        priority,
+        status: (c.status as string | null) ?? 'open',
+        lastDirection: 'unknown',
+      };
+    });
+
+    return { threads, channelStats: stats };
+  } catch {
+    return { threads: [], channelStats: stats };
+  }
+}
+
+export default async function OsCommsPage() {
+  let threads: CommsThread[] = [];
+  let channelStats = new Map<string, { connected: boolean; count: number }>();
+  let authed = false;
+
+  try {
+    const orgId = await requireOrgIdFromRequest();
+    authed = true;
+    ({ threads, channelStats } = await loadInitial(orgId));
+  } catch {
+    // dev / unauthenticated — render empty state with hint banner
+  }
+
+  const totalUnread = threads.reduce((s, t) => s + (t.unread ?? 0), 0);
+
+  const sources: SourceStatus[] = [
     {
+      id: 'whatsapp',
+      name: 'WhatsApp',
       icon: MessageSquare,
-      label: 'WhatsApp',
-      href: '/inbox?channel=whatsapp',
-      status: 'Conectado',
-      accent: 'oklch(70% 0.16 145)',
+      connected:
+        !!channelStats.get('whatsapp')?.connected || !!channelStats.get('waha')?.connected,
+      count:
+        (channelStats.get('whatsapp')?.count ?? 0) + (channelStats.get('waha')?.count ?? 0),
     },
     {
-      icon: Send,
-      label: 'Messenger',
-      href: '/inbox?channel=facebook',
-      status: 'Conectado',
-      accent: 'oklch(70% 0.14 250)',
+      id: 'messenger',
+      name: 'Messenger',
+      icon: MessageSquare,
+      connected: !!channelStats.get('messenger')?.connected,
+      count: channelStats.get('messenger')?.count ?? 0,
     },
     {
-      icon: Inbox,
-      label: 'Instagram DMs',
-      href: '/inbox?channel=instagram',
-      status: 'Conectado',
-      accent: 'oklch(65% 0.20 20)',
+      id: 'instagram',
+      name: 'Instagram',
+      icon: Camera,
+      connected: !!channelStats.get('instagram')?.connected,
+      count: channelStats.get('instagram')?.count ?? 0,
     },
-    { icon: Mail, label: 'Email (Gmail / IMAP)', href: '/es/os/integrations', status: 'Sin configurar', accent: 'oklch(65% 0.10 250)' },
-    { icon: Hash, label: 'Slack workspace', href: '/es/os/integrations', status: 'Sin configurar', accent: 'oklch(65% 0.10 250)' },
-    { icon: Phone, label: 'Llamadas + dictado', href: '/es/os/integrations', status: 'Próximamente', accent: 'oklch(65% 0.10 250)' },
+    {
+      id: 'email',
+      name: 'Email',
+      icon: Mail,
+      connected: !!channelStats.get('email')?.connected,
+      count: channelStats.get('email')?.count ?? 0,
+    },
+    {
+      id: 'slack',
+      name: 'Slack',
+      icon: Hash,
+      connected: !!channelStats.get('slack')?.connected,
+      count: channelStats.get('slack')?.count ?? 0,
+    },
+    {
+      id: 'phone',
+      name: 'Llamadas',
+      icon: Phone,
+      connected: !!channelStats.get('phone')?.connected,
+      count: channelStats.get('phone')?.count ?? 0,
+    },
   ];
+  const connectedSources = sources.filter((s) => s.connected).length;
 
   return (
     <main className="content">
@@ -35,55 +197,62 @@ export default function OsCommsPage() {
         <div>
           <h1 className="page-title">Comms unificado</h1>
           <div className="page-sub">
-            Un solo inbox para WhatsApp, Messenger, Instagram, Slack y Email — con dictado y triage por IA
+            Un solo inbox para WhatsApp, Messenger, Instagram, Slack, Email y llamadas — con priorización IA.
           </div>
         </div>
+        <span className="inline-flex items-center gap-2 rounded-md border border-os-border bg-os-surface px-3 py-1.5 font-mono text-[11.5px] font-semibold text-os-accent">
+          <Inbox className="h-3.5 w-3.5" strokeWidth={1.7} />
+          {totalUnread} sin leer
+        </span>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 mt-4">
-        {lanes.map((lane) => (
-          <Link
-            key={lane.label}
-            href={lane.href}
-            className="group flex items-center gap-3 rounded-xl border p-4 transition-colors hover:bg-white/5"
-            style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }}
-          >
-            <div
-              className="flex h-10 w-10 items-center justify-center rounded-lg"
-              style={{ background: `${lane.accent}/12`, color: lane.accent }}
-            >
-              <lane.icon className="h-5 w-5" />
-            </div>
-            <div className="flex flex-col">
-              <div className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>
-                {lane.label}
-              </div>
-              <div className="text-xs" style={{ color: 'var(--text-2)' }}>
-                {lane.status}
-              </div>
-            </div>
-          </Link>
-        ))}
-      </div>
+      {!authed && (
+        <div className="mt-4 rounded-md border border-dashed border-os-border bg-os-surface px-4 py-3 font-mono text-[11px] text-os-dim">
+          Sin sesión activa — inicia sesión para ver las conversaciones reales.
+        </div>
+      )}
 
-      <div
-        className="mt-8 rounded-xl border p-6"
-        style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }}
-      >
-        <h3 className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>
-          Bandeja legacy de Community Manager
-        </h3>
-        <p className="mt-1 text-sm" style={{ color: 'var(--text-2)' }}>
-          Por ahora el inbox multicanal vive en la vista clásica. Estamos migrando gradualmente a esta consola unificada.
-        </p>
-        <Link
-          href="/inbox"
-          className="mt-4 inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold"
-          style={{ background: 'oklch(70% 0.14 250)', color: 'white' }}
-        >
-          Abrir bandeja actual
-        </Link>
-      </div>
+      <section className="mt-5">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="font-mono text-[10px] uppercase tracking-wider text-os-dim">Fuentes</div>
+          <div className="font-mono text-[10px] uppercase tracking-wider text-os-dim">
+            {connectedSources}/{sources.length} conectadas
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          {sources.map((s) => {
+            const Icon = s.icon;
+            return (
+              <div
+                key={s.id}
+                className={`rounded-md-t border px-3 py-2.5 ${
+                  s.connected
+                    ? 'border-os-border bg-os-surface'
+                    : 'border-os-border/60 bg-os-surface/40'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Icon
+                    className={`h-4 w-4 shrink-0 ${s.connected ? 'text-os-accent' : 'text-os-dim'}`}
+                    strokeWidth={1.7}
+                  />
+                  <span className="text-[12.5px] font-semibold text-os-muted">{s.name}</span>
+                  {s.connected && (
+                    <span className="ml-auto h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-os-accent" />
+                  )}
+                </div>
+                <p className="mt-1 font-mono text-[10px] text-os-dim">
+                  {s.connected ? `${s.count} canal${s.count === 1 ? '' : 'es'}` : 'Sin configurar'}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="mt-6">
+        <CommsTabs initialThreads={threads} />
+      </section>
     </main>
   );
 }
