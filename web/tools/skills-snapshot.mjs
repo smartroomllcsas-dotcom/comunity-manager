@@ -5,10 +5,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 
 const SKILLS_DIR = path.join(os.homedir(), '.claude', 'skills');
-const ROOT = path.resolve(new URL('..', import.meta.url).pathname.replace(/^\//, ''));
+// Use fileURLToPath to decode URL-encoded paths (e.g. spaces → %20).
+const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const OUT_JSON = path.join(ROOT, 'public', 'skills-index.json');
 const OUT_MD_DIR = path.join(ROOT, 'public', 'skills-md');
 
