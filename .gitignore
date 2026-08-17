@@ -21,3 +21,4 @@ Thumbs.db
 web/playwright-report/
 web/test-results/
 web/tests/e2e/.auth/
+.vercel

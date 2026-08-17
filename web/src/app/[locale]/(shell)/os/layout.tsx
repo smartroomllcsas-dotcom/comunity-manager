@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import { communityOsFlag } from '@/lib/flags';
-import { OsSidebar } from '@/components/os/OsSidebar';
+import { Sidebar } from '@/components/layout/Sidebar';
 import { OsTopbar } from '@/components/os/OsTopbar';
 
 export default async function OsLayout({ children }: { children: React.ReactNode }) {
@@ -8,11 +8,11 @@ export default async function OsLayout({ children }: { children: React.ReactNode
   if (!enabled) notFound();
 
   return (
-    <div className="os-shell app">
-      <OsSidebar />
-      <div className="main">
+    <div className="flex min-h-screen bg-[var(--surface-base)]">
+      <Sidebar showCommunityOs={true} />
+      <div className="os-shell main flex-1 min-w-0 flex flex-col">
         <OsTopbar />
-        {children}
+        <div className="flex-1 overflow-auto">{children}</div>
       </div>
     </div>
   );

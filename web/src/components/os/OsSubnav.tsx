@@ -19,11 +19,7 @@ const SUBNAV_ITEMS = [
   { href: '/os/settings/theme',   label: 'Theme' },
 ];
 
-interface OsSubnavProps {
-  t: (key: string) => string;
-}
-
-export function OsSubnav({ t: _t }: OsSubnavProps) {
+export function OsSubnav() {
   const pathname = usePathname();
 
   // Derive locale-agnostic suffix for matching

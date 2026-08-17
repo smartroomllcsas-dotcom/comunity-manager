@@ -48,9 +48,9 @@ async function loadContext(token: string) {
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: Promise<{ token: string }> },
+  { params }: { params: Promise<{ ref: string }> },
 ) {
-  const { token } = await params;
+  const { ref: token } = await params;
   const ctx = await loadContext(token);
   if ("error" in ctx) {
     return Response.json({ error: ctx.error }, { status: ctx.status });
@@ -93,9 +93,9 @@ export async function GET(
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: Promise<{ token: string }> },
+  { params }: { params: Promise<{ ref: string }> },
 ) {
-  const { token } = await params;
+  const { ref: token } = await params;
   const ctx = await loadContext(token);
   if ("error" in ctx) {
     return Response.json({ error: ctx.error }, { status: ctx.status });

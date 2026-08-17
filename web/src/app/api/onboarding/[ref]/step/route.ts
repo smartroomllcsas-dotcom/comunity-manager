@@ -24,9 +24,9 @@ const VALID_STEPS = [
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: Promise<{ client_id: string }> },
+  { params }: { params: Promise<{ ref: string }> },
 ) {
-  const { client_id } = await params;
+  const { ref: client_id } = await params;
   if (!client_id) {
     return Response.json({ error: "client_id requerido" }, { status: 400 });
   }

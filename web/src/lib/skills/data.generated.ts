@@ -1,6 +1,6 @@
 // AUTO-GENERATED — do not edit. Run `npm run skills:index`.
 // Source: <repo>/skills/*/SKILL.md
-// Generated: 2026-08-16T04:46:45.479Z
+// Generated: 2026-08-16T16:21:04.561Z
 
 export interface SkillEntry {
   slug: string;

@@ -1,8 +1,10 @@
 import { getTranslations } from 'next-intl/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { Target } from 'lucide-react';
 import { createSupabaseRepository } from '@/lib/os/adapters/supabase';
 import type { Goal } from '@/lib/os/repository';
+import { EmptyState } from '@/components/os/EmptyState';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -84,18 +86,13 @@ export default async function OsGoalsPage() {
 
       {/* ── Empty state ──────────────────────────────────────────────────── */}
       {goals.length === 0 && (
-        <div className="mt-10 flex flex-col items-center gap-4 rounded-xl border border-dashed border-zinc-700 p-12 text-center">
-          <div className="text-4xl">🎯</div>
-          <p className="text-sm text-zinc-400">
-            No hay objetivos configurados aún.
-          </p>
-          <code className="rounded bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300">
-            POST /api/os/dev/seed
-          </code>
-          <p className="text-xs text-zinc-500">
-            Ejecuta el endpoint de seed para poblar los 6 objetivos del OS.
-          </p>
-        </div>
+        <EmptyState
+          icon={Target}
+          title="Define tu primer objetivo"
+          description="Los objetivos se evalúan cada 15 min. Si una métrica se sale del rango (SLA de respuesta, budget diario, alcance), el sentinel notifica y escalata según tu política."
+          action={{ label: 'Crear objetivo', href: '/es/os/goals/new' }}
+          secondary={{ label: 'Ver ejemplos', href: '/es/os/reference' }}
+        />
       )}
 
       {/* ── Goals grid ───────────────────────────────────────────────────── */}

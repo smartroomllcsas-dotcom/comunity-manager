@@ -1,5 +1,9 @@
 /**
- * GET /api/inbox/messages/[messageId]/media — servir el adjunto de un mensaje.
+ * GET /api/inbox/messages/[conversationId]/media — servir el adjunto de un mensaje.
+ * Nota: el segmento se llama `[conversationId]` para no colisionar con
+ * `[conversationId]/route.ts` hermana (Turbopack exige nombres consistentes de
+ * slug), pero el valor que llega es el id del **mensaje** — se aliasa a
+ * `messageId` para mantener la semántica del handler.
  *
  * Es la **única** puerta por la que un adjunto llega al navegador. Antes la
  * interfaz ponía en `<img src>` lo que hubiera en `content.url`, que según el
@@ -59,9 +63,9 @@ function notFound() {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ messageId: string }> },
+  { params }: { params: Promise<{ conversationId: string }> },
 ) {
-  const { messageId } = await params;
+  const { conversationId: messageId } = await params;
 
   const supabase = await createClient();
   const {

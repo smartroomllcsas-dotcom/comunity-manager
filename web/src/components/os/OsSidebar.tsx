@@ -1,10 +1,7 @@
 import Link from 'next/link';
-import { getTranslations } from 'next-intl/server';
 import { OsSubnav } from './OsSubnav';
 
-export async function OsSidebar() {
-  const t = await getTranslations('os');
-
+export function OsSidebar() {
   return (
     <aside className="sidebar">
       {/* Brand */}
@@ -112,7 +109,7 @@ export async function OsSidebar() {
       </Link>
 
       {/* Sub-nav */}
-      <OsSubnav t={t as (key: string) => string} />
+      <OsSubnav />
 
       {/* Brand switcher */}
       <div className="brand-switcher">
