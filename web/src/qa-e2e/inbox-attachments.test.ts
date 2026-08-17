@@ -109,7 +109,7 @@ import {
 import { preferDeclaredMime, redactSecrets } from "@/lib/inbox/media-resolver";
 import { isAllowedMime } from "@/lib/media/storage";
 import { parseMetaMessage } from "@/lib/smarttalk/meta-parser";
-import { GET as getMedia } from "@/app/api/inbox/messages/[messageId]/media/route";
+import { GET as getMedia } from "@/app/api/inbox/messages/[conversationId]/media/route";
 
 const ORG = "org-adj";
 const OTHER_ORG = "org-otra";
@@ -609,12 +609,14 @@ function mediaRequest(params: Record<string, string> = {}) {
 
 async function callMedia(messageId: string, params: Record<string, string> = {}) {
   const response = await getMedia(mediaRequest(params), {
-    params: Promise.resolve({ messageId }),
+    // Slug renombrado a [conversationId] para no colisionar con la ruta hermana
+    // (Turbopack strictness). El valor semanticamente sigue siendo un messageId.
+    params: Promise.resolve({ conversationId: messageId }),
   });
   return response;
 }
 
-describe("GET /api/inbox/messages/[messageId]/media", () => {
+describe("GET /api/inbox/messages/[conversationId]/media", () => {
   beforeEach(() => {
     H.current = seedMedia();
     H.downloads = [];
@@ -672,7 +674,7 @@ describe("GET /api/inbox/messages/[messageId]/media", () => {
 
   it("contempla URLs legacy de content.url sólo en servidor", () => {
     const source = readFileSync(
-      join(process.cwd(), "src/app/api/inbox/messages/[messageId]/media/route.ts"),
+      join(process.cwd(), "src/app/api/inbox/messages/[conversationId]/media/route.ts"),
       "utf8",
     );
     expect(source).toContain("const legacyUrl = content.url");
@@ -689,7 +691,7 @@ describe("GET /api/inbox/messages/[messageId]/media", () => {
 // y el `if (!message)` lo interpretaba como «no existe». Todos los adjuntos
 // respondían «Mensaje no encontrado.» con el mensaje sano en la base.
 describe("4 bis · Adjuntos: el canal se resuelve desde la conversación", () => {
-  const MEDIA_ROUTE = "src/app/api/inbox/messages/[messageId]/media/route.ts";
+  const MEDIA_ROUTE = "src/app/api/inbox/messages/[conversationId]/media/route.ts";
   const routeSource = () => readFileSync(join(process.cwd(), MEDIA_ROUTE), "utf8");
 
   beforeEach(() => {
