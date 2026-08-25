@@ -54,10 +54,6 @@
     {
       "path": "/api/cron/os-skills-runner",
       "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/os-broadcast-scheduler",
-      "schedule": "* * * * *"
     }
   ]
 }
