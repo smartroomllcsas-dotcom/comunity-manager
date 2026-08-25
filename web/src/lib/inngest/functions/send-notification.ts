@@ -15,7 +15,8 @@ export const sendNotification = inngest.createFunction(
     name: "Send notification (email / slack / whatsapp)",
     retries: 3,
     // Global cap; per-channel throttling would live inside providers if needed.
-    concurrency: { limit: 10 },
+    // Nota (2026-08-25): plan Inngest permite max 5 concurrent — subir requiere upgrade.
+    concurrency: { limit: 5 },
   },
   { event: INNGEST_EVENTS.NOTIFICATION_REQUESTED },
   async ({ event, step, logger }) => {
