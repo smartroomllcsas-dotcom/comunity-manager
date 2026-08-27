@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
+import { hashPassword } from "@/lib/auth/password";
 
 /**
  * Single dispatcher entry point. Works around @vercel/next@4.21.x lambda-grouping
@@ -151,19 +152,48 @@ async function acceptInvitation(token: string, formData: FormData) {
     isNewAuthUser = true;
   } else {
     // The email may already have an account (e.g. a previous half-finished
-    // accept). Let them through only if the password matches that account.
+    // accept). Let them through if the password matches that account.
     const { data: signin, error: signinError } = await supabase.auth.signInWithPassword({
       email: invitation.email,
       password,
     });
-    if (signinError || !signin.user) {
-      return {
-        error:
-          "Este correo ya tiene una cuenta y la contraseña no coincide. Inicia sesión con tu contraseña habitual o recupérala. Detalle: " +
-          (createError?.message || signinError?.message || "desconocido"),
-      };
+    if (signin?.user) {
+      userId = signin.user.id;
+    } else {
+      // Orphan recovery: an auth user without an agent row nor a cm_users
+      // row is leftover from a broken accept — safe to reset its password
+      // (the invitee proved control of the email by opening the link).
+      const pub = createAdminClient("public");
+      const [{ data: existingAgent }, { data: existingCmUser }, { data: authList }] =
+        await Promise.all([
+          admin.from("agents").select("id").eq("email", invitation.email).maybeSingle(),
+          pub.from("cm_users").select("id").eq("email", invitation.email).maybeSingle(),
+          admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+        ]);
+      const orphan = authList?.users?.find(
+        (u) => u.email?.toLowerCase() === invitation.email.toLowerCase()
+      );
+      if (orphan && !existingAgent && !existingCmUser) {
+        await admin.auth.admin.updateUserById(orphan.id, {
+          password,
+          email_confirm: true,
+        });
+        const retry = await supabase.auth.signInWithPassword({
+          email: invitation.email,
+          password,
+        });
+        if (retry.error || !retry.data.user) {
+          return { error: "No se pudo activar la cuenta. Intenta de nuevo." };
+        }
+        userId = retry.data.user.id;
+      } else {
+        return {
+          error:
+            "Este correo ya tiene una cuenta y la contraseña no coincide. Inicia sesión con tu contraseña habitual o recupérala. Detalle: " +
+            (createError?.message || signinError?.message || "desconocido"),
+        };
+      }
     }
-    userId = signin.user.id;
   }
 
   // Create agent linked to the invitation's organization
@@ -197,6 +227,30 @@ async function acceptInvitation(token: string, formData: FormData) {
       await admin.from("agents").delete().eq("id", userId);
       if (isNewAuthUser) await admin.auth.admin.deleteUser(userId);
       return { error: "Error asignando las marcas al miembro" };
+    }
+  }
+
+  // The unified /login validates against legacy public.cm_users first —
+  // without this row the member can never log in ("Email o contraseña
+  // inválidos"), even though the auth user and agent exist.
+  {
+    const pub = createAdminClient("public");
+    const { data: existingCmUser } = await pub
+      .from("cm_users")
+      .select("id")
+      .eq("email", invitation.email)
+      .maybeSingle();
+    if (!existingCmUser) {
+      const { error: cmError } = await pub.from("cm_users").insert({
+        email: invitation.email,
+        password_hash: await hashPassword(password),
+        name,
+        role: "user",
+        plan: "free",
+      });
+      if (cmError) {
+        console.error("[invite/accept] cm_users insert failed:", cmError.message);
+      }
     }
   }
 
