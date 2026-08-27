@@ -7,6 +7,7 @@ import {
 } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { getAgentBrandIds, isBrandScopedMember } from "@/lib/smarttalk/brand-scope";
+import { sendEmail } from "@/lib/notify/email-resend";
 
 type MemberType = "agency_user" | "brand_admin" | "brand_advisor";
 
@@ -300,8 +301,56 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Send the invitation email (best-effort: the invitation is already
+  // created, so a mail failure must not fail the request — the UI can
+  // still share the link manually).
+  const appUrl =
+    process.env.NEXT_PUBLIC_APP_URL?.trim() || request.nextUrl.origin;
+  const inviteUrl = `${appUrl.replace(/\/$/, "")}/invite/${invitation.id}`;
+
+  const { data: org } = await admin
+    .from("organizations")
+    .select("name")
+    .eq("id", requester.organization_id)
+    .maybeSingle();
+  const orgName = org?.name || "Community Manager";
+
+  const emailResult = await sendEmail({
+    to: email,
+    subject: `Te invitaron a unirte a ${orgName}`,
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#1a1a1a;">
+        <h2 style="margin:0 0 16px;">Te invitaron a ${escapeHtml(orgName)}</h2>
+        <p>Has sido invitado a unirte al equipo de <strong>${escapeHtml(orgName)}</strong> en Community Manager.</p>
+        <p style="margin:24px 0;">
+          <a href="${inviteUrl}" style="background:#111;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;display:inline-block;">
+            Aceptar invitación
+          </a>
+        </p>
+        <p style="color:#666;font-size:13px;">Este enlace expira el ${expiresAt.toLocaleDateString("es-CO", { day: "numeric", month: "long", year: "numeric" })}. Si no esperabas esta invitación, ignora este correo.</p>
+        <p style="color:#999;font-size:12px;">Si el botón no funciona, copia y pega este enlace:<br/>${inviteUrl}</p>
+      </div>
+    `,
+    text: `Has sido invitado a unirte a ${orgName} en Community Manager. Acepta la invitación aquí: ${inviteUrl} (expira el ${expiresAt.toISOString().slice(0, 10)}).`,
+  });
+  if (!emailResult.ok) {
+    console.error("[invitations] email send failed:", emailResult.error);
+  }
+
   return Response.json(
-    { invitation: { ...invitation, brand_ids: brandIds } },
+    {
+      invitation: { ...invitation, brand_ids: brandIds },
+      email_sent: emailResult.ok,
+      ...(emailResult.ok ? {} : { email_error: emailResult.error }),
+    },
     { status: 201 }
   );
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
