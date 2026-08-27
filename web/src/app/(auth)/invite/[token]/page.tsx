@@ -81,7 +81,7 @@ export default function InvitePage() {
         <CardTitle className="text-2xl text-center">Aceptar Invitacion</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="mb-4 p-3 bg-blue-50 rounded-md text-sm text-center">
+        <div className="mb-4 p-3 bg-blue-500/15 border border-blue-500/30 text-blue-200 rounded-md text-sm text-center">
           <p>
             Has sido invitado a <strong>{invitation.orgName}</strong> como{" "}
             <strong>
