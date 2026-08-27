@@ -41,6 +41,7 @@ export async function GET(req: Request) {
       code,
       redirect_uri: redirectUri,
     }),
+    signal: AbortSignal.timeout(15_000),
   });
 
   try {

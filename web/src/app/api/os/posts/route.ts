@@ -56,6 +56,7 @@ export async function GET(req: NextRequest) {
 
     const upstream = await fetch(`${origin}/api/posts?${url.searchParams.toString()}`, {
       headers: { Cookie: cookieHeader },
+      signal: AbortSignal.timeout(30_000),
     });
 
     const data = await upstream.json();
@@ -136,6 +137,7 @@ export async function POST(req: NextRequest) {
         Cookie: cookieHeader,
       },
       body: JSON.stringify(legacyBody),
+      signal: AbortSignal.timeout(30_000),
     });
 
     const data = await upstream.json() as Record<string, unknown>;
