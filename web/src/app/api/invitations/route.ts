@@ -268,6 +268,23 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "There is already a pending invitation for this email" }, { status: 409 });
   }
 
+  // A used/cancelled invitation still occupies the unique
+  // (organization_id, email) slot — clear it so re-inviting works.
+  const { data: staleInvites } = await admin
+    .from("invitations")
+    .select("id")
+    .eq("organization_id", requester.organization_id)
+    .eq("email", email)
+    .neq("status", "pending");
+  const staleIds = (staleInvites || []).map((invite) => invite.id as string);
+  if (staleIds.length > 0) {
+    await admin
+      .from("invitation_brand_assignments")
+      .delete()
+      .in("invitation_id", staleIds);
+    await admin.from("invitations").delete().in("id", staleIds);
+  }
+
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + 7);
   const { data: invitation, error } = await admin
