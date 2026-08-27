@@ -17,6 +17,7 @@ import { notionAdapter } from './notion/adapter';
 import { stripeAdapter } from './stripe/adapter';
 import { gmailImapAdapter } from './gmail-imap/adapter';
 import { googleCalendarAdapter } from './google-calendar/adapter';
+import { calcomAdapter } from './calcom/adapter';
 
 // Fusion 2026-08-17: 10 conectores adicionales portados de FounderOS-DEMO.
 // Todos siguen el mismo contrato ConnectorAdapter, con probe() env-based y
@@ -48,6 +49,8 @@ export const connectorRegistry: ConnectorAdapter[] = [
   stripeAdapter,
   gmailImapAdapter,
   googleCalendarAdapter,
+  // Self-hosted scheduling (Cal.com @ cal.smartgenapp.com)
+  calcomAdapter,
   // Fusion 2026-08-17 (grouped by domain)
   // — Social / Content
   zernioAdapter,

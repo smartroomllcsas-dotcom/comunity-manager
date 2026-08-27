@@ -18,9 +18,9 @@ import { ApiKeys } from '@/components/os/integrations/ApiKeys';
 // Category taxonomy
 // ---------------------------------------------------------------------------
 
-type Category = 'Payments' | 'Messaging' | 'Analytics' | 'Storage' | 'Dev' | 'Other';
+type Category = 'Payments' | 'Messaging' | 'Scheduling' | 'Analytics' | 'Storage' | 'Dev' | 'Other';
 
-const CATEGORY_ORDER: Category[] = ['Messaging', 'Payments', 'Analytics', 'Storage', 'Dev', 'Other'];
+const CATEGORY_ORDER: Category[] = ['Messaging', 'Scheduling', 'Payments', 'Analytics', 'Storage', 'Dev', 'Other'];
 
 function categorize(adapter: ConnectorAdapter): Category {
   const id = adapter.id.toLowerCase();
@@ -31,6 +31,7 @@ function categorize(adapter: ConnectorAdapter): Category {
     ['meta', 'waha', 'instagram', 'slack', 'whatsapp', 'gmail'].some((k) => id.includes(k)) ||
     ['channel', 'inbox', 'messaging', 'email'].includes(kind)
   ) return 'Messaging';
+  if (['calcom', 'cal.com', 'calendar', 'schedule'].some((k) => id.includes(k))) return 'Scheduling';
   if (['analytics', 'ga', 'mixpanel', 'posthog'].some((k) => id.includes(k))) return 'Analytics';
   if (['notion', 'drive', 'dropbox', 'storage', 's3'].some((k) => id.includes(k))) return 'Storage';
   if (['webhook', 'cron', 'github', 'vercel'].some((k) => id.includes(k))) return 'Dev';
