@@ -46,12 +46,14 @@ const SMARTTALK_PREFIXES = [
 ]
 
 function isSmarttalkArea(pathname: string) {
-  if (pathname.startsWith('/invite')) return true
   return SMARTTALK_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 }
 
 function isPublicRoute(pathname: string) {
   if (PUBLIC_ROUTES.has(pathname)) return true
+  // Token-based flows for visitors without a session yet: the invitee opens
+  // the emailed link precisely because they have no account to log in with.
+  if (pathname === '/invite' || pathname.startsWith('/invite/')) return true
   return false
 }
 
