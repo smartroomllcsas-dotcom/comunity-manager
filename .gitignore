@@ -22,3 +22,9 @@ web/playwright-report/
 web/test-results/
 web/tests/e2e/.auth/
 .vercel
+
+# Manual debug / audit scratchpads (screenshots + one-off scripts, keep locally)
+web/tmp-debug/
+web/tests/e2e-manual/*.png
+web/tests/e2e-manual/os-suite-shots/
+web/env-audit-report.json
