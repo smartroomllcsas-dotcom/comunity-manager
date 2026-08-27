@@ -3,7 +3,6 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
-import { redirect } from "next/navigation";
 
 /**
  * Single dispatcher entry point. Works around @vercel/next@4.21.x lambda-grouping
@@ -135,19 +134,41 @@ async function acceptInvitation(token: string, formData: FormData) {
     }
   }
 
-  // Create the auth user
-  const { data: authData, error: authError } = await supabase.auth.signUp({
+  // Create the auth user pre-confirmed (signUp depends on the project's
+  // email-confirmation setting: with it enabled the invitee gets no session
+  // and the login fails with "Email not confirmed" — bad first experience).
+  let userId: string;
+  let isNewAuthUser = false;
+  const { data: created, error: createError } = await admin.auth.admin.createUser({
     email: invitation.email,
     password,
+    email_confirm: true,
+    user_metadata: { name },
   });
 
-  if (authError || !authData.user) {
-    return { error: authError?.message || "Error al crear usuario" };
+  if (created?.user) {
+    userId = created.user.id;
+    isNewAuthUser = true;
+  } else {
+    // The email may already have an account (e.g. a previous half-finished
+    // accept). Let them through only if the password matches that account.
+    const { data: signin, error: signinError } = await supabase.auth.signInWithPassword({
+      email: invitation.email,
+      password,
+    });
+    if (signinError || !signin.user) {
+      return {
+        error:
+          "Este correo ya tiene una cuenta y la contraseña no coincide. Inicia sesión con tu contraseña habitual o recupérala. Detalle: " +
+          (createError?.message || signinError?.message || "desconocido"),
+      };
+    }
+    userId = signin.user.id;
   }
 
   // Create agent linked to the invitation's organization
   const { error: agentError } = await admin.from("agents").insert({
-    id: authData.user.id,
+    id: userId,
     organization_id: invitation.organization_id,
     name,
     email: invitation.email,
@@ -157,7 +178,7 @@ async function acceptInvitation(token: string, formData: FormData) {
   });
 
   if (agentError) {
-    await admin.auth.admin.deleteUser(authData.user.id);
+    if (isNewAuthUser) await admin.auth.admin.deleteUser(userId);
     return { error: "Error al crear agente" };
   }
 
@@ -167,14 +188,14 @@ async function acceptInvitation(token: string, formData: FormData) {
       .insert(
         (brandAssignments || []).map((assignment) => ({
           organization_id: invitation.organization_id,
-          agent_id: authData.user!.id,
+          agent_id: userId,
           brand_id: assignment.brand_id,
           created_by: invitation.invited_by,
         }))
       );
     if (assignmentError) {
-      await admin.from("agents").delete().eq("id", authData.user.id);
-      await admin.auth.admin.deleteUser(authData.user.id);
+      await admin.from("agents").delete().eq("id", userId);
+      if (isNewAuthUser) await admin.auth.admin.deleteUser(userId);
       return { error: "Error asignando las marcas al miembro" };
     }
   }
@@ -185,5 +206,17 @@ async function acceptInvitation(token: string, formData: FormData) {
     .update({ status: "accepted" })
     .eq("id", token);
 
-  redirect("/inbox");
+  // Establish the session on this response's cookies so the redirect lands
+  // authenticated. If it fails, the account still exists — send to /login.
+  if (isNewAuthUser) {
+    const { error: signinError } = await supabase.auth.signInWithPassword({
+      email: invitation.email,
+      password,
+    });
+    if (signinError) {
+      return { success: true as const, redirectTo: "/login?invited=1" };
+    }
+  }
+
+  return { success: true as const, redirectTo: "/inbox" };
 }

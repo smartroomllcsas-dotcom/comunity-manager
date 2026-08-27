@@ -22,6 +22,7 @@ export default function InvitePage() {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [accepted, setAccepted] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => {
@@ -40,9 +41,22 @@ export default function InvitePage() {
   async function handleSubmit(formData: FormData) {
     setLoading(true);
     setError(null);
-    const result = await invitationAction("accept", token, formData);
-    if (result?.error) {
-      setError(result.error);
+    try {
+      const result = await invitationAction("accept", token, formData);
+      if (result && "error" in result && result.error) {
+        setError(result.error);
+        setLoading(false);
+        return;
+      }
+      if (result && "success" in result && result.success) {
+        setAccepted(true);
+        window.location.assign(result.redirectTo || "/inbox");
+        return;
+      }
+      setError("No se pudo completar la invitación. Intenta de nuevo.");
+      setLoading(false);
+    } catch {
+      setError("Error de conexión. Intenta de nuevo.");
       setLoading(false);
     }
   }
@@ -61,9 +75,15 @@ export default function InvitePage() {
     return (
       <Card>
         <CardContent className="py-8">
-          <div className="bg-red-50 text-red-600 text-sm p-3 rounded-md text-center">
+          <div className="bg-red-500/15 border border-red-500/30 text-red-300 text-sm p-3 rounded-md text-center">
             {error || "Invitacion no valida"}
           </div>
+          <p className="mt-4 text-sm text-center text-muted-foreground">
+            ¿Ya aceptaste esta invitación?{" "}
+            <a href="/login" className="text-blue-400 hover:text-blue-300 underline">
+              Inicia sesión aquí
+            </a>
+          </p>
         </CardContent>
       </Card>
     );
@@ -107,8 +127,17 @@ export default function InvitePage() {
             <Label htmlFor="password">Contraseña</Label>
             <Input id="password" name="password" type="password" required minLength={6} />
           </div>
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "Creando cuenta..." : "Aceptar invitación"}
+          {accepted && (
+            <div className="bg-green-500/15 border border-green-500/30 text-green-300 text-sm p-3 rounded-md text-center">
+              Cuenta creada ✓ Entrando...
+            </div>
+          )}
+          <Button type="submit" className="w-full" disabled={loading || accepted}>
+            {accepted
+              ? "Cuenta creada ✓"
+              : loading
+              ? "Creando cuenta..."
+              : "Aceptar invitación"}
           </Button>
         </form>
       </CardContent>
