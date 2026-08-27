@@ -99,6 +99,9 @@ export default function AgentsSettingsPage() {
 
   const [removeConfirm, setRemoveConfirm] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [resendResult, setResendResult] = useState<
+    Record<string, "ok" | "error" | null>
+  >({});
 
   const isAgencyAdmin =
     currentAgent?.role === "admin" &&
@@ -251,6 +254,27 @@ export default function AgentsSettingsPage() {
       if (res.ok) {
         queryClient.invalidateQueries({ queryKey: ["invitations"] });
       }
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleResendInvitation(invitationId: string) {
+    setActionLoading(`resend:${invitationId}`);
+    setResendResult((prev) => ({ ...prev, [invitationId]: null }));
+    try {
+      const res = await fetch(`/api/invitations/${invitationId}/resend`, {
+        method: "POST",
+      });
+      setResendResult((prev) => ({
+        ...prev,
+        [invitationId]: res.ok ? "ok" : "error",
+      }));
+      if (res.ok) {
+        queryClient.invalidateQueries({ queryKey: ["invitations"] });
+      }
+    } catch {
+      setResendResult((prev) => ({ ...prev, [invitationId]: "error" }));
     } finally {
       setActionLoading(null);
     }
@@ -780,13 +804,28 @@ export default function AgentsSettingsPage() {
                           {new Date(invitation.expires_at).toLocaleDateString()}
                         </td>
                         <td className="px-4 py-3">
-                          <button
-                            onClick={() => handleCancelInvitation(invitation.id)}
-                            disabled={actionLoading === invitation.id}
-                            className="text-xs text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
-                          >
-                            {actionLoading === invitation.id ? "..." : "Cancelar"}
-                          </button>
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={() => handleResendInvitation(invitation.id)}
+                              disabled={actionLoading === `resend:${invitation.id}`}
+                              className="text-xs text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-50"
+                            >
+                              {actionLoading === `resend:${invitation.id}`
+                                ? "Enviando..."
+                                : resendResult[invitation.id] === "ok"
+                                ? "Enviado ✓"
+                                : resendResult[invitation.id] === "error"
+                                ? "Error, reintentar"
+                                : "Reenviar"}
+                            </button>
+                            <button
+                              onClick={() => handleCancelInvitation(invitation.id)}
+                              disabled={actionLoading === invitation.id}
+                              className="text-xs text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
+                            >
+                              {actionLoading === invitation.id ? "..." : "Cancelar"}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
