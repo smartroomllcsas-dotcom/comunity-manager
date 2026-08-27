@@ -41,6 +41,24 @@ export async function GET() {
     });
   }
 
+  // Team members of the super admin's own organization inherit platform
+  // access — their org has no subscription by design.
+  const { data: orgSuperAdmin } = await admin
+    .from("agents")
+    .select("id")
+    .eq("organization_id", agent.organization_id)
+    .eq("is_super_admin", true)
+    .limit(1)
+    .maybeSingle();
+  if (orgSuperAdmin) {
+    return Response.json({
+      isSuperAdmin: false,
+      status: "unlimited",
+      planName: "Equipo Super Admin",
+      message: null,
+    });
+  }
+
   const [
     { data: organization, error: organizationError },
     { data: subscription, error: subscriptionError },
