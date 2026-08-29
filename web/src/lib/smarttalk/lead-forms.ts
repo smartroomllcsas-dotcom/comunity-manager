@@ -39,7 +39,7 @@ export type LeadgenChangeValue = {
   created_time?: number | string;
 };
 
-type GraphLead = {
+export type GraphLead = {
   id?: string;
   created_time?: string;
   form_id?: string;
@@ -83,10 +83,20 @@ function normalizePhone(raw: string): string | null {
   return digits.startsWith("+") ? `+${bare}` : bare;
 }
 
+export const LEAD_GRAPH_FIELDS =
+  "id,created_time,form_id,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,is_organic,platform,field_data";
+
+export type LeadIngestResult = {
+  processed: boolean;
+  contactId?: string;
+  restricted?: boolean;
+  duplicate?: boolean;
+};
+
 export async function processLeadgenChange(
   channel: LeadgenChannel,
   value: LeadgenChangeValue
-): Promise<{ processed: boolean; contactId?: string; restricted?: boolean }> {
+): Promise<LeadIngestResult> {
   const leadgenId = String(value.leadgen_id || "").trim();
   if (!leadgenId) return { processed: false };
 
@@ -101,7 +111,7 @@ export async function processLeadgenChange(
     .contains("custom_fields", { leadgen_id: leadgenId })
     .maybeSingle();
   if (duplicate?.id) {
-    return { processed: false, contactId: duplicate.id as string };
+    return { processed: false, duplicate: true, contactId: duplicate.id as string };
   }
 
   const token = resolveToken(channel.access_token_ciphertext, channel.access_token);
@@ -109,10 +119,8 @@ export async function processLeadgenChange(
     throw new Error(`[leadgen] channel ${channel.id} has no usable page token`);
   }
 
-  const fields =
-    "id,created_time,form_id,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,is_organic,platform,field_data";
   const res = await fetch(
-    `${META_GRAPH_URL}/${encodeURIComponent(leadgenId)}?fields=${fields}&access_token=${encodeURIComponent(token)}`,
+    `${META_GRAPH_URL}/${encodeURIComponent(leadgenId)}?fields=${LEAD_GRAPH_FIELDS}&access_token=${encodeURIComponent(token)}`,
     { signal: AbortSignal.timeout(15_000) }
   );
   const lead = (await res.json().catch(() => null)) as GraphLead | null;
@@ -120,6 +128,40 @@ export async function processLeadgenChange(
     throw new Error(
       `[leadgen] Graph fetch failed for ${leadgenId}: HTTP ${res.status} ${lead?.error?.message || ""}`
     );
+  }
+
+  return ingestGraphLead(channel, lead, { pageId: value.page_id, adId: value.ad_id, formId: value.form_id });
+}
+
+/**
+ * Upserts a CRM contact from a full Graph lead object. Shared by the webhook
+ * path (processLeadgenChange) and the historical sync endpoint.
+ */
+export async function ingestGraphLead(
+  channel: LeadgenChannel,
+  lead: GraphLead,
+  extras: { pageId?: string; adId?: string; formId?: string } = {}
+): Promise<LeadIngestResult> {
+  const leadgenId = String(lead.id || "").trim();
+  if (!leadgenId) return { processed: false };
+
+  const admin = createAdminClient("smarttalk");
+  const value = {
+    page_id: extras.pageId,
+    ad_id: extras.adId,
+    form_id: extras.formId,
+  };
+
+  // Dedupe by leadgen_id (webhook redeliveries and repeated syncs).
+  const { data: duplicate } = await admin
+    .from("contacts")
+    .select("id")
+    .eq("organization_id", channel.organization_id)
+    .eq("brand_id", channel.brand_id)
+    .contains("custom_fields", { leadgen_id: leadgenId })
+    .maybeSingle();
+  if (duplicate?.id) {
+    return { processed: false, duplicate: true, contactId: duplicate.id as string };
   }
 
   // Map answers. Keep every answer under its slugified question name and

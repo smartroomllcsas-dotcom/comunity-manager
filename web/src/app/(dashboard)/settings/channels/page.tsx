@@ -151,6 +151,8 @@ function ChannelManageSheet({
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [retryResult, setRetryResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [syncingLeads, setSyncingLeads] = useState(false);
+  const [syncLeadsResult, setSyncLeadsResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   // Reset state when channel changes
   useEffect(() => {
@@ -233,6 +235,39 @@ function ChannelManageSheet({
       setSyncResult("Error de conexión al sincronizar");
     } finally {
       setSyncing(false);
+    }
+  }
+
+  /** Importa al CRM los leads ya existentes en los formularios de la página
+   *  (Lead Ads). Idempotente: los ya importados se saltan; si responde
+   *  partial, se pulsa de nuevo para continuar. */
+  async function handleSyncLeadForms() {
+    if (!channel) return;
+    setSyncingLeads(true);
+    setSyncLeadsResult(null);
+    try {
+      const res = await fetch(`/api/channels/${channel.id}/sync-lead-forms`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const parts = [
+          `${data.imported ?? 0} importados`,
+          `${data.duplicates ?? 0} ya existían`,
+        ];
+        if (data.restricted) parts.push(`${data.restricted} restringidos por plan`);
+        setSyncLeadsResult({
+          ok: true,
+          message: `${data.forms ?? 0} formularios revisados: ${parts.join(", ")}${data.partial ? ". Hay más — pulsa de nuevo para continuar." : "."}`,
+        });
+      } else {
+        setSyncLeadsResult({
+          ok: false,
+          message: data.error || "No fue posible sincronizar los leads.",
+        });
+      }
+    } catch {
+      setSyncLeadsResult({ ok: false, message: "Error de conexión al sincronizar leads." });
+    } finally {
+      setSyncingLeads(false);
     }
   }
 
@@ -391,6 +426,35 @@ function ChannelManageSheet({
               </div>
             )}
           </div>
+
+          {/* Sync Lead Ads (solo páginas de Facebook) */}
+          {channel.type === "facebook_messenger" && (
+            <div className="border-t border-[#2d333b] pt-4">
+              <Button
+                onClick={handleSyncLeadForms}
+                disabled={syncingLeads}
+                className="w-full bg-[#0d1117] border border-[#2d333b] text-white hover:bg-[#1a1f2e] hover:border-blue-500/50 h-9"
+                variant="outline"
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${syncingLeads ? "animate-spin" : ""}`} />
+                {syncingLeads ? "Sincronizando leads..." : "Sincronizar leads de formularios"}
+              </Button>
+              <p className="mt-1.5 text-[11px] text-[#8b949e]">
+                Importa a Contactos los leads existentes de los formularios de esta página
+                (Meta expone los últimos 90 días).
+              </p>
+              {syncLeadsResult && (
+                <div className={`mt-2 flex items-center gap-2 text-xs px-3 py-2 rounded-md ${
+                  syncLeadsResult.ok
+                    ? "bg-green-500/10 border border-green-500/30 text-green-400"
+                    : "bg-red-500/10 border border-red-500/30 text-red-400"
+                }`}>
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                  {syncLeadsResult.message}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Sync Templates */}
           <div className="border-t border-[#2d333b] pt-4">
