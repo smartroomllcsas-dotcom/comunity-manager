@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useContacts } from "@/hooks/useContacts";
 import { useSegments } from "@/hooks/useSegments";
+import { useActiveBrand } from "@/hooks/useActiveBrand";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -49,10 +50,18 @@ function getTagColor(index: number) {
 }
 
 export default function ContactsPage() {
-  const [brands, setBrands] = useState<Array<{ id: string; name: string }>>([]);
-  const [brandId, setBrandId] = useState("");
-  const [brandsLoading, setBrandsLoading] = useState(true);
-  const [brandLoadError, setBrandLoadError] = useState("");
+  // Fuente de marcas: provider global (ActiveBrandProvider) — reemplaza el
+  // fetch manual antiguo a /api/cm/clients + useEffect propio. Ahora esta
+  // página responde al BrandSwitcher del sidebar y viceversa.
+  const { clients, activeClientId, setActiveClientId, loading: brandsLoading, error: brandError } = useActiveBrand();
+  const brands = clients.map((c) => ({ id: c.id, name: c.name }));
+  const brandId = activeClientId ?? "";
+  const setBrandId = (id: string) => setActiveClientId(id || null);
+  const brandLoadError =
+    brandError ??
+    (!brandsLoading && brands.length === 0
+      ? "No hay una marca disponible para crear contactos."
+      : "");
   const [search, setSearch] = useState("");
   const [activeSegment, setActiveSegment] = useState("all");
   const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set());
@@ -65,61 +74,8 @@ export default function ContactsPage() {
   const { data: segments } = useSegments();
   const { data: restrictedLeads } = useRestrictedLeads(brandId || undefined);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadBrands() {
-      setBrandsLoading(true);
-      setBrandLoadError("");
-
-      try {
-        const response = await fetch("/api/cm/clients", { cache: "no-store" });
-        const payload = (await response.json().catch(() => null)) as {
-          clients?: unknown;
-          error?: string;
-        } | null;
-
-        if (!response.ok) {
-          throw new Error(payload?.error || "No fue posible cargar las marcas.");
-        }
-
-        const rows = Array.isArray(payload?.clients)
-          ? payload.clients.filter(
-              (client): client is { id: string; name: string } =>
-                Boolean(client) &&
-                typeof client === "object" &&
-                typeof (client as { id?: unknown }).id === "string" &&
-                typeof (client as { name?: unknown }).name === "string"
-            )
-          : [];
-
-        if (!cancelled) {
-          setBrands(rows);
-          setBrandId((current) => current || rows[0]?.id || "");
-          if (rows.length === 0) {
-            setBrandLoadError("No hay una marca disponible para crear contactos.");
-          }
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setBrands([]);
-          setBrandId("");
-          setBrandLoadError(
-            error instanceof Error
-              ? error.message
-              : "No fue posible cargar las marcas."
-          );
-        }
-      } finally {
-        if (!cancelled) setBrandsLoading(false);
-      }
-    }
-
-    void loadBrands();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Fetch de marcas eliminado: ahora vive en ActiveBrandProvider (context global).
+  // Este componente responde al switcher del sidebar automáticamente.
 
   // Reset to page 0 when search changes
   useEffect(() => {
