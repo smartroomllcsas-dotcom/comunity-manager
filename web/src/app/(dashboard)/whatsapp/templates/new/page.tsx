@@ -1,20 +1,33 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { BrandAccountPicker } from "@/components/whatsapp/cloud/BrandAccountPicker";
 import { TemplateForm } from "@/components/whatsapp/cloud/TemplateForm";
 import type { TemplateFormValue } from "@/components/whatsapp/cloud/TemplateForm";
+import { useActiveBrand } from "@/hooks/useActiveBrand";
 
 export const dynamic = "force-dynamic";
 
 export default function NewTemplatePage() {
   const router = useRouter();
   const params = useSearchParams();
-  const [clientId, setClientId] = useState<string | null>(params.get("clientId"));
+  const { activeClientId } = useActiveBrand();
+  const [clientId, setClientId] = useState<string | null>(params.get("clientId") ?? activeClientId);
   const [accountId, setAccountId] = useState<string | null>(params.get("accountId"));
   const [submitting, setSubmitting] = useState(false);
+
+  // Adopta switcher global si no hay override en URL. El provider detecta
+  // ?clientId= en la URL cuando pasa, por lo que no necesitamos notificarlo
+  // desde aquí (evita ciclo con el resolver).
+  useEffect(() => {
+    const urlId = params.get("clientId");
+    if (!urlId && activeClientId && activeClientId !== clientId) {
+      setClientId(activeClientId);
+      setAccountId(null);
+    }
+  }, [activeClientId, params, clientId]);
 
   async function handleSubmit(v: TemplateFormValue) {
     if (!clientId || !accountId) {

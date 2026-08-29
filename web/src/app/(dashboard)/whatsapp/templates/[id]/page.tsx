@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { StatusBadge, QualityBadge } from "@/components/whatsapp/cloud/StatusBadge";
 import { TemplatePreview } from "@/components/whatsapp/cloud/TemplatePreview";
+import { useActiveBrand } from "@/hooks/useActiveBrand";
 import type { CmWaTemplate } from "@/lib/whatsapp/cloud/types";
 import { friendlyRejectionReason } from "@/lib/whatsapp/cloud/error-map";
 
@@ -14,7 +15,9 @@ export default function TemplateDetailPage({ params }: { params: Promise<{ id: s
   const { id } = use(params);
   const router = useRouter();
   const search = useSearchParams();
-  const clientId = search.get("clientId");
+  const { activeClientId } = useActiveBrand();
+  // Prio: query param (deep-link) → switcher global (context)
+  const clientId = search.get("clientId") ?? activeClientId;
   const [tpl, setTpl] = useState<CmWaTemplate | null>(null);
   const [loading, setLoading] = useState(true);
   const [showSend, setShowSend] = useState(false);

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { OsSubnav } from './OsSubnav';
+import { BrandSwitcher } from '@/components/brand/BrandSwitcher';
 
 export function OsSidebar() {
   return (
@@ -118,17 +119,8 @@ export function OsSidebar() {
       {/* Sub-nav */}
       <OsSubnav />
 
-      {/* Brand switcher */}
-      <div className="brand-switcher">
-        <div className="brand-switcher-label">Marca activa</div>
-        <div className="brand-chip">
-          <div className="brand-chip-dot" />
-          <span>Bliss Glamping</span>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-        </div>
-      </div>
+      {/* Brand switcher — dropdown funcional (reemplaza stub hardcoded) */}
+      <BrandSwitcher />
     </aside>
   );
 }

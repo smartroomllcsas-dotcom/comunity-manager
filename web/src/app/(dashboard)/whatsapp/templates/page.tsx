@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { BrandAccountPicker } from "@/components/whatsapp/cloud/BrandAccountPicker";
 import { StatusBadge, QualityBadge } from "@/components/whatsapp/cloud/StatusBadge";
+import { useActiveBrand } from "@/hooks/useActiveBrand";
 import type { CmWaTemplate } from "@/lib/whatsapp/cloud/types";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +22,9 @@ const STATUS_FILTERS = [
 export default function WhatsAppTemplatesPage() {
   const router = useRouter();
   const params = useSearchParams();
-  const [clientId, setClientId] = useState<string | null>(params.get("clientId"));
+  const { activeClientId, setActiveClientId } = useActiveBrand();
+  // Prioridad clientId: URL > switcher global (context). Estado local sincroniza con ambos.
+  const [clientId, setClientId] = useState<string | null>(params.get("clientId") ?? activeClientId);
   const [accountId, setAccountId] = useState<string | null>(params.get("accountId"));
   const [statusFilter, setStatusFilter] = useState<string>(params.get("status") ?? "");
   const [search, setSearch] = useState<string>(params.get("search") ?? "");
@@ -29,8 +32,19 @@ export default function WhatsAppTemplatesPage() {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
+  // Si el switcher global cambia y no hay override explícito en URL, adopta la nueva marca.
   useEffect(() => {
-    // sync URL
+    const urlId = params.get("clientId");
+    if (!urlId && activeClientId && activeClientId !== clientId) {
+      setClientId(activeClientId);
+      setAccountId(null);
+    }
+  }, [activeClientId, params, clientId]);
+
+  useEffect(() => {
+    // sync URL solamente. El provider detecta ?clientId= en URL y actualiza
+    // activeClientId por su cuenta — evitamos el ciclo bidireccional que
+    // disparaba fetches duplicados.
     const q = new URLSearchParams();
     if (clientId) q.set("clientId", clientId);
     if (accountId) q.set("accountId", accountId);
