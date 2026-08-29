@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useBroadcasts } from "@/hooks/useBroadcasts";
+import { useActiveBrand } from "@/hooks/useActiveBrand";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Plus, Radio, Search, MoreHorizontal } from "lucide-react";
@@ -29,6 +30,7 @@ const sidebarFilters = [
 
 export default function BroadcastsPage() {
   const { data: broadcasts, isLoading } = useBroadcasts();
+  const { activeClient } = useActiveBrand();
   const [activeFilter, setActiveFilter] = useState("all");
   const [search, setSearch] = useState("");
 
@@ -78,6 +80,14 @@ export default function BroadcastsPage() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Bar */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-[#2d333b] bg-[#161b22]">
+          {activeClient && (
+            <span
+              className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/30"
+              title={`Filtrando por marca activa (definida en el sidebar)`}
+            >
+              {activeClient.name}
+            </span>
+          )}
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#8b949e]" />
             <Input

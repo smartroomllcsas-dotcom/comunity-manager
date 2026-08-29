@@ -15,17 +15,22 @@
  * en query lo respetan por su cuenta desde el context.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useActiveBrand } from "@/hooks/useActiveBrand";
+
+// ID estable por option para aria-activedescendant.
+const optionId = (id: string) => `brand-opt-${id}`;
 
 export function BrandSwitcher() {
   const { clients, activeClient, activeClientId, setActiveClientId, loading, error } = useActiveBrand();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [highlightId, setHighlightId] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
-  // Cerrar al clic fuera + Escape
+  // Cerrar al clic fuera + Escape + navegación con flechas y Enter.
   useEffect(() => {
     if (!open) return;
     function handlePointer(ev: MouseEvent) {
@@ -33,7 +38,29 @@ export function BrandSwitcher() {
       if (!rootRef.current.contains(ev.target as Node)) setOpen(false);
     }
     function handleKey(ev: KeyboardEvent) {
-      if (ev.key === "Escape") setOpen(false);
+      if (ev.key === "Escape") {
+        setOpen(false);
+        return;
+      }
+      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+        ev.preventDefault();
+        const list = filteredRef.current;
+        if (list.length === 0) return;
+        const currentIdx = highlightId ? list.findIndex((c) => c.id === highlightId) : -1;
+        const nextIdx =
+          ev.key === "ArrowDown"
+            ? (currentIdx + 1) % list.length
+            : (currentIdx - 1 + list.length) % list.length;
+        const nextId = list[nextIdx].id;
+        setHighlightId(nextId);
+        // scroll into view
+        const el = document.getElementById(optionId(nextId));
+        el?.scrollIntoView({ block: "nearest" });
+      }
+      if (ev.key === "Enter" && highlightId) {
+        ev.preventDefault();
+        pickFromKeyboard(highlightId);
+      }
     }
     document.addEventListener("mousedown", handlePointer);
     document.addEventListener("keydown", handleKey);
@@ -41,7 +68,8 @@ export function BrandSwitcher() {
       document.removeEventListener("mousedown", handlePointer);
       document.removeEventListener("keydown", handleKey);
     };
-  }, [open]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, highlightId]);
 
   // Estados: loading inicial
   if (loading && clients.length === 0) {
@@ -69,9 +97,23 @@ export function BrandSwitcher() {
     );
   }
 
-  const filtered = query.trim()
-    ? clients.filter((c) => (c.name ?? "").toLowerCase().includes(query.trim().toLowerCase()))
-    : clients;
+  const filtered = useMemo(
+    () =>
+      query.trim()
+        ? clients.filter((c) => (c.name ?? "").toLowerCase().includes(query.trim().toLowerCase()))
+        : clients,
+    [clients, query]
+  );
+  // Ref viva para el handler keyboard (que no se re-crea por cada render).
+  const filteredRef = useRef(filtered);
+  filteredRef.current = filtered;
+
+  // Al abrir, resaltar la marca actual (o la primera).
+  useEffect(() => {
+    if (open) {
+      setHighlightId(activeClientId ?? filtered[0]?.id ?? null);
+    }
+  }, [open, activeClientId, filtered]);
 
   function pick(id: string) {
     const name = clients.find((c) => c.id === id)?.name ?? id.slice(0, 8);
@@ -85,6 +127,11 @@ export function BrandSwitcher() {
     setOpen(false);
     setQuery("");
     toast.success(`Marca activa: ${name}`);
+  }
+
+  // Wrapper para Enter del keyboard — misma lógica que click.
+  function pickFromKeyboard(id: string) {
+    pick(id);
   }
 
   return (
@@ -115,7 +162,11 @@ export function BrandSwitcher() {
 
       {open && (
         <div
+          ref={listRef}
           role="listbox"
+          aria-label="Empresas disponibles"
+          aria-activedescendant={highlightId ? optionId(highlightId) : undefined}
+          tabIndex={-1}
           style={{
             position: "absolute",
             left: 0,
@@ -156,12 +207,15 @@ export function BrandSwitcher() {
             )}
             {filtered.map((c) => {
               const active = c.id === activeClientId;
+              const highlighted = c.id === highlightId;
               const dotColor = c.status === "paused" ? "#f59e0b" : c.status === "active" ? "#22c55e" : "#64748b";
               return (
                 <button
                   key={c.id}
+                  id={optionId(c.id)}
                   type="button"
                   onClick={() => pick(c.id)}
+                  onMouseMove={() => setHighlightId(c.id)}
                   role="option"
                   aria-selected={active}
                   style={{
@@ -171,14 +225,12 @@ export function BrandSwitcher() {
                     alignItems: "center",
                     gap: 8,
                     border: 0,
-                    background: active ? "#1c2128" : "transparent",
+                    background: highlighted || active ? "#1c2128" : "transparent",
                     textAlign: "left",
                     cursor: "pointer",
                     color: "#c9d1d9",
                     fontSize: 13,
                   }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = active ? "#1c2128" : "#1c2128"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = active ? "#1c2128" : "transparent"; }}
                 >
                   <span
                     style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flex: "0 0 auto" }}

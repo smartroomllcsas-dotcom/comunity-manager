@@ -107,6 +107,7 @@ export function getOAuthUrl(
   options: {
     includeInstagramMessaging?: boolean
     includeAds?: boolean
+    includeWhatsAppCloud?: boolean
     configId?: string
   } = {}
 ): string {
@@ -114,10 +115,21 @@ export function getOAuthUrl(
     'pages_manage_metadata',
     'pages_show_list',
     'pages_messaging',
+    // Bug 3 fix (sesión 2026-08-25): Meta rechazaba publish con
+    // "(#200) pages_manage_posts are not available". Ahora se pide en el
+    // dialogo inicial junto con pages_read_engagement (Meta lo exige para
+    // los flujos de posting desde 2024+).
+    'pages_manage_posts',
+    'pages_read_engagement',
   ]
 
   if (options.includeInstagramMessaging) {
-    scopes.push('instagram_basic', 'instagram_manage_messages')
+    scopes.push(
+      'instagram_basic',
+      'instagram_manage_messages',
+      // Bug 3 fix: publicar en IG requiere content_publish explicito.
+      'instagram_content_publish',
+    )
   }
 
   // Ads and business permissions require separate approval in production.
@@ -125,6 +137,13 @@ export function getOAuthUrl(
   // dedicated combined flow explicitly requests them.
   if (options.includeAds) {
     scopes.push('business_management', 'pages_read_engagement', 'ads_read', 'ads_management')
+  }
+
+  // WhatsApp Business Platform (Cloud API oficial) — templates + envio.
+  // Solo cuando el flujo de connect lo pida explicito (Embedded Signup),
+  // no meter en el flow FB/IG estandar para no ampliar el consent.
+  if (options.includeWhatsAppCloud) {
+    scopes.push('whatsapp_business_management', 'whatsapp_business_messaging')
   }
 
   const params = new URLSearchParams({

@@ -471,8 +471,8 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
           .map((permission) => permission.permission)
       )
       const required = flow === 'facebook'
-        ? ['public_profile', 'pages_show_list', 'pages_manage_metadata', 'pages_messaging']
-        : ['public_profile', 'pages_show_list', 'pages_read_engagement']
+        ? ['public_profile', 'pages_show_list', 'pages_manage_metadata', 'pages_messaging', 'pages_manage_posts']
+        : ['public_profile', 'pages_show_list', 'pages_read_engagement', 'pages_manage_posts']
       const missing = required.filter((permission) => !granted.has(permission))
       const detail = missing.length > 0
         ? `Meta no concedio los permisos requeridos: ${missing.join(', ')}. Vuelve a autorizar la integracion.`
