@@ -117,12 +117,12 @@ export function getOAuthUrl(
     'pages_messaging',
     // Lead Ads: leer los envíos de formularios (Centro de clientes potenciales)
     'leads_retrieval',
-    // Bug 3 fix (sesión 2026-08-25): Meta rechazaba publish con
-    // "(#200) pages_manage_posts are not available". Ahora se pide en el
-    // dialogo inicial junto con pages_read_engagement (Meta lo exige para
-    // los flujos de posting desde 2024+).
-    'pages_manage_posts',
     'pages_read_engagement',
+    // NOTA (2026-08-29): 'pages_manage_posts' NO puede pedirse todavía — en
+    // esta app requiere App Review ("Agregar a revisión" en el caso de uso
+    // Administrar páginas). Incluirlo rompe el diálogo OAuth completo con
+    // "Invalid Scopes: pages_manage_posts" (regresión del Bug 3 fix del
+    // 2026-08-25). Reincorporarlo aquí SOLO cuando Meta apruebe el permiso.
   ]
 
   if (options.includeInstagramMessaging) {
