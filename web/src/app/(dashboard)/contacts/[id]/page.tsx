@@ -158,6 +158,38 @@ export default function ContactDetailPage() {
           </div>
         )}
 
+        {/* Información del contacto (respuestas de formulario + atribución) */}
+        {contact.visibility_status !== "restricted" &&
+          contact.custom_fields &&
+          Object.keys(contact.custom_fields).length > 0 && (
+            <div className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg overflow-hidden mb-6">
+              <div className="px-5 py-3 border-b border-[#2d333b] flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-white">Información</h3>
+                {contact.custom_fields.source === "facebook_lead_form" && (
+                  <span className="inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    Formulario de Facebook
+                  </span>
+                )}
+              </div>
+              <dl className="divide-y divide-[#2d333b]/50">
+                {Object.entries(contact.custom_fields)
+                  .filter(
+                    ([key, val]) =>
+                      val &&
+                      !["quota_restricted", "requires_upgrade", "source", "leadgen_id"].includes(key)
+                  )
+                  .map(([key, val]) => (
+                    <div key={key} className="px-5 py-2.5 flex gap-4 text-sm">
+                      <dt className="w-44 shrink-0 text-[#8b949e] capitalize">
+                        {key.replace(/^lead_/, "").replace(/_/g, " ")}
+                      </dt>
+                      <dd className="text-white break-words min-w-0">{String(val)}</dd>
+                    </div>
+                  ))}
+              </dl>
+            </div>
+          )}
+
         {/* Conversations */}
         {contact.visibility_status === "restricted" ? null : <div className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg overflow-hidden">
           <div className="px-5 py-3 border-b border-[#2d333b] flex items-center gap-2">

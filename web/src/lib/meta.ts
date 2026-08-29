@@ -114,6 +114,8 @@ export function getOAuthUrl(
     'pages_manage_metadata',
     'pages_show_list',
     'pages_messaging',
+    // Lead Ads: leer los envíos de formularios (Centro de clientes potenciales)
+    'leads_retrieval',
   ]
 
   if (options.includeInstagramMessaging) {
@@ -215,6 +217,7 @@ export async function subscribePageToApp(pageId: string, pageAccessToken: string
       'messaging_postbacks',
       'message_deliveries',
       'message_reads',
+      'leadgen',
     ].join(','),
   })
 

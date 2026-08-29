@@ -402,6 +402,11 @@ export default function ContactsPage() {
                           <span className="text-sm font-medium text-white group-hover/name:text-blue-400 transition-colors">
                             {displayName}
                           </span>
+                          {!restricted && contact.custom_fields?.source === "facebook_lead_form" && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 shrink-0">
+                              FB Lead
+                            </span>
+                          )}
                         </Link>
                       </td>
                       <td className="px-3 py-2.5 text-sm text-[#8b949e]">

@@ -42,6 +42,13 @@ export type MetaWebhookChangeValue = {
     account_id?: string;
     phone_number_id?: string;
   };
+  // Lead Ads (change.field === "leadgen"): page_id llega en la raíz del value
+  leadgen_id?: string;
+  page_id?: string;
+  form_id?: string;
+  adgroup_id?: string;
+  ad_id?: string;
+  created_time?: number | string;
   messages?: MetaMessagePayload[];
   statuses?: Array<{
     id?: string;
@@ -94,6 +101,7 @@ export function normalizeId(value: string | null | undefined) {
 export function pickChannelCandidates(entry: MetaWebhookEntry, value?: MetaWebhookChangeValue) {
   const candidates = new Set<string>();
   if (entry.id) candidates.add(entry.id);
+  if (value?.page_id) candidates.add(value.page_id);
   if (value?.metadata?.page_id) candidates.add(value.metadata.page_id);
   if (value?.metadata?.account_id) candidates.add(value.metadata.account_id);
   if (value?.metadata?.phone_number_id) candidates.add(value.metadata.phone_number_id);

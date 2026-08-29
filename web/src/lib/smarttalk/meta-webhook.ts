@@ -11,6 +11,7 @@ import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { upsertRestrictedContact } from "@/lib/smarttalk/contact-privacy";
 import { recordContactOverageEvent } from "@/lib/smarttalk/contact-overage";
+import { processLeadgenChange } from "@/lib/smarttalk/lead-forms";
 import {
   buildDisplayName,
   extractContactId,
@@ -664,6 +665,13 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
         .from("channels")
         .update({ last_active_at: new Date().toISOString() })
         .eq("id", channel.id);
+
+      // Lead Ads: un envío de formulario se vuelve contacto CRM, no chat.
+      if (change.field === "leadgen") {
+        const leadResult = await processLeadgenChange(channel, value);
+        if (leadResult.processed) processed += 1;
+        continue;
+      }
 
       const messages = value.messages || [];
       for (const message of messages) {
