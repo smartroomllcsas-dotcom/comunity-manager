@@ -82,7 +82,7 @@ export function TemplateForm({
         ...v,
         components: [
           ...v.components.filter((c) => c.type !== "BUTTONS"),
-          { type: "BUTTONS", buttons: [...list, newBtn] },
+          { type: "BUTTONS" as const, buttons: [...list, newBtn] },
         ].sort(sortComponents),
       };
     });
@@ -97,7 +97,7 @@ export function TemplateForm({
         ...v,
         components: [
           ...v.components.filter((c) => c.type !== "BUTTONS"),
-          { type: "BUTTONS", buttons },
+          { type: "BUTTONS" as const, buttons },
         ].sort(sortComponents),
       };
     });
