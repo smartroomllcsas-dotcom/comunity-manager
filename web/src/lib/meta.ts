@@ -115,8 +115,10 @@ export function getOAuthUrl(
     'pages_manage_metadata',
     'pages_show_list',
     'pages_messaging',
-    // Lead Ads: leer los envíos de formularios (Centro de clientes potenciales)
+    // Lead Ads: leer los envíos de formularios (Centro de clientes potenciales).
+    // pages_manage_ads es requisito de Meta para listar /leadgen_forms.
     'leads_retrieval',
+    'pages_manage_ads',
     'pages_read_engagement',
     // NOTA (2026-08-29): 'pages_manage_posts' NO puede pedirse todavía — en
     // esta app requiere App Review ("Agregar a revisión" en el caso de uso
