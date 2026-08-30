@@ -128,6 +128,10 @@ export function ActiveBrandProvider({ children }: { children: React.ReactNode })
         params.set("clientId", id);
         router.replace(`?${params.toString()}`, { scroll: false });
       }
+      // Los server components (páginas OS, analytics, etc.) resuelven la marca
+      // vía identify() leyendo esta cookie — sin refresh siguen mostrando la
+      // marca anterior hasta una navegación completa.
+      router.refresh();
     },
     [router, searchParams]
   );

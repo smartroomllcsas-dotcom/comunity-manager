@@ -15,7 +15,7 @@ export function useDashboardStats() {
     queryFn: async () => {
       const orgId = agent!.organization_id;
 
-      const [contacts, conversations, agents, messages] = await Promise.all([
+      const [contacts, conversations, agents] = await Promise.all([
         supabase
           .from("contacts")
           .select("id, created_at", { count: "exact" })
@@ -28,11 +28,28 @@ export function useDashboardStats() {
           .from("agents")
           .select("*")
           .eq("organization_id", orgId),
-        supabase
-          .from("messages")
-          .select("id, direction, created_at", { count: "exact" })
-          .eq("direction", "outbound"),
       ]);
+
+      // messages no tiene organization_id — se scopea vía conversation_id de la org.
+      // Chunks de 150 ids: .in() codifica los UUIDs en la URL del GET y listas
+      // grandes exceden límites de request-URI.
+      const convoIds = ((conversations.data || []) as { id: string }[]).map((c) => c.id);
+      const CHUNK = 150;
+      const chunks: string[][] = [];
+      for (let i = 0; i < convoIds.length; i += CHUNK) chunks.push(convoIds.slice(i, i + CHUNK));
+      const messageResults = await Promise.all(
+        chunks.map((ids) =>
+          supabase
+            .from("messages")
+            .select("id, direction, created_at", { count: "exact" })
+            .in("conversation_id", ids)
+            .eq("direction", "outbound")
+        )
+      );
+      const messages = {
+        data: messageResults.flatMap((r) => r.data || []),
+        count: messageResults.reduce((acc, r) => acc + (r.count || 0), 0),
+      };
 
       const now = new Date();
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
