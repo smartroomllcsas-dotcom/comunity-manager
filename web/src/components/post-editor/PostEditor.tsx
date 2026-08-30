@@ -66,11 +66,9 @@ export type PostEditorProps = {
 // -- Hook: useClients ---------------------------------------------------------
 
 /**
- * Fetch de clientes desde /api/clients.
- * FIXME(sprint-24): el endpoint `/api/clients` aún no existe. Cuando
- * el agente que lo cree lo publique, este hook lo consumirá tal cual.
- * Mientras tanto: usa `initialClients` (prefetch server-side) o cae a
- * un mock local de un solo cliente para no bloquear el UX en dev.
+ * Fetch de clientes desde /api/cm/clients (mismo endpoint del BrandSwitcher).
+ * Usa `initialClients` (prefetch server-side) si viene; si no, consulta el API.
+ * Sin marcas → lista vacía (el UI muestra estado honesto, nunca mock).
  */
 function useClients(initial?: ClientOption[]) {
   const [clients, setClients] = React.useState<ClientOption[]>(initial ?? []);
@@ -81,20 +79,18 @@ function useClients(initial?: ClientOption[]) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/clients", { cache: "no-store" });
+        const res = await fetch("/api/cm/clients", { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
-        const list: ClientOption[] = Array.isArray(json?.clients) ? json.clients : [];
-        if (!cancelled && list.length > 0) setClients(list);
-        else if (!cancelled) {
-          // Fallback dev
-          setClients([{ id: "dev-client-1", name: "Cliente (mock)" }]);
-        }
+        const raw = Array.isArray(json?.clients) ? json.clients : Array.isArray(json) ? json : [];
+        const list: ClientOption[] = raw
+          .filter((c: unknown): c is { id: string; name?: string | null } =>
+            !!c && typeof c === "object" && typeof (c as { id?: unknown }).id === "string",
+          )
+          .map((c: { id: string; name?: string | null }) => ({ id: c.id, name: c.name ?? "Sin nombre" }));
+        if (!cancelled) setClients(list);
       } catch {
-        if (!cancelled) {
-          // FIXME: quitar cuando /api/clients esté vivo
-          setClients([{ id: "dev-client-1", name: "Cliente (mock)" }]);
-        }
+        if (!cancelled) setClients([]);
       } finally {
         if (!cancelled) setLoading(false);
       }

@@ -10,34 +10,10 @@ import type { PillarAxis } from '@/lib/os/pillar-radar';
 import type { SocialGrowth, DmThread } from '@/lib/os/social';
 import type { PostDay } from '@/lib/os/posting-activity';
 import { requireOrgIdFromRequest } from '@/lib/os/server';
+import { EmptyState } from '@/components/os/EmptyState';
+import { Share2 } from 'lucide-react';
 
-// ---------------------------------------------------------------------------
-// Fallback placeholder data (Bliss Glamping · 3 accounts)
-// Used when cm_social_accounts / cm_metrics_account have no rows for this org.
-// TODO Sprint 3: remove once all orgs have live social accounts connected.
-// ---------------------------------------------------------------------------
-const PLACEHOLDER_FOLLOWER_SERIES: FollowerPoint[] = [
-  { date: '2026-06-01', followers: 18200 },
-  { date: '2026-06-15', followers: 18950 },
-  { date: '2026-07-01', followers: 19800 },
-  { date: '2026-07-15', followers: 20650 },
-  { date: '2026-08-01', followers: 21400 },
-  { date: '2026-08-14', followers: 22100 },
-];
-const PLACEHOLDER_PIE: PieItem[] = [
-  { key: 'instagram', label: '@blissglamping (IG)', value: 14300 },
-  { key: 'tiktok',    label: '@blissglamping (TikTok)', value: 5200 },
-  { key: 'facebook',  label: 'Bliss Glamping (FB)',  value: 2600 },
-];
-const PLACEHOLDER_PILLAR_AXES: PillarAxis[] = [
-  { id: 'nature',     label: 'Naturaleza',         color: '#3df08c', score: 88, roster: 90, freshness: 85, sop: 80 },
-  { id: 'experience', label: 'Experiencia',         color: '#5ec9f8', score: 75, roster: 70, freshness: 80, sop: 72 },
-  { id: 'community',  label: 'Comunidad',           color: '#a78bfa', score: 62, roster: 60, freshness: 65, sop: 58 },
-  { id: 'offers',     label: 'Ofertas',             color: '#f59e0b', score: 50, roster: 48, freshness: 55, sop: 44 },
-  { id: 'behind',     label: 'Behind the scenes',   color: '#f87171', score: 70, roster: 68, freshness: 72, sop: 66 },
-];
-const PLACEHOLDER_AUDIENCE_GROWTH: SocialGrowth = { d7: 1.2, d30: 4.8, d60: 9.1, allTime: 21.4 };
-const PLACEHOLDER_DM_GROWTH: SocialGrowth = { d7: 3.5, d30: 12.0, d60: 18.5, allTime: null };
+const EMPTY_GROWTH: SocialGrowth = { d7: null, d30: null, d60: null, allTime: null };
 
 // ---------------------------------------------------------------------------
 // Server-side data fetch helpers
@@ -180,7 +156,7 @@ function buildPieItems(history: MetricRow[]): { items: PieItem[]; total: number 
 }
 
 function buildGrowth(history: MetricRow[]): SocialGrowth {
-  if (!history.length) return PLACEHOLDER_AUDIENCE_GROWTH;
+  if (!history.length) return EMPTY_GROWTH;
   // Sum the most-recent followers_delta_30d across all platforms
   const latest: Record<string, MetricRow> = {};
   for (const row of history) {
@@ -202,7 +178,7 @@ function buildGrowth(history: MetricRow[]): SocialGrowth {
  * roster/freshness/sop approximate the same value until post-level signals land.
  */
 function buildPillarAxes(pillars: PillarRow[]): PillarAxis[] {
-  if (!pillars.length) return PLACEHOLDER_PILLAR_AXES;
+  if (!pillars.length) return [];
   const maxCount = Math.max(...pillars.map((p) => p.post_count ?? 0), 1);
   return pillars.map((p) => {
     const score = Math.round(((p.post_count ?? 0) / maxCount) * 100);
@@ -252,19 +228,18 @@ export default async function OsSocialPage() {
   const t = await getTranslations('os.social');
   const today = new Date().toISOString().slice(0, 10);
 
-  // Attempt real data; fall back to placeholder on auth/db error
-  let followerSeries: FollowerPoint[] = PLACEHOLDER_FOLLOWER_SERIES;
-  let pieItems: PieItem[]             = PLACEHOLDER_PIE;
-  let pieTotal                        = 22100;
-  let audienceGrowth: SocialGrowth   = PLACEHOLDER_AUDIENCE_GROWTH;
-  let platformsCount                  = 3;
-  let isPlaceholder                   = true;
+  // Solo data real — sin métricas conectadas se muestran empty states.
+  let followerSeries: FollowerPoint[] = [];
+  let pieItems: PieItem[]             = [];
+  let pieTotal                        = 0;
+  let audienceGrowth: SocialGrowth   = EMPTY_GROWTH;
+  let platformsCount                  = 0;
+  let hasMetrics                      = false;
 
-  // Sprint 3: real pillar / postDays / DM data
-  let pillarAxes: PillarAxis[]  = PLACEHOLDER_PILLAR_AXES;
+  let pillarAxes: PillarAxis[]  = [];
   let postDays: PostDay[]       = [];
-  let dmGrowth: SocialGrowth    = PLACEHOLDER_DM_GROWTH;
-  let dmCount                   = 148; // placeholder total DMs until we accumulate history
+  let dmGrowth: SocialGrowth    = EMPTY_GROWTH;
+  let dmCount                   = 0;
   const dmThreads: DmThread[]   = [];  // TODO Sprint 4: surface individual DM threads
 
   try {
@@ -272,7 +247,7 @@ export default async function OsSocialPage() {
     const { accounts, history, pillars, posts, dms30, dms60 } = await fetchSocialData(orgId);
 
     if (history.length > 0) {
-      isPlaceholder  = false;
+      hasMetrics     = true;
       followerSeries = buildFollowerSeries(history);
       const pie      = buildPieItems(history);
       pieItems       = pie.items;
@@ -297,7 +272,7 @@ export default async function OsSocialPage() {
       dmGrowth = buildDmGrowth(dms30, dms60);
     }
   } catch {
-    // Unauthenticated preview or DB unavailable — keep placeholders
+    // Unauthenticated preview or DB unavailable — empty states below
   }
 
   return (
@@ -321,48 +296,55 @@ export default async function OsSocialPage() {
         />
       </div>
 
-      {/* Charts grid */}
-      <div className="mt-2 grid gap-6 lg:grid-cols-2">
-        {/* Follower bar chart */}
-        <section className="rounded-lg-t border border-os-border bg-os-surface px-5 py-[18px]">
-          <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-os-dim">{t('followers')}</h2>
-          {/* Source: cm_metrics_account · organization_id · last 90d */}
-          {isPlaceholder && (
-            <p className="mb-1 font-mono text-[9px] text-os-muted">
-              demo data · connect accounts to see live metrics
-            </p>
-          )}
-          <FollowerBarChart series={followerSeries} />
-        </section>
-
-        {/* Audience pie */}
-        <section>
-          <h2 className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-os-dim">{t('audience')}</h2>
-          {/* Source: cm_metrics_account latest snapshot per platform */}
-          <AudiencePie items={pieItems} total={pieTotal} donutPx={160} />
-        </section>
-
-        {/* Audience consistency — Source: cm_scheduled_posts · client_id · last 90d */}
-        <section className="lg:col-span-2">
-          <AudienceConsistencyLazy
-            audience={[]}
-            postDays={postDays}
-            today={today}
+      {/* Charts grid — solo data real; sin métricas → empty state con CTA */}
+      {!hasMetrics ? (
+        <div className="mt-2 rounded-lg-t border border-os-border bg-os-surface">
+          <EmptyState
+            icon={Share2}
+            title="Sin métricas sociales todavía"
+            description="Conecta las cuentas sociales de esta marca para ver seguidores, audiencia y crecimiento con datos reales."
+            action={{ label: 'Conectar canal', href: '/es/os/integrations' }}
+            secondary={{ label: 'Ver marcas', href: '/clients' }}
           />
-        </section>
+        </div>
+      ) : (
+        <div className="mt-2 grid gap-6 lg:grid-cols-2">
+          {/* Follower bar chart — Source: cm_metrics_account · organization_id · last 90d */}
+          <section className="rounded-lg-t border border-os-border bg-os-surface px-5 py-[18px]">
+            <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-os-dim">{t('followers')}</h2>
+            <FollowerBarChart series={followerSeries} />
+          </section>
 
-        {/* Pillar radar — Source: cm_content_pillars · client_id · post_count score */}
-        <section className="rounded-lg-t border border-os-border bg-os-surface px-5 py-[18px] lg:col-span-2">
-          <h2 className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-os-dim">{t('pillars')}</h2>
-          <div className="flex justify-center">
-            <PillarRadar
-              axes={pillarAxes}
-              health={Math.round(pillarAxes.reduce((s, a) => s + a.score, 0) / Math.max(pillarAxes.length, 1))}
-              warnings={pillarAxes.filter((a) => a.score < 30).length}
+          {/* Audience pie — Source: cm_metrics_account latest snapshot per platform */}
+          <section>
+            <h2 className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-os-dim">{t('audience')}</h2>
+            <AudiencePie items={pieItems} total={pieTotal} donutPx={160} />
+          </section>
+
+          {/* Audience consistency — Source: cm_scheduled_posts · client_id · last 90d */}
+          <section className="lg:col-span-2">
+            <AudienceConsistencyLazy
+              audience={[]}
+              postDays={postDays}
+              today={today}
             />
-          </div>
-        </section>
-      </div>
+          </section>
+
+          {/* Pillar radar — Source: cm_content_pillars · client_id · post_count score */}
+          {pillarAxes.length > 0 && (
+            <section className="rounded-lg-t border border-os-border bg-os-surface px-5 py-[18px] lg:col-span-2">
+              <h2 className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-os-dim">{t('pillars')}</h2>
+              <div className="flex justify-center">
+                <PillarRadar
+                  axes={pillarAxes}
+                  health={Math.round(pillarAxes.reduce((s, a) => s + a.score, 0) / Math.max(pillarAxes.length, 1))}
+                  warnings={pillarAxes.filter((a) => a.score < 30).length}
+                />
+              </div>
+            </section>
+          )}
+        </div>
+      )}
     </main>
   );
 }

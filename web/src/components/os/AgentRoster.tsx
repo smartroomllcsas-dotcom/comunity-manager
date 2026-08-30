@@ -14,12 +14,12 @@ function initials(name: string): string {
 }
 
 export function AgentRoster({ agents }: AgentRosterProps) {
-  const rows = agents.length > 0 ? agents.slice(0, 4) : PLACEHOLDER_AGENTS;
+  const rows = agents.slice(0, 4);
 
   const trustAvg =
     rows.length > 0
       ? (rows.reduce((s, a) => s + a.trustScore, 0) / rows.length).toFixed(2)
-      : '0.82';
+      : '—';
 
   return (
     <div className="panel">
@@ -28,6 +28,14 @@ export function AgentRoster({ agents }: AgentRosterProps) {
         <div className="panel-meta">trust avg {trustAvg}</div>
       </div>
       <div className="feed">
+        {rows.length === 0 && (
+          <div className="feed-row">
+            <div className="feed-body">
+              <div className="feed-line">Sin agentes configurados</div>
+              <div className="feed-meta">crea tu primer agente en /os/agents</div>
+            </div>
+          </div>
+        )}
         {rows.map((agent) => {
           const trust = agent.trustScore;
           const isActive = agent.status === 'active';
@@ -56,10 +64,3 @@ export function AgentRoster({ agents }: AgentRosterProps) {
     </div>
   );
 }
-
-const PLACEHOLDER_AGENTS: Agent[] = [
-  { id: '1', orgId: 'demo', departmentId: 'inbox', name: 'Auto-responder',  status: 'active', tier: 'worker',     model: 'sonnet', trustScore: 0.92, role: '', description: '', tools: [], instance: 'builtin', constitution: {}, trustLedger: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-  { id: '2', orgId: 'demo', departmentId: 'inbox', name: 'Lead-qualifier',  status: 'active', tier: 'specialist', model: 'haiku',  trustScore: 0.88, role: '', description: '', tools: [], instance: 'builtin', constitution: {}, trustLedger: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-  { id: '3', orgId: 'demo', departmentId: 'content', name: 'Content-writer', status: 'active', tier: 'worker',    model: 'opus',   trustScore: 0.76, role: '', description: '', tools: [], instance: 'builtin', constitution: {}, trustLedger: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-  { id: '4', orgId: 'demo', departmentId: 'inbox', name: 'Escalator-agent', status: 'idle',   tier: 'worker',     model: 'haiku',  trustScore: 0.70, role: '', description: '', tools: [], instance: 'builtin', constitution: {}, trustLedger: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-];

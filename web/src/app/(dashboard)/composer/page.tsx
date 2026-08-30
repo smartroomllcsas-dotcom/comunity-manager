@@ -15,8 +15,8 @@ async function loadClientsForUser(): Promise<ClientOption[]> {
   try {
     const supabase = await createClient();
     // El schema default del server client es `smarttalk`. La tabla real de
-    // clientes de CM vive en `public.cm_clients`. Intentamos ambas de forma
-    // defensiva: si ninguna responde, el hook cae al mock.
+    // clientes de CM vive en `public.cm_clients`. Si no responde, el hook
+    // cliente reintenta contra /api/cm/clients (sin mocks).
     const { data } = await supabase
       .schema("public")
       .from("cm_clients")

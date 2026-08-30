@@ -4,8 +4,19 @@
 // con /composer (dark palette, badges, botones minimal).
 
 import * as React from "react";
+import { useActiveBrand } from "@/hooks/useActiveBrand";
 
 type Tab = "generate" | "repurpose" | "draft";
+
+/** clientId editable que arranca con la marca activa del BrandSwitcher (no demo). */
+function useBrandClientId() {
+  const { activeClientId } = useActiveBrand();
+  const [clientId, setClientId] = React.useState("");
+  React.useEffect(() => {
+    if (activeClientId) setClientId((prev) => (prev === "" ? activeClientId : prev));
+  }, [activeClientId]);
+  return [clientId, setClientId] as const;
+}
 
 interface GenVariant {
   platform: string;
@@ -114,7 +125,7 @@ function SkillsBadges({ skills }: { skills: string[] }) {
 // ── Tab 1: Generate ──────────────────────────────────────────────────────────
 
 function GenerateTab() {
-  const [clientId, setClientId] = React.useState("demo-client");
+  const [clientId, setClientId] = useBrandClientId();
   const [goal, setGoal] = React.useState("");
   const [audience, setAudience] = React.useState("");
   const [brandVoice, setBrandVoice] = React.useState("");
@@ -408,7 +419,7 @@ function RepurposeTab() {
 // ── Tab 3: Draft Response ────────────────────────────────────────────────────
 
 function DraftTab() {
-  const [clientId, setClientId] = React.useState("demo-client");
+  const [clientId, setClientId] = useBrandClientId();
   const [platform, setPlatform] = React.useState("instagram-dm");
   const [incoming, setIncoming] = React.useState("");
   const [brandVoice, setBrandVoice] = React.useState("");

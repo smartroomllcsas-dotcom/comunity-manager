@@ -1,105 +1,39 @@
 import { getTranslations } from 'next-intl/server';
+import { Users } from 'lucide-react';
 import { FunnelRadialLazy, FunnelSpaceLazy } from '@/components/os/FunnelGraphsLazy';
 import type { FunnelRadialModel, FunnelRadialSegment } from '@/components/os/FunnelRadial';
 import type { FunnelSummary } from '@/components/os/FunnelSpace';
-import type { FunnelSpaceNode } from '@/components/os/FunnelNodeCard';
+import type { FunnelSpaceNode, FunnelTouch } from '@/components/os/FunnelNodeCard';
+import { EmptyState } from '@/components/os/EmptyState';
+import { requireOrgIdFromRequest } from '@/lib/os/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 
-// ── placeholder data ─────────────────────────────────────────────────────────
-// TODO Sprint 2: replace with real cm_leads join via OSRepository
-// Shape: nodes pulled from os_leads, mapped to FunnelSpaceNode + FunnelRadialNode
+export const dynamic = 'force-dynamic';
 
-const PLACEHOLDER_NODES: FunnelSpaceNode[] = [
-  {
-    id: 'lead-1', name: 'Ana García', person: 'Ana García', role: 'Founder', company: 'StartupCo',
-    email: null, phone: null, linkedin: null, url: null,
-    status: 'first_touch', likelihood: 72, relationship: 'warm', state: 'active',
-    decay: 0, daysSinceLastTouch: 3, amountUsd: null, product: null,
-    touches: [{ id: 't1', channel: 'organic', label: 'Instagram post · growth hacks', at: '2026-07-10' }],
-    currentHub: 0, hubs: [0], radius: 5, currentRing: 0, rings: [0], segment: 0,
-  },
-  {
-    id: 'lead-2', name: 'Carlos Méndez', person: 'Carlos Méndez', role: 'CMO', company: 'BrandLab',
-    email: 'carlos@brandlab.co', phone: null, linkedin: null, url: null,
-    status: 'engaged', likelihood: 85, relationship: 'hot', state: 'active',
-    decay: 0, daysSinceLastTouch: 1, amountUsd: 4800, product: null,
-    touches: [
-      { id: 't2', channel: 'ads', label: 'Meta Ad · community management', at: '2026-07-01' },
-      { id: 't3', channel: 'dm', label: 'DM — asked for pricing', at: '2026-07-13' },
-    ],
-    currentHub: 1, hubs: [0, 1], radius: 6, currentRing: 1, rings: [0, 1], segment: 1,
-  },
-  {
-    id: 'lead-3', name: 'Sofía Herrera', person: 'Sofía Herrera', role: null, company: null,
-    email: 'sofia@gmail.com', phone: null, linkedin: null, url: null,
-    status: 'nurtured', likelihood: 60, relationship: 'warm', state: 'active',
-    decay: 0, daysSinceLastTouch: 7, amountUsd: 2400, product: null,
-    touches: [
-      { id: 't4', channel: 'organic', label: 'YouTube · webinar', at: '2026-06-20' },
-      { id: 't5', channel: 'email', label: 'Newsletter open · pricing edition', at: '2026-07-05' },
-    ],
-    currentHub: 2, hubs: [0, 1, 2], radius: 5, currentRing: 2, rings: [0, 1, 2], segment: 2,
-  },
-  {
-    id: 'lead-4', name: 'Miguel Torres', person: 'Miguel Torres', role: 'CEO', company: 'AgencyPro',
-    email: 'miguel@agencypro.mx', phone: '+52 555 1234', linkedin: null, url: null,
-    status: 'opted_in', likelihood: 92, relationship: 'hot', state: 'active',
-    decay: 0, daysSinceLastTouch: 0, amountUsd: 9600, product: null,
-    touches: [
-      { id: 't6', channel: 'ads', label: 'LinkedIn Ad · ROI calculator', at: '2026-06-15' },
-      { id: 't7', channel: 'email', label: 'Email sequence · day 5', at: '2026-07-08' },
-      { id: 't8', channel: 'call', label: 'Discovery call — 30 min', at: '2026-08-12' },
-    ],
-    currentHub: 3, hubs: [0, 1, 2, 3], radius: 7, currentRing: 3, rings: [0, 1, 2, 3], segment: 4,
-  },
-  {
-    id: 'lead-5', name: 'Laura Pérez', person: 'Laura Pérez', role: 'Marketing Dir', company: 'RetailMX',
-    email: 'laura@retailmx.com', phone: null, linkedin: null, url: null,
-    status: 'converted', likelihood: 100, relationship: 'hot', state: 'converted',
-    decay: 0, daysSinceLastTouch: 5, amountUsd: 14400, product: 'Community OS · Anual',
-    touches: [
-      { id: 't9', channel: 'organic', label: 'Word of mouth · referral', at: '2026-06-01' },
-      { id: 't10', channel: 'checkout', label: 'Checkout · plan anual', at: '2026-07-20' },
-    ],
-    currentHub: 4, hubs: [0, 1, 2, 3, 4], radius: 8, currentRing: 4, rings: [0, 1, 2, 3, 4], segment: 5,
-  },
-  {
-    id: 'lead-6', name: 'Roberto Solis', person: 'Roberto Solis', role: null, company: null,
-    email: null, phone: null, linkedin: null, url: null,
-    status: 'first_touch', likelihood: 35, relationship: 'cold', state: 'active',
-    decay: 0.3, daysSinceLastTouch: 25, amountUsd: null, product: null,
-    touches: [{ id: 't11', channel: 'organic', label: 'Instagram story view', at: '2026-07-20' }],
-    currentHub: 0, hubs: [0], radius: 4, currentRing: 0, rings: [0], segment: 3,
-  },
-];
+// ── real data: smarttalk.contacts (leads de Meta Lead Ads + CRM) ─────────────
 
-const PLACEHOLDER_SEGMENTS: FunnelRadialSegment[] = [
-  { id: 'instagram', label: 'Instagram', count: 3, converted: 1 },
-  { id: 'youtube', label: 'YouTube', count: 1, converted: 0 },
-  { id: 'newsletter', label: 'Newsletter', count: 1, converted: 0 },
-  { id: 'x', label: 'X', count: 0, converted: 0 },
-  { id: 'linkedin', label: 'LinkedIn', count: 1, converted: 0 },
-  { id: 'forms', label: 'Forms', count: 0, converted: 0 },
-  { id: 'wom', label: 'Word of mouth', count: 1, converted: 1 },
-];
+const STAGES = ['first_touch', 'engaged', 'nurtured', 'opted_in', 'converted'] as const;
+type StageId = (typeof STAGES)[number];
 
-const PLACEHOLDER_RADIAL_MODEL: FunnelRadialModel = {
-  nodes: PLACEHOLDER_NODES,
-  segments: PLACEHOLDER_SEGMENTS,
+// Debe coincidir con ACQUISITIONS inlined en FunnelRadial/FunnelNodeCard
+const ACQUISITION_SEGMENTS = ['Instagram', 'YouTube', 'Newsletter', 'X', 'LinkedIn', 'Forms', 'Word of mouth'];
+
+const STAGE_LIKELIHOOD: Record<StageId, number> = {
+  first_touch: 30,
+  engaged: 55,
+  nurtured: 70,
+  opted_in: 85,
+  converted: 100,
 };
 
-const PLACEHOLDER_SUMMARY: FunnelSummary = {
-  stages: [
-    { id: 'first_touch', total: 42, conversionFromPrev: null },
-    { id: 'engaged', total: 18, conversionFromPrev: 43 },
-    { id: 'nurtured', total: 10, conversionFromPrev: 56 },
-    { id: 'opted_in', total: 6, conversionFromPrev: 60 },
-    { id: 'converted', total: 3, conversionFromPrev: 50 },
-  ],
-  totalLeads: 42,
-  totalConverted: 3,
+const STAGE_RELATIONSHIP: Record<StageId, 'cold' | 'warm' | 'hot'> = {
+  first_touch: 'cold',
+  engaged: 'warm',
+  nurtured: 'warm',
+  opted_in: 'hot',
+  converted: 'hot',
 };
 
-// stage id → i18n key mapping
 const STAGE_I18N: Record<string, 'new' | 'qualified' | 'hot' | 'closed'> = {
   first_touch: 'new',
   engaged: 'qualified',
@@ -107,10 +41,157 @@ const STAGE_I18N: Record<string, 'new' | 'qualified' | 'hot' | 'closed'> = {
   converted: 'closed',
 };
 
+interface ContactRow {
+  id: string;
+  name: string | null;
+  custom_fields: Record<string, unknown> | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+function str(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() !== '' ? v.trim() : null;
+}
+
+function stageOf(cf: Record<string, unknown>): StageId {
+  const lifecycle = str(cf.lifecycle);
+  return (STAGES as readonly string[]).includes(lifecycle ?? '') ? (lifecycle as StageId) : 'first_touch';
+}
+
+function segmentOf(cf: Record<string, unknown>): number {
+  const source = str(cf.source) ?? '';
+  const platform = (str(cf.lead_platform) ?? '').toLowerCase();
+  if (source === 'facebook_lead_form') {
+    return platform.includes('ig') || platform.includes('instagram') ? 0 : 5; // Instagram | Forms
+  }
+  if (source.includes('instagram')) return 0;
+  if (source.includes('whatsapp') || source.includes('referral')) return 6; // Word of mouth
+  return 5; // Forms (default para captura directa)
+}
+
+function touchesOf(row: ContactRow, cf: Record<string, unknown>, stage: StageId): FunnelTouch[] {
+  const at = (row.created_at ?? new Date().toISOString()).slice(0, 10);
+  const campaign = str(cf.lead_campaign);
+  const ad = str(cf.lead_ad);
+  const source = str(cf.source);
+  const touches: FunnelTouch[] = [
+    {
+      id: `${row.id}-origin`,
+      channel: source === 'facebook_lead_form' ? 'ads' : 'organic',
+      label:
+        source === 'facebook_lead_form'
+          ? `Lead Ad${campaign ? ` · ${campaign}` : ''}${ad ? ` · ${ad}` : ''}`
+          : `Captura · ${source ?? 'CRM'}`,
+      at,
+    },
+  ];
+  if (stage === 'converted' && row.updated_at) {
+    touches.push({
+      id: `${row.id}-conv`,
+      channel: 'checkout',
+      label: 'Convertido',
+      at: row.updated_at.slice(0, 10),
+    });
+  }
+  return touches;
+}
+
+function toNode(row: ContactRow): FunnelSpaceNode {
+  const cf = row.custom_fields ?? {};
+  const stage = stageOf(cf);
+  const stageIdx = STAGES.indexOf(stage);
+  const lastTouchTs = Date.parse(row.updated_at ?? row.created_at ?? '') || Date.now();
+  const daysSince = Math.max(0, Math.floor((Date.now() - lastTouchTs) / 86_400_000));
+  const decay = stage === 'converted' ? 0 : Math.min(1, Math.max(0, (daysSince - 21) / 90));
+  const hubs = Array.from({ length: stageIdx + 1 }, (_, i) => i);
+  return {
+    id: row.id,
+    name: row.name ?? 'Sin nombre',
+    person: row.name ?? null,
+    role: null,
+    company: null,
+    email: str(cf.email),
+    phone: str(cf.phone) ?? str(cf.phone_number),
+    linkedin: null,
+    url: null,
+    status: stage,
+    likelihood: STAGE_LIKELIHOOD[stage],
+    relationship: STAGE_RELATIONSHIP[stage],
+    state: stage === 'converted' ? 'converted' : daysSince > 7 && stage !== 'first_touch' ? 'stalled' : 'active',
+    decay,
+    daysSinceLastTouch: daysSince,
+    amountUsd: null,
+    product: null,
+    touches: touchesOf(row, cf, stage),
+    currentHub: stageIdx,
+    hubs,
+    radius: 5 + stageIdx,
+    currentRing: stageIdx,
+    rings: hubs,
+    segment: segmentOf(cf),
+  };
+}
+
+function buildSegments(nodes: FunnelSpaceNode[]): FunnelRadialSegment[] {
+  return ACQUISITION_SEGMENTS.map((label, idx) => {
+    const inSeg = nodes.filter((n) => n.segment === idx);
+    return {
+      id: label.toLowerCase().replace(/\s+/g, '-'),
+      label,
+      count: inSeg.length,
+      converted: inSeg.filter((n) => n.state === 'converted').length,
+    };
+  });
+}
+
+function buildSummary(nodes: FunnelSpaceNode[]): FunnelSummary {
+  const totals = STAGES.map((s) => nodes.filter((n) => n.status === s).length);
+  return {
+    stages: STAGES.map((id, i) => ({
+      id,
+      total: totals[i],
+      conversionFromPrev: i > 0 && totals[i - 1] > 0 ? Math.round((totals[i] / totals[i - 1]) * 100) : null,
+    })),
+    totalLeads: nodes.length,
+    totalConverted: nodes.filter((n) => n.state === 'converted').length,
+  };
+}
+
+async function fetchLeadNodes(): Promise<FunnelSpaceNode[]> {
+  try {
+    const orgId = await requireOrgIdFromRequest();
+    const publicAdmin = createAdminClient('public');
+    const { data: client } = await publicAdmin
+      .from('cm_clients')
+      .select('id, smarttalk_organization_id')
+      .eq('id', orgId)
+      .maybeSingle();
+    const stOrgId = (client as { smarttalk_organization_id: string | null } | null)?.smarttalk_organization_id;
+    if (!stOrgId) return [];
+
+    const smarttalk = createAdminClient('smarttalk');
+    const { data: contacts } = await smarttalk
+      .from('contacts')
+      .select('id, name, custom_fields, created_at, updated_at')
+      .eq('organization_id', stOrgId)
+      .eq('brand_id', orgId)
+      .order('created_at', { ascending: false })
+      .limit(60);
+
+    return ((contacts ?? []) as ContactRow[]).map(toNode);
+  } catch {
+    return [];
+  }
+}
+
 // ── page ─────────────────────────────────────────────────────────────────────
 
 export default async function OsFunnelPage() {
   const t = await getTranslations('os.funnel');
+  const nodes = await fetchLeadNodes();
+  const summary = buildSummary(nodes);
+  const radialModel: FunnelRadialModel = { nodes, segments: buildSegments(nodes) };
+  const hasLeads = nodes.length > 0;
 
   return (
     <main className="content">
@@ -121,34 +202,46 @@ export default async function OsFunnelPage() {
         </div>
       </div>
 
-      {/* Stage summary pills */}
-      <div className="mb-6 flex flex-wrap gap-3">
-        {PLACEHOLDER_SUMMARY.stages.map((stage) => {
-          const i18nKey = STAGE_I18N[stage.id];
-          const label = i18nKey ? t(`stages.${i18nKey}`) : stage.id;
-          return (
-            <div key={stage.id} className="flex flex-col rounded-lg border border-os-border bg-os-surface px-4 py-2">
-              <span className="font-mono text-[9px] uppercase tracking-widest text-os-dim">{label}</span>
-              <span className="mt-1 text-[22px] font-bold tabular-nums text-os-text">{stage.total}</span>
-              {stage.conversionFromPrev != null && (
-                <span className="font-mono text-[9px] text-os-dim">{stage.conversionFromPrev}% conv.</span>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      {!hasLeads ? (
+        <EmptyState
+          icon={Users}
+          title="Sin leads todavía"
+          description="Cuando lleguen leads reales de Meta Lead Ads o del CRM para esta marca, aparecerán aquí con su recorrido por el funnel."
+          action={{ label: 'Configurar Lead Ads', href: '/settings/channels' }}
+          secondary={{ label: 'Ver marcas', href: '/clients' }}
+        />
+      ) : (
+        <>
+          {/* Stage summary pills */}
+          <div className="mb-6 flex flex-wrap gap-3">
+            {summary.stages.map((stage) => {
+              const i18nKey = STAGE_I18N[stage.id];
+              const label = i18nKey ? t(`stages.${i18nKey}`) : stage.id;
+              return (
+                <div key={stage.id} className="flex flex-col rounded-lg border border-os-border bg-os-surface px-4 py-2">
+                  <span className="font-mono text-[9px] uppercase tracking-widest text-os-dim">{label}</span>
+                  <span className="mt-1 text-[22px] font-bold tabular-nums text-os-text">{stage.total}</span>
+                  {stage.conversionFromPrev != null && (
+                    <span className="font-mono text-[9px] text-os-dim">{stage.conversionFromPrev}% conv.</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
 
-      {/* Neural radial view — spiral inward */}
-      <section className="mb-8 rounded-xl border border-os-border bg-os-surface p-4">
-        <div className="mb-3 font-mono text-[10px] uppercase tracking-widest text-os-dim">vista radial · origen → conversión</div>
-        <FunnelRadialLazy model={PLACEHOLDER_RADIAL_MODEL} />
-      </section>
+          {/* Neural radial view — spiral inward */}
+          <section className="mb-8 rounded-xl border border-os-border bg-os-surface p-4">
+            <div className="mb-3 font-mono text-[10px] uppercase tracking-widest text-os-dim">vista radial · origen → conversión</div>
+            <FunnelRadialLazy model={radialModel} />
+          </section>
 
-      {/* Linear space view — hub-to-hub */}
-      <section className="rounded-xl border border-os-border bg-os-surface p-4">
-        <div className="mb-3 font-mono text-[10px] uppercase tracking-widest text-os-dim">vista de espacio · etapas lineales</div>
-        <FunnelSpaceLazy nodes={PLACEHOLDER_NODES} summary={PLACEHOLDER_SUMMARY} />
-      </section>
+          {/* Linear space view — hub-to-hub */}
+          <section className="rounded-xl border border-os-border bg-os-surface p-4">
+            <div className="mb-3 font-mono text-[10px] uppercase tracking-widest text-os-dim">vista de espacio · etapas lineales</div>
+            <FunnelSpaceLazy nodes={nodes} summary={summary} />
+          </section>
+        </>
+      )}
     </main>
   );
 }

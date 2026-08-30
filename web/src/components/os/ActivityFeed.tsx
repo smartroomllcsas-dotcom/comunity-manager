@@ -32,45 +32,30 @@ export function ActivityFeed({ activity }: ActivityFeedProps) {
         <div className="panel-meta">últimas 24 h</div>
       </div>
       <div className="feed">
-        {rows
-          ? rows.map((row, i) => (
-              <div key={i} className="feed-row">
-                <div className={`feed-mark ${markFromActivity(row)}`} />
-                <div className="feed-body">
-                  <div className="feed-line">
-                    {row.actorId && <span className="actor">{row.actorId}</span>}
-                    {row.actorId ? ' ' : ''}
-                    {row.summary}
-                  </div>
-                  <div className="feed-meta">{row.kind}</div>
+        {rows ? (
+          rows.map((row, i) => (
+            <div key={i} className="feed-row">
+              <div className={`feed-mark ${markFromActivity(row)}`} />
+              <div className="feed-body">
+                <div className="feed-line">
+                  {row.actorId && <span className="actor">{row.actorId}</span>}
+                  {row.actorId ? ' ' : ''}
+                  {row.summary}
                 </div>
-                <div className="feed-time">{relativeTime(row.at)}</div>
+                <div className="feed-meta">{row.kind}</div>
               </div>
-            ))
-          : PLACEHOLDER_ROWS.map((row, i) => (
-              <div key={i} className="feed-row">
-                <div className={`feed-mark ${row.mark}`} />
-                <div className="feed-body">
-                  <div className="feed-line">
-                    <span className="actor">{row.actor}</span>
-                    {' '}
-                    <span dangerouslySetInnerHTML={{ __html: row.title }} />
-                  </div>
-                  <div className="feed-meta">{row.meta}</div>
-                </div>
-                <div className="feed-time">{row.time}</div>
-              </div>
-            ))}
+              <div className="feed-time">{relativeTime(row.at)}</div>
+            </div>
+          ))
+        ) : (
+          <div className="feed-row">
+            <div className="feed-body">
+              <div className="feed-line">Sin actividad todavía</div>
+              <div className="feed-meta">los eventos de agentes y canales aparecerán aquí</div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
-const PLACEHOLDER_ROWS = [
-  { mark: 'accent' as FeedMark, actor: 'Auto-responder',   title: 'respondió a Diego Marín en WhatsApp',            meta: 'verificado · 68 tokens · US$ 0.0011',                 time: '2 min' },
-  { mark: 'ok'     as FeedMark, actor: 'Lead-qualifier',   title: 'marcó a Carla Ríos como <strong>caliente</strong>', meta: 'score 0.87 · próximo paso: agendar cita',           time: '7 min' },
-  { mark: 'warn'   as FeedMark, actor: 'WAHA-watchdog',    title: 'reconectó sesión perdida',                         meta: 'downtime 34 s · sin mensajes perdidos',              time: '12 min' },
-  { mark: 'err'    as FeedMark, actor: 'Goals sentinel',   title: 'detectó <strong>breach</strong>: SLA > 5 min',     meta: '3 conversaciones en cola — escalar a humano',        time: '18 min' },
-  { mark: 'accent' as FeedMark, actor: 'Content-writer',   title: 'generó 3 borradores para Instagram',               meta: 'pilar: naturaleza · pendiente aprobación',           time: '27 min' },
-  { mark: 'ok'     as FeedMark, actor: 'Broadcast-sender', title: 'envió campaña <strong>Reserva agosto</strong> a 342 contactos', meta: 'entrega 98.5 % · CTR 12 % (parcial)', time: '1 h' },
-];

@@ -53,10 +53,6 @@ export function OsTopbar({ orgId }: { orgId?: string }) {
       </div>
       <div className="topbar-right">
         <OsBrandSwitcher />
-        <div className="status-pill">
-          <span className="live-dot" />
-          7 canales activos
-        </div>
         {orgId && me && <PresenceStack orgId={orgId} me={me} />}
         <div className="lang-toggle">
           <button
