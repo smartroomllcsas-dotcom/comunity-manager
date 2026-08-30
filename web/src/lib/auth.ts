@@ -112,24 +112,46 @@ export function getCurrentUserId(): string | null {
   return cookieMatch ? decodeURIComponent(cookieMatch[1]) : null
 }
 
+export class AuthTransientError extends Error {
+  constructor() {
+    super('auth-transient')
+    this.name = 'AuthTransientError'
+  }
+}
+
 export async function getCurrentUser(): Promise<CMUser | null> {
   const userId = getCurrentUserId()
   if (!userId) return null
 
-  const res = await fetch('/api/auth/local', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      action: 'getCurrentUser',
-      userId,
-    }),
-  })
+  let res: Response
+  try {
+    res = await fetch('/api/auth/local', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'getCurrentUser',
+        userId,
+      }),
+    })
+  } catch {
+    // Network blip: not proof the session is invalid.
+    throw new AuthTransientError()
+  }
 
-  const payload = await res.json()
+  if (res.status >= 500 || res.status === 429) {
+    throw new AuthTransientError()
+  }
+
+  let payload: { user?: CMUser | null } | null = null
+  try {
+    payload = await res.json()
+  } catch {
+    throw new AuthTransientError()
+  }
 
   if (!res.ok || !payload?.user) return null
 
-  return payload.user as CMUser | null
+  return payload.user as CMUser
 }
 
 export function logout() {

@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { getCurrentUser, logout as doLogout } from '@/lib/auth'
+import { AuthTransientError, getCurrentUser, logout as doLogout } from '@/lib/auth'
 import { createClient as createSupabaseBrowser } from '@/lib/supabase/client'
 import type { CMUser } from '@/types/database'
 import type { User as SupabaseUser } from '@supabase/supabase-js'
@@ -60,6 +60,7 @@ function isPublicRoute(pathname: string) {
 export default function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<CMUser | null>(null)
   const [loading, setLoading] = useState(true)
+  const [degraded, setDegraded] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
   const isPublic = isPublicRoute(pathname)
@@ -75,20 +76,39 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
 
-      const localUser = await getCurrentUser()
+      let localUser: CMUser | null = null
+      let identityCheckFailed = false
+      try {
+        localUser = await getCurrentUser()
+      } catch (err) {
+        if (err instanceof AuthTransientError) {
+          // Network/server blip: do NOT treat as logged-out or we kick valid
+          // sessions to /login on every transient failure.
+          identityCheckFailed = true
+        } else {
+          throw err
+        }
+      }
+
       let authUser: SupabaseUser | null = null
 
       // The legacy CM cookie can outlive the Supabase session. Do not render
       // protected routes as authenticated when the secure session is gone.
       if (smarttalk) {
+        let sessionDefinitelyAbsent = false
         try {
-          const authResult = await createSupabaseBrowser().auth.getUser()
-          authUser = authResult.data.user
+          // getSession() is local-first (reads the stored token) and only hits
+          // the network to refresh. getUser() always hits the auth server and
+          // returns null on ANY network/5xx error, which used to nuke valid
+          // sessions whenever the self-hosted Supabase API had a blip.
+          const { data, error } = await createSupabaseBrowser().auth.getSession()
+          authUser = data.session?.user ?? null
+          if (!authUser && !error) sessionDefinitelyAbsent = true
         } catch {
-          authUser = null
+          // Transient failure: keep the session, degrade gracefully.
         }
 
-        if (!authUser) {
+        if (sessionDefinitelyAbsent) {
           doLogout()
           document.cookie = 'cm_user_id=; Path=/; Max-Age=0'
           if (cancelled) return
@@ -126,8 +146,11 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
       if (cancelled) return
       setUser(resolvedUser)
+      setDegraded(!resolvedUser && identityCheckFailed)
       setLoading(false)
-      if (!resolvedUser && !smarttalk) router.push('/login')
+      // Never kick to /login when the failure was transient — the session may
+      // be perfectly valid and the API just blipped.
+      if (!resolvedUser && !smarttalk && !identityCheckFailed) router.push('/login')
     }
 
     void loadIdentity()
@@ -168,7 +191,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     )
   }
 
-  if (!user && !smarttalk) {
+  if (!user && !smarttalk && !degraded) {
     return null
   }
 
