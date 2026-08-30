@@ -2,6 +2,7 @@ import { dedupe } from 'flags/next';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
+import { verifySessionSig } from '@/lib/session-sig';
 
 /**
  * Service-role client for identify() only. Needed because public.cm_users has RLS
@@ -60,14 +61,33 @@ export const identify = dedupe(async (): Promise<UserEntities> => {
     // NOT Supabase Auth. When a user logs in via the legacy flow, only the cm_user_id
     // cookie is set — supabase.auth.getUser() returns null. We must resolve email +
     // orgId from public.cm_users + public.cm_clients directly.
-    const cmUserId = cookieStore.get('cm_user_id')?.value
+    const rawCmUserId = cookieStore.get('cm_user_id')?.value
       ? decodeURIComponent(cookieStore.get('cm_user_id')!.value)
       : null;
+
+    // La cookie cm_user_id no es autoritativa: se acepta sólo si viene con la
+    // firma HMAC emitida en el login (cm_session_sig). Sin firma válida, la
+    // identidad legacy se resuelve por el email verificado de Supabase Auth
+    // (sesiones anteriores al despliegue de la firma siguen funcionando).
+    const sessionSig = cookieStore.get('cm_session_sig')?.value ?? null;
+    let cmUserId =
+      rawCmUserId && verifySessionSig(rawCmUserId, sessionSig) ? rawCmUserId : null;
 
     let orgId: string | null = null;
     let orgName: string | null = null;
     let orgIds: string[] = [];
     let legacyEmail: string | null = null;
+
+    // Fallback para sesiones sin firma: resolver cm_users por email verificado
+    // de Supabase Auth (el login legacy también abre sesión Supabase).
+    if (!cmUserId && authUser?.email) {
+      const { data: byEmail } = await serviceClient()
+        .from('cm_users')
+        .select('id')
+        .eq('email', authUser.email.trim().toLowerCase())
+        .maybeSingle();
+      cmUserId = byEmail?.id ?? null;
+    }
 
     if (cmUserId) {
       // Use service-role client — public.cm_users has RLS on and there is no
@@ -106,16 +126,6 @@ export const identify = dedupe(async (): Promise<UserEntities> => {
     const rawEmail = authUser?.email ?? legacyEmail;
     const email = rawEmail ? rawEmail.trim().toLowerCase() : null;
     const userId = authUser?.id ?? cmUserId ?? null;
-
-    // TEMP diagnostic (remove after Community OS visibility confirmed in prod)
-    console.log('[identify] result', {
-      hasCookie: !!cmUserId,
-      cmUserIdPrefix: cmUserId ? cmUserId.slice(0, 8) : null,
-      authUserEmail: authUser?.email ?? null,
-      legacyEmail,
-      finalEmail: email,
-      orgCount: orgIds.length,
-    });
 
     return {
       userId,

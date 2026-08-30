@@ -133,7 +133,7 @@ export default function OsSkillsPage() {
       {featured.length > 0 && (
         <section className="mt-4">
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold" style={{ color: 'var(--text-1)' }}>
-            <Sparkles className="h-4 w-4" style={{ color: 'oklch(75% 0.15 60)' }} />
+            <Sparkles className="h-4 w-4" style={{ color: 'var(--os-warn)' }} />
             Spec · Build · Review
           </h2>
           <div className="flex flex-wrap gap-2">

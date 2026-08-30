@@ -131,7 +131,7 @@ export function ContentCalendar() {
               onClick={() => setView(v)}
               className="px-2.5 py-1 text-[11px]"
               style={{
-                background: view === v ? 'oklch(70% 0.14 250 / 0.15)' : 'transparent',
+                background: view === v ? 'color-mix(in oklch, var(--os-accent) 15%, transparent)' : 'transparent',
                 color: view === v ? 'oklch(80% 0.14 250)' : 'var(--text-2)',
               }}
             >
@@ -182,7 +182,7 @@ export function ContentCalendar() {
                 className="min-h-[76px] rounded-md border p-1.5"
                 style={{
                   borderColor: 'var(--border)',
-                  background: day && sameYMD(day, new Date()) ? 'oklch(70% 0.14 250 / 0.08)' : 'var(--surface-1)',
+                  background: day && sameYMD(day, new Date()) ? 'color-mix(in oklch, var(--os-accent) 8%, transparent)' : 'var(--surface-1)',
                   opacity: day ? 1 : 0.3,
                 }}
               >
@@ -195,7 +195,7 @@ export function ContentCalendar() {
                         draggable
                         onDragStart={() => setDragId(p.id)}
                         className="mb-1 cursor-move rounded-sm px-1.5 py-0.5 text-[10px] line-clamp-1"
-                        style={{ background: 'oklch(70% 0.14 250 / 0.2)', color: 'var(--text-1)' }}
+                        style={{ background: 'color-mix(in oklch, var(--os-accent) 20%, transparent)', color: 'var(--text-1)' }}
                         title={p.content}
                       >
                         {p.content.slice(0, 40) || '(post)'}

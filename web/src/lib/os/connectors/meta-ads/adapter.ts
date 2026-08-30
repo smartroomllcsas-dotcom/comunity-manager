@@ -192,6 +192,112 @@ export async function metaAdsCampaigns(): Promise<MetaAdsCampaign[]> {
   }
 }
 
+export interface MetaAdsCampaignDetail extends MetaAdsCampaign {
+  reach: number;
+  ctr: number; // % (0-100)
+  cpc_cents: number;
+  purchases: number;
+  purchase_value_cents: number;
+  roas: number | null; // purchase_value / spend, null si spend=0
+}
+
+interface GraphActionRow {
+  action_type?: string;
+  value?: string;
+}
+
+interface GraphCampaignDetailRow {
+  id: string;
+  name: string;
+  status: string;
+  insights?: {
+    data?: Array<{
+      spend?: string;
+      impressions?: string;
+      clicks?: string;
+      reach?: string;
+      actions?: GraphActionRow[];
+      action_values?: GraphActionRow[];
+    }>;
+  };
+}
+
+// Meta devuelve filas superpuestas (omni_purchase agrega purchase + pixel);
+// sumarlas duplicaría compras/ROAS, por eso se toma una sola por prioridad.
+const PURCHASE_PRIORITY = [
+  'omni_purchase',
+  'purchase',
+  'offsite_conversion.fb_pixel_purchase',
+];
+
+function sumActions(rows: GraphActionRow[] | undefined): number {
+  if (!rows) return 0;
+  for (const type of PURCHASE_PRIORITY) {
+    const row = rows.find((r) => r.action_type === type);
+    if (row) {
+      const n = Number(row.value);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Campañas con métricas de performance (últimos 30 días):
+ * spend, impressions, clicks, reach, CTR, CPC, purchases y ROAS.
+ */
+export async function metaAdsCampaignInsights(): Promise<MetaAdsCampaignDetail[]> {
+  const cacheKey = 'meta-ads:campaign-insights';
+  const cached = getCached<MetaAdsCampaignDetail[]>(cacheKey);
+  if (cached) return cached;
+
+  const accountId = await resolveAccountId();
+  if (!accountId) return [];
+
+  try {
+    const body = await graphGet<{ data?: GraphCampaignDetailRow[] }>(
+      `/act_${accountId}/campaigns`,
+      {
+        fields:
+          'id,name,status,insights.date_preset(last_30d){spend,impressions,clicks,reach,actions,action_values}',
+        limit: '100',
+      },
+    );
+
+    const rows: MetaAdsCampaignDetail[] = (body.data ?? []).map((c) => {
+      const ins = c.insights?.data?.[0] ?? {};
+      const spend_cents = toCents(ins.spend);
+      const impressions = Number(ins.impressions ?? 0) || 0;
+      const clicks = Number(ins.clicks ?? 0) || 0;
+      const reach = Number(ins.reach ?? 0) || 0;
+      const purchases = Math.round(sumActions(ins.actions));
+      const purchase_value_cents = Math.round(sumActions(ins.action_values) * 100);
+      return {
+        id: c.id,
+        name: c.name,
+        status: c.status,
+        spend_cents,
+        impressions,
+        clicks,
+        reach,
+        ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+        cpc_cents: clicks > 0 ? Math.round(spend_cents / clicks) : 0,
+        purchases,
+        purchase_value_cents,
+        roas: spend_cents > 0 ? purchase_value_cents / spend_cents : null,
+      };
+    });
+    setCached(cacheKey, rows);
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+export function metaAdsConfigured(): boolean {
+  return Boolean(process.env.META_ADS_ACCESS_TOKEN);
+}
+
 export interface MetaAdsAccountSummary {
   spend_last_7d: number;
   spend_mtd: number;

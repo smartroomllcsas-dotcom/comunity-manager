@@ -79,7 +79,7 @@ export default async function OsGoalsPage() {
         <div>
           <h1 className="page-title">{t('title')}</h1>
           <div className="page-sub">
-            Sentinel corre cada 15 min · {goals.length} objetivos registrados
+            Se evalúan cada 15 min · {goals.length} objetivos registrados
           </div>
         </div>
       </div>
@@ -89,7 +89,7 @@ export default async function OsGoalsPage() {
         <EmptyState
           icon={Target}
           title="Define tu primer objetivo"
-          description="Los objetivos se evalúan cada 15 min. Si una métrica se sale del rango (SLA de respuesta, budget diario, alcance), el sentinel notifica y escalata según tu política."
+          description="Los objetivos se evalúan cada 15 min. Si una métrica se sale del rango (SLA de respuesta, budget diario, alcance), el sistema te notifica y escala según tu política."
           action={{ label: 'Crear objetivo', href: '/es/os/goals/new' }}
           secondary={{ label: 'Ver ejemplos', href: '/es/os/reference' }}
         />

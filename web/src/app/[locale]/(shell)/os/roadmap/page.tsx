@@ -51,7 +51,7 @@ export default function OsRoadmapPage() {
               borderColor: 'var(--border)',
               background:
                 phase.status === 'in_progress'
-                  ? 'linear-gradient(180deg, oklch(70% 0.14 250 / 0.08), var(--surface-2))'
+                  ? 'linear-gradient(180deg, color-mix(in oklch, var(--os-accent) 8%, transparent), var(--surface-2))'
                   : 'var(--surface-2)',
             }}
           >
@@ -60,7 +60,7 @@ export default function OsRoadmapPage() {
                 className="rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider"
                 style={
                   phase.status === 'in_progress'
-                    ? { background: 'oklch(70% 0.14 250 / 0.25)', color: 'oklch(85% 0.14 250)' }
+                    ? { background: 'color-mix(in oklch, var(--os-accent) 25%, transparent)', color: 'oklch(85% 0.14 250)' }
                     : { background: 'var(--surface-3, #1f2937)', color: 'var(--text-2)' }
                 }
               >
@@ -77,7 +77,7 @@ export default function OsRoadmapPage() {
                     className="flex h-4 w-4 items-center justify-center rounded-full"
                     style={
                       item.done
-                        ? { background: 'oklch(70% 0.16 145)', color: 'white' }
+                        ? { background: 'var(--os-ok)', color: 'white' }
                         : { border: '1.5px solid var(--border)' }
                     }
                   >

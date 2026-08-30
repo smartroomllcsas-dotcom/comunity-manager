@@ -163,8 +163,8 @@ export function EditorialPipeline() {
     }));
     return [
       { name: 'Drafts', tone: 'oklch(70% 0.05 250)', items: draftCards },
-      { name: 'Programados', tone: 'oklch(70% 0.14 250)', items: scheduled },
-      { name: 'Publicados', tone: 'oklch(70% 0.16 145)', items: published },
+      { name: 'Programados', tone: 'var(--os-accent)', items: scheduled },
+      { name: 'Publicados', tone: 'var(--os-ok)', items: published },
     ];
   }, [posts, drafts]);
 
@@ -177,7 +177,7 @@ export function EditorialPipeline() {
         {loading ? <span className="text-[11px]" style={{ color: 'var(--text-2)' }}>Cargando…</span> : null}
       </div>
       {err ? (
-        <div className="mb-2 text-[11px]" style={{ color: 'oklch(70% 0.18 20)' }}>
+        <div className="mb-2 text-[11px]" style={{ color: 'var(--os-err)' }}>
           Error: {err}
         </div>
       ) : null}

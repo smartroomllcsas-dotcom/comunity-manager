@@ -7,16 +7,42 @@ import { BrandAccountPicker } from "@/components/whatsapp/cloud/BrandAccountPick
 import { TemplateForm } from "@/components/whatsapp/cloud/TemplateForm";
 import type { TemplateFormValue } from "@/components/whatsapp/cloud/TemplateForm";
 import { useActiveBrand } from "@/hooks/useActiveBrand";
+import {
+  TEMPLATE_PRESETS,
+  PRESET_GROUP_LABELS,
+  buildPreset,
+  type PresetGroup,
+} from "@/lib/whatsapp/cloud/template-presets";
 
 export const dynamic = "force-dynamic";
+
+const PRESET_GROUP_ORDER: PresetGroup[] = [
+  "leads_meta",
+  "bienvenida",
+  "seguimiento",
+  "nurture",
+  "operativa",
+];
 
 export default function NewTemplatePage() {
   const router = useRouter();
   const params = useSearchParams();
-  const { activeClientId } = useActiveBrand();
+  const { activeClientId, activeClient } = useActiveBrand();
   const [clientId, setClientId] = useState<string | null>(params.get("clientId") ?? activeClientId);
   const [accountId, setAccountId] = useState<string | null>(params.get("accountId"));
   const [submitting, setSubmitting] = useState(false);
+  const [presetInitial, setPresetInitial] = useState<TemplateFormValue | null>(null);
+  const [presetKey, setPresetKey] = useState<string>("manual");
+  const [presetNonce, setPresetNonce] = useState(0);
+  const [showPresets, setShowPresets] = useState(true);
+
+  // Al cambiar de marca, el preset precargado quedaría con el nombre de la
+  // marca anterior → resetear a manual para evitar enviar texto equivocado.
+  useEffect(() => {
+    setPresetInitial(null);
+    setPresetKey("manual");
+    setPresetNonce((n) => n + 1);
+  }, [clientId]);
 
   // Adopta switcher global si no hay override en URL. El provider detecta
   // ?clientId= en la URL cuando pasa, por lo que no necesitamos notificarlo
@@ -91,7 +117,81 @@ export default function NewTemplatePage() {
             </p>
           )}
         </div>
-        <TemplateForm submitting={submitting} onSubmit={handleSubmit} />
+        <div className="rounded-lg border border-[#2d333b] bg-[#161b22] p-4">
+          <button
+            type="button"
+            onClick={() => setShowPresets((s) => !s)}
+            className="flex w-full items-center justify-between text-sm font-medium text-white"
+          >
+            <span>
+              Plantillas prediseñadas{" "}
+              <span className="text-[#8b949e] font-normal">
+                ({TEMPLATE_PRESETS.length} modelos{activeClient ? ` · ${activeClient.name}` : ""})
+              </span>
+            </span>
+            <span className="text-[#8b949e]">{showPresets ? "▾" : "▸"}</span>
+          </button>
+          {showPresets && (
+            <div className="mt-3 space-y-4">
+              {PRESET_GROUP_ORDER.map((group) => {
+                const items = TEMPLATE_PRESETS.filter((p) => p.group === group);
+                if (items.length === 0) return null;
+                return (
+                  <div key={group}>
+                    <div className="text-xs uppercase tracking-wider text-[#8b949e] mb-1.5">
+                      {PRESET_GROUP_LABELS[group]}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                      {items.map((p) => {
+                        const active = presetKey === p.key;
+                        return (
+                          <button
+                            key={p.key}
+                            type="button"
+                            onClick={() => {
+                              setPresetInitial(buildPreset(p, activeClient?.name ?? ""));
+                              setPresetKey(p.key);
+                              setPresetNonce((n) => n + 1);
+                            }}
+                            className={`text-left rounded-md border p-2.5 transition-colors ${
+                              active
+                                ? "border-emerald-500 bg-emerald-500/10"
+                                : "border-[#2d333b] bg-[#0d1117] hover:border-[#8b949e]"
+                            }`}
+                          >
+                            <div className="text-[13px] font-medium text-white">{p.label}</div>
+                            <div className="text-xs text-[#8b949e] mt-0.5 line-clamp-2">
+                              {p.description}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+              {presetKey !== "manual" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPresetInitial(null);
+                    setPresetKey("manual");
+                    setPresetNonce((n) => n + 1);
+                  }}
+                  className="text-xs text-[#8b949e] hover:text-white underline"
+                >
+                  Limpiar y empezar desde cero
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+        <TemplateForm
+          key={`${presetKey}-${presetNonce}`}
+          initial={presetInitial ?? undefined}
+          submitting={submitting}
+          onSubmit={handleSubmit}
+        />
       </div>
     </div>
   );

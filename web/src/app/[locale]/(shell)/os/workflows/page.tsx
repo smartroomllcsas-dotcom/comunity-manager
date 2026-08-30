@@ -30,7 +30,7 @@ export default async function WorkflowsPage() {
         <Link
           href="/os/workflows/new"
           className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors"
-          style={{ background: 'oklch(70% 0.14 250)', color: 'white' }}
+          style={{ background: 'var(--os-accent)', color: 'white' }}
         >
           <Plus className="h-4 w-4" /> New Workflow
         </Link>

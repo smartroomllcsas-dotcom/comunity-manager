@@ -57,10 +57,10 @@ function ago(unix: number): string {
 function ConnectorPill({ state, note }: { state: ConnectorState; note?: string }) {
   const color =
     state === 'live'
-      ? { bg: 'rgba(16,185,129,0.12)', fg: '#10b981', label: 'live' }
+      ? { bg: 'rgba(16,185,129,0.12)', fg: '#10b981', label: 'activo' }
       : state === 'error'
       ? { bg: 'rgba(244,63,94,0.12)', fg: '#f43f5e', label: 'error' }
-      : { bg: 'rgba(148,163,184,0.15)', fg: 'var(--text-2)', label: 'not configured' };
+      : { bg: 'rgba(148,163,184,0.15)', fg: 'var(--text-2)', label: 'sin configurar' };
 
   return (
     <span
@@ -318,8 +318,8 @@ export default async function OsFinancesPage() {
 
       <p className="mt-6 text-[11px]" style={{ color: 'var(--text-2)' }}>
         <DollarSign className="mr-1 inline h-3 w-3" />
-        Los procesadores sin llave en el entorno muestran <em>not configured</em> — nunca fingimos un
-        cero como si fuera ingreso real.
+        Los procesadores sin llave en el entorno se muestran como <em>sin configurar</em> — nunca
+        mostramos un cero como si fuera ingreso real.
       </p>
     </main>
   );

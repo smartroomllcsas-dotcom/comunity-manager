@@ -23,7 +23,7 @@ interface QuickAction {
 const QUICK_ACTIONS: QuickAction[] = [
   { href: '/es/os/comms',        icon: Inbox,   label: 'Abrir inbox',    description: 'Ver conversaciones' },
   { href: '/es/os/agents',       icon: Bot,     label: 'Crear agente',   description: 'Nuevo autómata' },
-  { href: '/es/os/goals',        icon: Target,  label: 'Nuevo goal',     description: 'Standing sentinel' },
+  { href: '/es/os/goals',        icon: Target,  label: 'Nuevo objetivo', description: 'Objetivo permanente' },
   { href: '/es/os/integrations', icon: Zap,     label: 'Conectar canal', description: 'Meta · WA · Slack' },
 ];
 
@@ -159,7 +159,7 @@ export default async function OsConsolePage() {
         <span><kbd>g</kbd> <kbd>c</kbd> comms</span>
         <div className="right">
           <span>
-            flag: os-shell <Users className="inline h-3 w-3" />
+            Community OS <Users className="inline h-3 w-3" />
           </span>
         </div>
       </div>

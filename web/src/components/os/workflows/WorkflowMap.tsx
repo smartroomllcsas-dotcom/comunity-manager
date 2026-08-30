@@ -35,7 +35,7 @@ type StepKind = WorkflowStep['kind'];
 const KIND_COLOR: Record<StepKind, string> = {
   trigger: 'var(--ok)',
   condition: 'var(--warn)',
-  action: 'var(--os-accent, oklch(70% 0.14 250))',
+  action: 'var(--os-accent)',
   wait: 'var(--text-3)',
   branch: '#a78bfa',
 };
@@ -129,7 +129,7 @@ function Edge({ label }: { label: string | null }) {
       {label && (
         <span
           className="mb-1 whitespace-nowrap font-mono text-[9px] uppercase tracking-wide"
-          style={{ color: 'var(--os-accent, oklch(70% 0.14 250))' }}
+          style={{ color: 'var(--os-accent)' }}
         >
           {label}
         </span>
@@ -207,8 +207,8 @@ export function WorkflowMap({ workflows }: { workflows: Workflow[] }) {
               onClick={() => setSelectedId(w.id)}
               className="rounded-md border px-3 py-1.5 font-mono text-[11px] transition-colors"
               style={{
-                borderColor: on ? 'var(--os-accent, oklch(70% 0.14 250))' : 'var(--border, #333)',
-                color: on ? 'var(--os-accent, oklch(70% 0.14 250))' : 'var(--text-3, #999)',
+                borderColor: on ? 'var(--os-accent)' : 'var(--border, #333)',
+                color: on ? 'var(--os-accent)' : 'var(--text-3, #999)',
               }}
             >
               {w.name}
@@ -227,8 +227,8 @@ export function WorkflowMap({ workflows }: { workflows: Workflow[] }) {
             href="/os/workflows/new"
             className="flex items-center gap-1 rounded-md border px-2.5 py-1.5 font-mono text-[11px] transition-colors"
             style={{
-              borderColor: 'var(--os-accent, oklch(70% 0.14 250))',
-              color: 'var(--os-accent, oklch(70% 0.14 250))',
+              borderColor: 'var(--os-accent)',
+              color: 'var(--os-accent)',
             }}
           >
             <Plus className="h-3 w-3" /> New Workflow

@@ -86,7 +86,7 @@ export function AiWriterPanel({
       style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }}
     >
       <div className="flex items-center gap-2 mb-3">
-        <Sparkles className="h-4 w-4" style={{ color: 'oklch(75% 0.18 60)' }} />
+        <Sparkles className="h-4 w-4" style={{ color: 'var(--os-warn)' }} />
         <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-1)' }}>
           AI Writer
         </div>
@@ -115,7 +115,7 @@ export function AiWriterPanel({
       </div>
 
       {err ? (
-        <div className="mt-2 text-[11px]" style={{ color: 'oklch(70% 0.18 20)' }}>
+        <div className="mt-2 text-[11px]" style={{ color: 'var(--os-err)' }}>
           {err}
         </div>
       ) : null}
@@ -134,7 +134,7 @@ export function AiWriterPanel({
             type="button"
             onClick={() => onReplace(output)}
             className="flex-1 rounded-md px-2 py-1.5 text-[11px] font-semibold"
-            style={{ background: 'oklch(70% 0.14 250)', color: 'white' }}
+            style={{ background: 'var(--os-accent)', color: 'white' }}
           >
             Reemplazar post
           </button>

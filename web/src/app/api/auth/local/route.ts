@@ -7,6 +7,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { hashPassword, verifyPassword } from '@/lib/auth/password'
 import { clientIp, rateLimitWithWhitelist } from '@/lib/rate-limit'
 import { isGlobalAdminEmail } from '@/lib/platform-admin'
+import { SESSION_SIG_COOKIE, signSession } from '@/lib/session-sig'
 
 const SESSION_KEY = 'cm_user_id'
 const LOGIN_RATE_LIMIT = 5
@@ -347,6 +348,17 @@ async function bridgeSmarttalkSession(
     path: '/',
     maxAge: 60 * 60 * 24 * 30,
   })
+
+  const sig = signSession(cmUser.id)
+  if (sig) {
+    response.cookies.set(SESSION_SIG_COOKIE, sig, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 30,
+    })
+  }
 
   return null
 }
@@ -705,7 +717,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ user: null, error: 'Unsupported action' }, { status: 400 })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unexpected auth error'
-    return NextResponse.json({ user: null, error: message }, { status: 500 })
+    console.error('[auth/local] error', error instanceof Error ? error.message : error)
+    return NextResponse.json({ user: null, error: 'Error de autenticación. Intenta de nuevo.' }, { status: 500 })
   }
 }

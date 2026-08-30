@@ -24,10 +24,10 @@ export function EmptyState({ icon: Icon, title, description, action, secondary }
         className="flex h-14 w-14 items-center justify-center rounded-full border"
         style={{
           borderColor: 'var(--border)',
-          background: 'linear-gradient(180deg, oklch(70% 0.14 250 / 0.12), transparent 70%)',
+          background: 'linear-gradient(180deg, var(--os-accent-tint), transparent 70%)',
         }}
       >
-        <Icon className="h-6 w-6" style={{ color: 'oklch(70% 0.14 250)' }} />
+        <Icon className="h-6 w-6" style={{ color: 'var(--os-accent)' }} />
       </div>
       <h2 className="text-lg font-semibold" style={{ color: 'var(--text-1)' }}>
         {title}
@@ -39,7 +39,7 @@ export function EmptyState({ icon: Icon, title, description, action, secondary }
             <Link
               href={action.href}
               className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors"
-              style={{ background: 'oklch(70% 0.14 250)', color: 'white' }}
+              style={{ background: 'var(--os-accent)', color: 'white' }}
             >
               {action.label}
             </Link>

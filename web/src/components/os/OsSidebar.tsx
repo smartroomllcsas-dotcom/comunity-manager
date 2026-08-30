@@ -65,6 +65,12 @@ export function OsSidebar() {
           </svg>
           Analytics
         </Link>
+        <Link href="/es/os/ads" className="nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+            <path d="M3 11l18-8-8 18-2-8-8-2z" />
+          </svg>
+          Meta Ads
+        </Link>
         <Link href="/reports" className="nav-item">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
             <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" />

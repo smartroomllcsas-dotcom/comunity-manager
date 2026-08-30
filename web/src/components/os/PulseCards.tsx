@@ -86,7 +86,7 @@ export function PulseCards({ agents, connectors, goals, messagesToday = 0 }: Pul
 
       {/* Standing goals */}
       <div className="card">
-        <div className="card-label">Standing goals</div>
+        <div className="card-label">Objetivos permanentes</div>
         <div className="card-metric num">
           <span style={{ color: 'var(--os-ok)' }}>{okGoals || 5}</span>
           <span className="sep">/</span>

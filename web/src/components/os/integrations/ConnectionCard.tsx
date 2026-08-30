@@ -13,9 +13,9 @@ const PILL_STYLES: Record<ProbeStatus, string> = {
 };
 
 const PILL_LABELS: Record<ProbeStatus, string> = {
-  live: 'Live',
-  configured: 'Configured',
-  not_configured: 'Not configured',
+  live: 'Activo',
+  configured: 'Configurado',
+  not_configured: 'Sin configurar',
   error: 'Error',
 };
 

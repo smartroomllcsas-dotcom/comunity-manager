@@ -45,7 +45,7 @@ export function GoalsGrid({ goals }: GoalsGridProps) {
   return (
     <section>
       <div className="section-head">
-        <div className="section-title">Standing goals · sentinel</div>
+        <div className="section-title">Objetivos permanentes</div>
         <div className="section-meta">verificados cada 15 min</div>
       </div>
       <div className="goals-grid">

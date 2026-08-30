@@ -54,7 +54,7 @@ export default function OsReferencePage() {
             <div className="flex items-start gap-3">
               <div
                 className="flex h-10 w-10 items-center justify-center rounded-lg shrink-0"
-                style={{ background: 'oklch(70% 0.14 250 / 0.12)', color: 'oklch(70% 0.14 250)' }}
+                style={{ background: 'var(--os-accent-tint)', color: 'var(--os-accent)' }}
               >
                 <ref.icon className="h-5 w-5" />
               </div>
@@ -79,7 +79,7 @@ export default function OsReferencePage() {
                 <Link
                   href={ref.href}
                   className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium"
-                  style={{ color: 'oklch(70% 0.14 250)' }}
+                  style={{ color: 'var(--os-accent)' }}
                 >
                   Ir a {ref.label} →
                 </Link>
@@ -93,7 +93,7 @@ export default function OsReferencePage() {
         className="mt-8 flex items-start gap-3 rounded-xl border p-4"
         style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }}
       >
-        <BookOpen className="h-5 w-5 shrink-0 mt-0.5" style={{ color: 'oklch(70% 0.14 250)' }} />
+        <BookOpen className="h-5 w-5 shrink-0 mt-0.5" style={{ color: 'var(--os-accent)' }} />
         <div className="text-sm" style={{ color: 'var(--text-2)' }}>
           <span className="font-semibold" style={{ color: 'var(--text-1)' }}>
             Filosofía del OS:

@@ -555,6 +555,9 @@ export async function handleMetaCallback(request: NextRequest, callbackPath: str
           ? String((err as { message?: unknown }).message || 'Error desconocido')
           : 'Error desconocido'
     console.error('Meta OAuth error:', msg)
-    return NextResponse.redirect(`${appUrl}/clients?meta_error=${encodeURIComponent(msg)}`)
+    // No propagar el mensaje crudo (puede contener detalles internos de Meta/DB).
+    return NextResponse.redirect(
+      `${appUrl}/clients?meta_error=${encodeURIComponent('No se pudo completar la conexión con Meta. Intenta de nuevo.')}`
+    )
   }
 }

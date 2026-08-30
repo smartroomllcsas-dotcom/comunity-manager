@@ -85,7 +85,7 @@ export function PillarsManager() {
         <h2 className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Pilares de contenido</h2>
         {loading ? <span className="text-[11px]" style={{ color: 'var(--text-2)' }}>Cargando…</span> : null}
       </div>
-      {err ? <div className="mb-2 text-[11px]" style={{ color: 'oklch(70% 0.18 20)' }}>Error: {err}</div> : null}
+      {err ? <div className="mb-2 text-[11px]" style={{ color: 'var(--os-err)' }}>Error: {err}</div> : null}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
         {pillars.map((p) => (
           <article
@@ -94,7 +94,7 @@ export function PillarsManager() {
             style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }}
           >
             <div className="flex items-center gap-2 mb-2">
-              <span className="h-2 w-2 rounded-full" style={{ background: p.color ?? 'oklch(70% 0.14 250)' }} />
+              <span className="h-2 w-2 rounded-full" style={{ background: p.color ?? 'var(--os-accent)' }} />
               <input
                 defaultValue={p.name}
                 onBlur={(e) => e.target.value !== p.name && updatePillar(p.id, { name: e.target.value })}
@@ -178,7 +178,7 @@ export function PillarsManager() {
             onClick={create}
             disabled={creating || !draft.name.trim()}
             className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-semibold disabled:opacity-50"
-            style={{ background: 'oklch(70% 0.14 250)', color: 'white' }}
+            style={{ background: 'var(--os-accent)', color: 'white' }}
           >
             <Plus className="h-3 w-3" /> {creating ? 'Creando…' : 'Crear'}
           </button>

@@ -32,6 +32,7 @@ export async function POST(
       const ze = e as z.ZodError;
       return NextResponse.json({ error: 'invalid_input', details: ze.issues }, { status: 400 });
     }
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    console.error('[POST /api/os/agents/:id/run]', e);
+    return NextResponse.json({ error: 'internal_error' }, { status: 500 });
   }
 }

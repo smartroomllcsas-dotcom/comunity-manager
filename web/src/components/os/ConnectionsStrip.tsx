@@ -13,10 +13,10 @@ function statusClass(status: ConnectorStatus): string {
 }
 
 function statusLabel(status: ConnectorStatus): string {
-  if (status === 'live') return 'Live';
-  if (status === 'configured') return 'Configured';
+  if (status === 'live') return 'Activo';
+  if (status === 'configured') return 'Configurado';
   if (status === 'error') return 'Error';
-  return 'Not conf.';
+  return 'Sin configurar';
 }
 
 export function ConnectionsStrip({ connectors }: ConnectionsStripProps) {
@@ -29,11 +29,11 @@ export function ConnectionsStrip({ connectors }: ConnectionsStripProps) {
   return (
     <section className="connections">
       <div className="connections-head">
-        <div className="panel-title">Conexiones · honest status</div>
+        <div className="panel-title">Conexiones · estado real</div>
         <div className="connections-meta">
-          <span><strong>{live}</strong> live</span>
-          <span><strong>{configured}</strong> configured</span>
-          <span><strong>{notConf}</strong> not configured</span>
+          <span><strong>{live}</strong> activas</span>
+          <span><strong>{configured}</strong> configuradas</span>
+          <span><strong>{notConf}</strong> sin configurar</span>
         </div>
       </div>
       <div className="conn-grid">
@@ -48,7 +48,7 @@ export function ConnectionsStrip({ connectors }: ConnectionsStripProps) {
         {rows.map((conn) => {
           const displayName = conn.provider || conn.id;
           const abbr = displayName.charAt(0).toUpperCase();
-          const meta = conn.lastError ?? (conn.status === 'not_configured' ? 'connect →' : '');
+          const meta = conn.lastError ?? (conn.status === 'not_configured' ? 'conectar →' : '');
 
           return (
             <div key={conn.id} className="conn">

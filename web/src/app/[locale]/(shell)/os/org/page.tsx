@@ -5,14 +5,14 @@ const HIERARCHY = [
   {
     role: 'Operator',
     icon: Crown,
-    accent: 'oklch(80% 0.15 60)',
+    accent: 'var(--os-warn)',
     person: 'Leonel',
     scope: 'Decisiones estratégicas · goals top-level · política',
   },
   {
     role: 'Conductor',
     icon: Star,
-    accent: 'oklch(70% 0.14 250)',
+    accent: 'var(--os-accent)',
     person: 'Auto-responder (agente)',
     scope: 'Coordina agentes · asigna tareas · escala a humano',
   },
@@ -121,7 +121,7 @@ export default function OsOrgPage() {
         <Link
           href="/es/os/agents"
           className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium"
-          style={{ color: 'oklch(70% 0.14 250)' }}
+          style={{ color: 'var(--os-accent)' }}
         >
           Ver roster completo →
         </Link>

@@ -277,8 +277,8 @@ export function PostComposerPro({
                   onClick={() => togglePlatform(p.id)}
                   className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors"
                   style={{
-                    borderColor: on ? 'oklch(70% 0.14 250)' : 'var(--border)',
-                    background: on ? 'oklch(70% 0.14 250 / 0.15)' : 'transparent',
+                    borderColor: on ? 'var(--os-accent)' : 'var(--border)',
+                    background: on ? 'color-mix(in oklch, var(--os-accent) 15%, transparent)' : 'transparent',
                     color: on ? 'oklch(80% 0.14 250)' : 'var(--text-2)',
                   }}
                 >
@@ -306,8 +306,8 @@ export function PostComposerPro({
                       onClick={() => toggleAccount(a.id)}
                       className="rounded-md border px-2 py-0.5 text-[10.5px]"
                       style={{
-                        borderColor: on ? 'oklch(70% 0.16 145)' : 'var(--border)',
-                        background: on ? 'oklch(70% 0.16 145 / 0.12)' : 'transparent',
+                        borderColor: on ? 'var(--os-ok)' : 'var(--border)',
+                        background: on ? 'var(--os-ok-tint)' : 'transparent',
                         color: on ? 'oklch(80% 0.16 145)' : 'var(--text-2)',
                       }}
                     >
@@ -392,7 +392,7 @@ export function PostComposerPro({
               onClick={publishNow}
               disabled={busy !== 'idle'}
               className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
-              style={{ background: 'oklch(70% 0.14 250)', color: 'white' }}
+              style={{ background: 'var(--os-accent)', color: 'white' }}
             >
               <Send className="h-3.5 w-3.5" /> {busy === 'publishing' ? 'Publicando…' : 'Publish Now'}
             </button>
@@ -401,7 +401,7 @@ export function PostComposerPro({
           {msg ? (
             <div
               className="mt-2 text-[11px]"
-              style={{ color: msg.tone === 'ok' ? 'oklch(70% 0.16 145)' : 'oklch(70% 0.18 20)' }}
+              style={{ color: msg.tone === 'ok' ? 'var(--os-ok)' : 'var(--os-err)' }}
             >
               {msg.text}
             </div>
@@ -438,7 +438,7 @@ export function PostComposerPro({
                     <div className="inline-flex items-center gap-1.5 text-[12px] font-medium" style={{ color: 'var(--text-1)' }}>
                       <p.icon className="h-3.5 w-3.5" /> {p.label}
                     </div>
-                    <div className="text-[10px]" style={{ color: over ? 'oklch(70% 0.18 20)' : 'var(--text-2)' }}>
+                    <div className="text-[10px]" style={{ color: over ? 'var(--os-err)' : 'var(--text-2)' }}>
                       {len} / {p.limit}
                     </div>
                   </div>

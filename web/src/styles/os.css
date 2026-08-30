@@ -1,7 +1,7 @@
 /* Hallmark · macrostructure: Workbench · theme: Cobalt · tone: technical/editorial · anchor: cool-blue */
 /* Community OS — design tokens + utility classes. Scoped to .os-shell to avoid leaking into CM routes. */
 
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+/* Fonts se cargan via next/font/google en el layout del OS shell (variables --font-*). */
 
 :root {
   /* — Paper stack (dark-first) — */
@@ -20,6 +20,13 @@
   --os-line:       oklch(22% 0.012 250);
   --os-line-2:     oklch(30% 0.018 250);
 
+  /* — Compat aliases (os/content components reference these) — */
+  --surface-1:     var(--os-paper-2);
+  --surface-2:     var(--os-paper-3);
+  --text-1:        var(--os-ink);
+  --text-2:        var(--os-ink-2);
+  --border:        var(--os-line);
+
   /* — Accent (variable per-org via --os-accent-hue) — */
   --os-accent-hue: 250;
   --os-accent:     oklch(70% 0.14 var(--os-accent-hue));
@@ -36,9 +43,9 @@
   --os-err-tint:   color-mix(in oklch, var(--os-err) 14%, transparent);
 
   /* — Type — */
-  --os-font-display: "Space Grotesk", "Inter Tight", ui-sans-serif, system-ui, sans-serif;
-  --os-font-body:    "Inter", ui-sans-serif, system-ui, sans-serif;
-  --os-font-mono:    "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  --os-font-display: var(--font-space-grotesk, "Space Grotesk"), "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+  --os-font-body:    var(--font-inter, "Inter"), ui-sans-serif, system-ui, sans-serif;
+  --os-font-mono:    var(--font-jetbrains-mono, "JetBrains Mono"), "SF Mono", ui-monospace, monospace;
 
   --os-text-xs:   11px;
   --os-text-sm:   12px;

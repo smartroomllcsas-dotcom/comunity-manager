@@ -22,8 +22,8 @@ export async function POST() {
     const repo = await getOSRepositoryForRequest();
     const stats = await ingestForOrg(repo, orgId);
     return NextResponse.json({ ok: true, stats });
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('[POST /api/os/brain/ingest]', e);
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return NextResponse.json({ error: 'internal_error' }, { status: 500 });
   }
 }

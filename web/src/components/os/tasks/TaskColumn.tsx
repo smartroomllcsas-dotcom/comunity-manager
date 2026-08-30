@@ -35,7 +35,7 @@ export function TaskColumn({
       onDrop={onDrop}
       className="flex min-h-[260px] flex-col gap-2.5 rounded-xl border p-3 transition-colors"
       style={{
-        borderColor: isOver ? 'var(--os-accent, oklch(70% 0.14 250))' : 'var(--border, #333)',
+        borderColor: isOver ? 'var(--os-accent)' : 'var(--border, #333)',
         background: isOver ? 'var(--surface-2, transparent)' : 'var(--surface, transparent)',
       }}
       data-status={status}

@@ -117,10 +117,8 @@ export async function POST(request: NextRequest) {
       components: payload.components,
     });
   } catch (err) {
-    return NextResponse.json(
-      { error: friendlyWhatsAppError(err), raw: err instanceof Error ? err.message : String(err) },
-      { status: 400 }
-    );
+    console.error("[whatsapp/cloud/templates] Meta create error", err);
+    return NextResponse.json({ error: friendlyWhatsAppError(err) }, { status: 400 });
   }
 
   // Persistir local (upsert por unique (account, name, language))

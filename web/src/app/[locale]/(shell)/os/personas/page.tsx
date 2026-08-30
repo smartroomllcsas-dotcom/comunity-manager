@@ -46,9 +46,9 @@ export default function OsPersonasPage() {
             key={tpl.slug}
             className="rounded-xl border p-5 transition-colors"
             style={{
-              borderColor: tpl.active ? 'oklch(70% 0.14 250)' : 'var(--border)',
+              borderColor: tpl.active ? 'var(--os-accent)' : 'var(--border)',
               background: tpl.active
-                ? 'linear-gradient(180deg, oklch(70% 0.14 250 / 0.08), var(--surface-2))'
+                ? 'linear-gradient(180deg, color-mix(in oklch, var(--os-accent) 8%, transparent), var(--surface-2))'
                 : 'var(--surface-2)',
             }}
           >
@@ -64,7 +64,7 @@ export default function OsPersonasPage() {
               {tpl.active && (
                 <span
                   className="rounded-full px-2.5 py-0.5 text-[11px] font-bold"
-                  style={{ background: 'oklch(70% 0.14 250)', color: 'white' }}
+                  style={{ background: 'var(--os-accent)', color: 'white' }}
                 >
                   ACTIVA
                 </span>
@@ -98,7 +98,7 @@ export default function OsPersonasPage() {
         className="mt-8 flex items-center gap-3 rounded-xl border p-4"
         style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }}
       >
-        <Users2 className="h-5 w-5 shrink-0" style={{ color: 'oklch(70% 0.14 250)' }} />
+        <Users2 className="h-5 w-5 shrink-0" style={{ color: 'var(--os-accent)' }} />
         <div className="text-sm" style={{ color: 'var(--text-2)' }}>
           <span className="font-semibold" style={{ color: 'var(--text-1)' }}>¿Necesitas un persona custom?</span>{' '}
           Escríbenos y armamos el template para tu vertical.

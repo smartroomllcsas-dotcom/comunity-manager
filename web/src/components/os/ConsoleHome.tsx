@@ -33,8 +33,8 @@ export function ConsoleHome({ agents, activity, connectors, goals, orgName }: Co
         <span><kbd>g</kbd> <kbd>g</kbd> goals</span>
         <div className="right">
           <span>org: <strong>{orgName ?? '—'}</strong></span>
-          <span>flag: os-shell ✓</span>
-          <span>region: cle1</span>
+          <span>Community OS ✓</span>
+          <span>región: cle1</span>
         </div>
       </div>
     </>
