@@ -30,6 +30,24 @@ export function BrandSwitcher() {
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
+  const filtered = useMemo(
+    () =>
+      query.trim()
+        ? clients.filter((c) => (c.name ?? "").toLowerCase().includes(query.trim().toLowerCase()))
+        : clients,
+    [clients, query]
+  );
+  // Ref viva para el handler keyboard (que no se re-crea por cada render).
+  const filteredRef = useRef(filtered);
+  filteredRef.current = filtered;
+
+  // Al abrir, resaltar la marca actual (o la primera).
+  useEffect(() => {
+    if (open) {
+      setHighlightId(activeClientId ?? filtered[0]?.id ?? null);
+    }
+  }, [open, activeClientId, filtered]);
+
   // Cerrar al clic fuera + Escape + navegación con flechas y Enter.
   useEffect(() => {
     if (!open) return;
@@ -96,24 +114,6 @@ export function BrandSwitcher() {
       </div>
     );
   }
-
-  const filtered = useMemo(
-    () =>
-      query.trim()
-        ? clients.filter((c) => (c.name ?? "").toLowerCase().includes(query.trim().toLowerCase()))
-        : clients,
-    [clients, query]
-  );
-  // Ref viva para el handler keyboard (que no se re-crea por cada render).
-  const filteredRef = useRef(filtered);
-  filteredRef.current = filtered;
-
-  // Al abrir, resaltar la marca actual (o la primera).
-  useEffect(() => {
-    if (open) {
-      setHighlightId(activeClientId ?? filtered[0]?.id ?? null);
-    }
-  }, [open, activeClientId, filtered]);
 
   function pick(id: string) {
     const name = clients.find((c) => c.id === id)?.name ?? id.slice(0, 8);
