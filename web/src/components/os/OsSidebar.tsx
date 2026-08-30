@@ -52,6 +52,12 @@ export function OsSidebar() {
           </svg>
           Contacts
         </Link>
+        <Link href="/settings/channels" className="nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+            <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
+          </svg>
+          Lead Ads
+        </Link>
         <Link href="/analytics" className="nav-item">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
             <path d="M3 3v18h18" />
