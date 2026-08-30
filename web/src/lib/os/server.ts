@@ -35,3 +35,15 @@ export async function requireOrgIdFromRequest(): Promise<string> {
   }
   return entities.orgId;
 }
+
+/**
+ * Active org (brand) for the current request — respects the BrandSwitcher
+ * cookie via identify(). Returns nulls when unauthenticated (no throw).
+ */
+export async function getActiveOrgFromRequest(): Promise<{
+  orgId: string | null;
+  orgName: string | null;
+}> {
+  const entities = await identify();
+  return { orgId: entities?.orgId ?? null, orgName: entities?.orgName ?? null };
+}

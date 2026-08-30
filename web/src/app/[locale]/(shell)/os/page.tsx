@@ -1,7 +1,7 @@
 import { getTranslations } from 'next-intl/server';
 import Link from 'next/link';
 import { Inbox, Users, Zap, TrendingUp, MessageSquare, Plus, Bot, Target } from 'lucide-react';
-import { getOSRepositoryForRequest, requireOrgIdFromRequest } from '@/lib/os/server';
+import { getOSRepositoryForRequest, requireOrgIdFromRequest, getActiveOrgFromRequest } from '@/lib/os/server';
 import type { Agent, Activity, Connector, Goal } from '@/lib/os/repository';
 import { PulseCards } from '@/components/os/PulseCards';
 import { ActivityFeed } from '@/components/os/ActivityFeed';
@@ -34,6 +34,7 @@ export default async function OsConsolePage() {
   let activity: Activity[] = [];
   let connectors: Connector[] = [];
   let goals: Goal[] = [];
+  const { orgName } = await getActiveOrgFromRequest();
 
   try {
     const orgId = await requireOrgIdFromRequest();
@@ -58,7 +59,7 @@ export default async function OsConsolePage() {
         <div>
           <h1 className="page-title">{t('title')}</h1>
           <div className="page-sub">
-            {t('subtitle', { brand: 'Bliss Glamping' })}
+            {t('subtitle', { brand: orgName ?? '—' })}
           </div>
         </div>
       </div>

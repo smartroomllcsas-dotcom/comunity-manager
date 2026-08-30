@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { PresenceStack } from './PresenceStack';
+import { OsBrandSwitcher } from './OsBrandSwitcher';
 import type { PresenceUser } from '@/hooks/useOsPresence';
 
 export function OsTopbar({ orgId }: { orgId?: string }) {
@@ -51,6 +52,7 @@ export function OsTopbar({ orgId }: { orgId?: string }) {
         <span>{section}</span>
       </div>
       <div className="topbar-right">
+        <OsBrandSwitcher />
         <div className="status-pill">
           <span className="live-dot" />
           7 canales activos

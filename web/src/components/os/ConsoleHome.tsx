@@ -10,9 +10,10 @@ interface ConsoleHomeProps {
   activity: Activity[];
   connectors: Connector[];
   goals: Goal[];
+  orgName?: string | null;
 }
 
-export function ConsoleHome({ agents, activity, connectors, goals }: ConsoleHomeProps) {
+export function ConsoleHome({ agents, activity, connectors, goals, orgName }: ConsoleHomeProps) {
   return (
     <>
       <PulseCards agents={agents} connectors={connectors} goals={goals} />
@@ -31,7 +32,7 @@ export function ConsoleHome({ agents, activity, connectors, goals }: ConsoleHome
         <span><kbd>g</kbd> <kbd>a</kbd> agents</span>
         <span><kbd>g</kbd> <kbd>g</kbd> goals</span>
         <div className="right">
-          <span>org: <strong>Bliss Glamping</strong></span>
+          <span>org: <strong>{orgName ?? '—'}</strong></span>
           <span>flag: os-shell ✓</span>
           <span>region: cle1</span>
         </div>

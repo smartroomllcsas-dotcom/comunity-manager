@@ -20,6 +20,7 @@ export interface UserEntities {
   userId: string | null;
   userEmail: string | null;
   orgId: string | null;
+  orgName: string | null;
   orgIds: string[];
   betaCohorts: string[];
 }
@@ -64,6 +65,7 @@ export const identify = dedupe(async (): Promise<UserEntities> => {
       : null;
 
     let orgId: string | null = null;
+    let orgName: string | null = null;
     let orgIds: string[] = [];
     let legacyEmail: string | null = null;
 
@@ -83,11 +85,22 @@ export const identify = dedupe(async (): Promise<UserEntities> => {
       // Orgs live in public.cm_clients with FK user_id → cm_users.id
       const { data: cmClients } = await sb
         .from('cm_clients')
-        .select('id')
+        .select('id, name')
         .eq('user_id', cmUserId);
 
-      orgIds = (cmClients ?? []).map((c) => c.id as string);
-      orgId = orgIds[0] ?? null;
+      const clientRows = (cmClients ?? []) as { id: string; name: string | null }[];
+      orgIds = clientRows.map((c) => c.id);
+
+      // Marca activa: cookie del BrandSwitcher (cm_active_brand_id). La cookie NO es
+      // autoritativa — solo se respeta si el id pertenece a orgIds, cuyo ownership ya
+      // quedó validado por la query anterior (filtrada por user_id). Fallback: primera.
+      const rawActiveBrand = cookieStore.get('cm_active_brand_id')?.value;
+      const activeBrandId = rawActiveBrand ? decodeURIComponent(rawActiveBrand) : null;
+      orgId =
+        activeBrandId && orgIds.includes(activeBrandId)
+          ? activeBrandId
+          : orgIds[0] ?? null;
+      orgName = clientRows.find((c) => c.id === orgId)?.name ?? null;
     }
 
     const rawEmail = authUser?.email ?? legacyEmail;
@@ -108,11 +121,12 @@ export const identify = dedupe(async (): Promise<UserEntities> => {
       userId,
       userEmail: email,
       orgId,
+      orgName,
       orgIds,
       betaCohorts: [], // Sprint 2: query os_beta_cohorts
     };
   } catch (e) {
     console.error('[identify] threw', e instanceof Error ? e.message : String(e));
-    return { userId: null, userEmail: null, orgId: null, orgIds: [], betaCohorts: [] };
+    return { userId: null, userEmail: null, orgId: null, orgName: null, orgIds: [], betaCohorts: [] };
   }
 });
