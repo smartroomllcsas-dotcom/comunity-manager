@@ -53,6 +53,7 @@ import {
   FlaskConical,
   ServerCog,
 } from "lucide-react";
+import { BrandSwitcher } from "@/components/brand/BrandSwitcher";
 import {
   Tooltip,
   TooltipContent,
@@ -89,6 +90,7 @@ const CM_SECTIONS: NavSection[] = [
       { href: "/broadcasts", label: "Difusiones", icon: Send },
       { href: "/chatbot", label: "Chatbot", icon: Bot },
       { href: "/composer", label: "Composer", icon: PenTool },
+      { href: "/whatsapp/templates", label: "Plantillas WA", icon: FileText },
       { href: "/listening", label: "Escucha social", icon: Radio },
     ],
   },
@@ -99,6 +101,8 @@ const CM_SECTIONS: NavSection[] = [
       { href: "/settings/agents", label: "Equipo", icon: UserRoundCog },
       { href: "/settings/tags", label: "Etiquetas", icon: Tag },
       { href: "/settings/contact-fields", label: "Campos custom", icon: ClipboardList },
+      { href: "/settings/channels", label: "Lead Ads", icon: Target },
+      { href: "/es/os/ads", label: "Meta Ads", icon: Share2 },
     ],
   },
   {
@@ -370,6 +374,11 @@ export function Sidebar({ showCommunityOs = false }: SidebarProps) {
             expanded ? "px-2" : "items-center"
           )}
         >
+          {expanded && (
+            <div className="px-1 pb-1">
+              <BrandSwitcher />
+            </div>
+          )}
           {BOTTOM_ITEMS.map((item) => {
             const active = isActive(item.href);
             return (
