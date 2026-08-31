@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { SUPABASE_SERVER_HEADERS } from "./user-agent";
 
 export async function createClient() {
   const cookieStore = await cookies();
@@ -9,6 +10,7 @@ export async function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       db: { schema: "smarttalk" },
+      global: { headers: SUPABASE_SERVER_HEADERS },
       cookies: {
         getAll() {
           return cookieStore.getAll();

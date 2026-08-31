@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { SUPABASE_SERVER_HEADERS } from "./user-agent";
 
 type AdminSchema = "smarttalk" | "public";
 
@@ -9,6 +10,7 @@ export function createAdminClient(schema: AdminSchema = "smarttalk") {
     {
       auth: { autoRefreshToken: false, persistSession: false },
       db: { schema },
+      global: { headers: SUPABASE_SERVER_HEADERS },
     }
   );
 }

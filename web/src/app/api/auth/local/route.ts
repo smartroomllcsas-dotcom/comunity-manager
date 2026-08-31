@@ -4,6 +4,7 @@ import { createServerClient } from '@supabase/ssr'
 import type { CMUser } from '@/types/database'
 import { mysqlQuery, quoteId } from '@/lib/mysql'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { SUPABASE_SERVER_HEADERS } from '@/lib/supabase/user-agent'
 import { hashPassword, verifyPassword } from '@/lib/auth/password'
 import { clientIp, rateLimitWithWhitelist } from '@/lib/rate-limit'
 import { isGlobalAdminEmail } from '@/lib/platform-admin'
@@ -233,6 +234,7 @@ async function bridgeSmarttalkSession(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       db: { schema: 'smarttalk' },
+      global: { headers: SUPABASE_SERVER_HEADERS },
       cookies: {
         getAll() {
           return request.cookies.getAll()
