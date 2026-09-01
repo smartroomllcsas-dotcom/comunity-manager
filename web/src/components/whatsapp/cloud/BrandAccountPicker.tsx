@@ -22,8 +22,17 @@ export function BrandAccountPicker({
 
   useEffect(() => {
     fetch("/api/cm/clients")
-      .then((r) => r.json())
-      .then((d) => setClients(d.clients ?? d ?? []))
+      .then((r) => {
+        if (r.status === 401) {
+          window.location.assign("/login");
+          return null;
+        }
+        return r.json();
+      })
+      .then((d) => {
+        const list = Array.isArray(d?.clients) ? d.clients : Array.isArray(d) ? d : [];
+        setClients(list);
+      })
       .catch(() => setClients([]));
   }, []);
 
@@ -33,8 +42,8 @@ export function BrandAccountPicker({
       return;
     }
     fetch(`/api/whatsapp/cloud/business-accounts?clientId=${clientId}`)
-      .then((r) => r.json())
-      .then((d) => setAccounts(d.accounts ?? []))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setAccounts(Array.isArray(d?.accounts) ? d.accounts : []))
       .catch(() => setAccounts([]));
   }, [clientId]);
 
