@@ -29,6 +29,39 @@ export default function NewTemplatePage() {
     }
   }, [activeClientId, params, clientId]);
 
+  /**
+   * Graph v26 rechaza con INVALID_FORMAT las variables posicionales {{1}}
+   * (verificado 2026-09-01 contra dos WABAs distintas; sin example y con
+   * example igual). Convertimos a parámetros con nombre ({{var1}}) y
+   * generamos los example obligatorios antes de enviar a Meta.
+   */
+  function toNamedParams(components: TemplateFormValue["components"]) {
+    let hasVars = false;
+    const converted = components.map((c) => {
+      if (!c.text || !/\{\{\s*\d+\s*\}\}/.test(c.text)) return c;
+      hasVars = true;
+      const names: string[] = [];
+      const text = c.text.replace(/\{\{\s*(\d+)\s*\}\}/g, (_m, n) => {
+        const name = `var${n}`;
+        if (!names.includes(name)) names.push(name);
+        return `{{${name}}}`;
+      });
+      const example =
+        c.type === "BODY"
+          ? {
+              body_text_named_params: names.map((name, i) => ({
+                param_name: name,
+                example: `Ejemplo ${i + 1}`,
+              })),
+            }
+          : c.type === "HEADER"
+          ? { header_text: names.map((_n, i) => `Ejemplo ${i + 1}`) }
+          : undefined;
+      return { ...c, text, ...(example ? { example } : {}) };
+    });
+    return { converted, parameterFormat: hasVars ? "NAMED" : "POSITIONAL" };
+  }
+
   async function handleSubmit(v: TemplateFormValue) {
     if (!clientId || !accountId) {
       toast.error("Selecciona empresa y cuenta WhatsApp primero");
@@ -36,6 +69,7 @@ export default function NewTemplatePage() {
     }
     setSubmitting(true);
     try {
+      const { converted, parameterFormat } = toNamedParams(v.components);
       const res = await fetch("/api/whatsapp/cloud/templates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -45,7 +79,8 @@ export default function NewTemplatePage() {
           name: v.name,
           language: v.language,
           category: v.category,
-          components: v.components,
+          parameter_format: parameterFormat,
+          components: converted,
           tag: v.tag || undefined,
         }),
       });
