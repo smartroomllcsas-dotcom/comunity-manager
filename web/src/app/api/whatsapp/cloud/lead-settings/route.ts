@@ -14,6 +14,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getCmClientAccess } from "@/lib/cm-client-access";
+import { AGENT_ROLES, AGENT_TONES, AGENT_GOALS } from "@/lib/whatsapp/cloud/agent-presets";
+
+const roleValues = AGENT_ROLES.map((o) => o.value) as [string, ...string[]];
+const toneValues = AGENT_TONES.map((o) => o.value) as [string, ...string[]];
+const goalValues = AGENT_GOALS.map((o) => o.value) as [string, ...string[]];
 
 const putSchema = z.object({
   clientId: z.string().uuid(),
@@ -21,6 +26,9 @@ const putSchema = z.object({
   first_touch_template_id: z.string().uuid().nullable().optional(),
   reengage_template_id: z.string().uuid().nullable().optional(),
   reengage_after_hours: z.number().int().min(1).max(168).optional(),
+  agent_role: z.enum(roleValues).nullable().optional(),
+  agent_tone: z.enum(toneValues).nullable().optional(),
+  agent_goal: z.enum(goalValues).nullable().optional(),
   agent_context: z.string().max(8000).nullable().optional(),
   booking_url: z.string().url().max(500).nullable().optional(),
   max_sends_per_hour: z.number().int().min(1).max(500).optional(),

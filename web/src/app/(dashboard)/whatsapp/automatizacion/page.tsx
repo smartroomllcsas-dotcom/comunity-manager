@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useActiveBrand } from "@/hooks/useActiveBrand";
+import { AGENT_ROLES, AGENT_TONES, AGENT_GOALS } from "@/lib/whatsapp/cloud/agent-presets";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,9 @@ interface Settings {
   first_touch_template_id: string | null;
   reengage_template_id: string | null;
   reengage_after_hours: number;
+  agent_role: string | null;
+  agent_tone: string | null;
+  agent_goal: string | null;
   agent_context: string | null;
   booking_url: string | null;
   max_sends_per_hour: number;
@@ -44,6 +48,9 @@ const emptySettings: Settings = {
   first_touch_template_id: null,
   reengage_template_id: null,
   reengage_after_hours: 24,
+  agent_role: "asesor_ventas",
+  agent_tone: "amable",
+  agent_goal: "calificar_y_agendar",
   agent_context: null,
   booking_url: null,
   max_sends_per_hour: 20,
@@ -219,11 +226,50 @@ export default function LeadAutomationPage() {
               )}
             </div>
 
-            {/* Contexto del agente */}
-            <div className="rounded-lg border border-[#2d333b] bg-[#161b22] p-4 space-y-3">
+            {/* Perfil del agente */}
+            <div className="rounded-lg border border-[#2d333b] bg-[#161b22] p-4 space-y-4">
+              <p className="text-sm font-medium text-white">Perfil del agente IA de ESTA empresa</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-[#8b949e] mb-1">¿Cómo se comporta? (rol)</label>
+                  <select
+                    className={selectCls}
+                    value={settings.agent_role ?? ""}
+                    onChange={(e) => setSettings((s) => ({ ...s, agent_role: e.target.value || null }))}
+                  >
+                    {AGENT_ROLES.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-[#8b949e] mb-1">Tono de comunicación</label>
+                  <select
+                    className={selectCls}
+                    value={settings.agent_tone ?? ""}
+                    onChange={(e) => setSettings((s) => ({ ...s, agent_tone: e.target.value || null }))}
+                  >
+                    {AGENT_TONES.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-[#8b949e] mb-1">¿Qué debe hacer? (objetivo)</label>
+                <select
+                  className={selectCls}
+                  value={settings.agent_goal ?? ""}
+                  onChange={(e) => setSettings((s) => ({ ...s, agent_goal: e.target.value || null }))}
+                >
+                  {AGENT_GOALS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
               <div className="flex items-center justify-between">
                 <label className="block text-xs text-[#8b949e]">
-                  Instrucciones del agente IA para ESTA empresa
+                  Instrucciones adicionales (opcional — detalles propios de esta empresa)
                 </label>
                 <button
                   type="button"
@@ -234,9 +280,9 @@ export default function LeadAutomationPage() {
                 </button>
               </div>
               <textarea
-                rows={12}
+                rows={8}
                 className="w-full rounded-md bg-[#0d1117] border border-[#2d333b] px-3 py-2 text-sm text-white font-mono"
-                placeholder="Qué debe hacer el agente con los leads de esta empresa: qué información del proyecto recolectar, tono, y cuándo ofrecer la cita…"
+                placeholder="Ej: servicios que ofrecemos, precios desde, qué NO prometer, horarios de atención…"
                 value={settings.agent_context ?? ""}
                 onChange={(e) => setSettings((s) => ({ ...s, agent_context: e.target.value || null }))}
               />

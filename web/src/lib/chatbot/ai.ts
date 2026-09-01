@@ -178,18 +178,33 @@ export async function processWithAIAgent(
       const pub = createPublicAdmin("public");
       const { data: settings } = await pub
         .from("cm_lead_agent_settings")
-        .select("agent_context, booking_url")
+        .select("agent_context, booking_url, agent_role, agent_tone, agent_goal")
         .eq("client_id", convRow.brand_id)
         .maybeSingle();
-      if (settings?.agent_context || settings?.booking_url) {
-        brandContext = "\n\n## Contexto de esta empresa (definido por el administrador)\n";
-        if (settings.agent_context) brandContext += settings.agent_context + "\n";
+      if (settings) {
+        const { AGENT_ROLES, AGENT_TONES, AGENT_GOALS, presetPrompt } = await import(
+          "@/lib/whatsapp/cloud/agent-presets"
+        );
+        const parts: string[] = [];
+        const rolePrompt = presetPrompt(AGENT_ROLES, settings.agent_role);
+        const tonePrompt = presetPrompt(AGENT_TONES, settings.agent_tone);
+        const goalPrompt = presetPrompt(AGENT_GOALS, settings.agent_goal);
+        if (rolePrompt) parts.push(rolePrompt);
+        if (tonePrompt) parts.push(tonePrompt);
+        if (goalPrompt) parts.push(goalPrompt);
+        if (settings.agent_context) {
+          parts.push("Instrucciones adicionales del administrador:\n" + settings.agent_context);
+        }
         if (settings.booking_url) {
-          brandContext +=
-            `\n## Objetivo principal: agendar una cita\n` +
-            `Cuando el cliente muestre interés o ya tengas la información básica del proyecto, ` +
-            `invítalo a agendar una reunión y compártele este enlace de agenda: ${settings.booking_url}\n` +
-            `No compartas el enlace en el primer mensaje; primero entiende su necesidad.`;
+          parts.push(
+            `Para agendar la cita comparte este enlace de agenda: ${settings.booking_url}\n` +
+              `No compartas el enlace en el primer mensaje; primero entiende la necesidad del cliente.`
+          );
+        }
+        if (parts.length > 0) {
+          brandContext =
+            "\n\n## Perfil y misión para ESTA empresa (definido por el administrador)\n" +
+            parts.join("\n\n");
         }
       }
     }
