@@ -167,6 +167,7 @@ export async function processWithAIAgent(
   // para ESTA marca (qué información del proyecto recolectar, tono, objetivo)
   // y el enlace de agenda al que hay que llevar al cliente.
   let brandContext = "";
+  let brochure: { url: string; filename: string; mode: string } | null = null;
   try {
     const { data: convRow } = await admin
       .from("conversations")
@@ -178,9 +179,16 @@ export async function processWithAIAgent(
       const pub = createPublicAdmin("public");
       const { data: settings } = await pub
         .from("cm_lead_agent_settings")
-        .select("agent_context, booking_url, agent_role, agent_tone, agent_goal")
+        .select("agent_context, booking_url, agent_role, agent_tone, agent_goal, brochure_url, brochure_filename, brochure_mode")
         .eq("client_id", convRow.brand_id)
         .maybeSingle();
+      if (settings?.brochure_url && settings.brochure_mode && settings.brochure_mode !== "off") {
+        brochure = {
+          url: settings.brochure_url as string,
+          filename: (settings.brochure_filename as string) || "catalogo.pdf",
+          mode: settings.brochure_mode as string,
+        };
+      }
       if (settings) {
         const { AGENT_ROLES, AGENT_TONES, AGENT_GOALS, presetPrompt } = await import(
           "@/lib/whatsapp/cloud/agent-presets"
@@ -246,32 +254,78 @@ export async function processWithAIAgent(
     });
   }
 
-  // Send the cleaned response via WhatsApp
-  const { phoneNumberId, accessToken } = await getOrgWhatsAppCredentials(
-    context.organizationId,
-    context.channelId
-  );
-  const result = await sendText({
-    to: context.contactWaId,
-    text: cleanText,
-    phoneNumberId,
-    accessToken,
-  });
+  // Enviar la respuesta por el canal correcto (WhatsApp/Messenger/Instagram).
+  const { getOutboundSender } = await import("@/lib/chatbot/outbound");
+  const sender = context.channelId ? await getOutboundSender(context.channelId) : null;
+  if (!sender) {
+    console.error("[chatbot] sin emisor para el canal", context.channelId);
+    return false;
+  }
+  const result = (await sender.sendText(context.contactWaId, cleanText)) as {
+    messages?: Array<{ id?: string }>;
+  };
 
   await admin.from("messages").insert({
     conversation_id: context.conversationId,
     direction: "outbound",
     type: "text",
     content: { type: "text", text: cleanText },
-    wa_message_id: result.messages[0]?.id,
+    wa_message_id: result?.messages?.[0]?.id,
     status: "sent",
     is_bot: true,
   });
 
+  // Catálogo / brochure: se envía una sola vez por conversación, según el modo
+  // configurado por la empresa. 'after_greeting' en la primera respuesta;
+  // 'on_request' cuando el cliente lo pide (catálogo, brochure, precios, info).
+  let brochureSent = false;
+  if (brochure) {
+    const asked = /cat[aá]logo|brochure|folleto|portafolio|precios?|informaci[oó]n|servicios?/i.test(
+      context.messageText
+    );
+    const shouldSend =
+      (brochure.mode === "after_greeting" && turnCount === 0) ||
+      (brochure.mode === "on_request" && asked);
+    if (shouldSend) {
+      const { data: convFlag } = await admin
+        .from("conversations")
+        .select("metadata")
+        .eq("id", context.conversationId)
+        .maybeSingle();
+      const already = (convFlag?.metadata as { brochure_sent?: boolean })?.brochure_sent === true;
+      if (!already) {
+        try {
+          const isPdf = /\.pdf($|\?)/i.test(brochure.url) || /pdf/i.test(brochure.filename);
+          await sender.sendMedia(
+            context.contactWaId,
+            isPdf ? "document" : "image",
+            brochure.url,
+            brochure.filename
+          );
+          await admin.from("messages").insert({
+            conversation_id: context.conversationId,
+            direction: "outbound",
+            type: isPdf ? "document" : "image",
+            content: { type: isPdf ? "document" : "image", url: brochure.url, filename: brochure.filename },
+            status: "sent",
+            is_bot: true,
+          });
+          brochureSent = true;
+        } catch (e) {
+          console.error("[chatbot] brochure send failed:", e);
+        }
+      }
+    }
+  }
+
   await admin
     .from("conversations")
     .update({
-      metadata: { ai_turn_count: turnCount + 1, ai_agent_id: agentConfig.id },
+      metadata: {
+        ai_turn_count: turnCount + 1,
+        ai_agent_id: agentConfig.id,
+        ...(brochureSent ? { brochure_sent: true } : {}),
+      },
       last_message_preview: cleanText.slice(0, 100),
       updated_at: new Date().toISOString(),
     })

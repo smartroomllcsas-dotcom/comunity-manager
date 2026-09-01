@@ -27,6 +27,9 @@ interface Settings {
   agent_context: string | null;
   booking_url: string | null;
   max_sends_per_hour: number;
+  brochure_url: string | null;
+  brochure_filename: string | null;
+  brochure_mode: string;
 }
 
 const DEFAULT_CONTEXT = `Eres el asesor comercial de esta empresa. Tu objetivo es calificar al lead y llevarlo a agendar una cita.
@@ -54,6 +57,9 @@ const emptySettings: Settings = {
   agent_context: null,
   booking_url: null,
   max_sends_per_hour: 20,
+  brochure_url: null,
+  brochure_filename: null,
+  brochure_mode: "off",
 };
 
 export default function LeadAutomationPage() {
@@ -63,6 +69,7 @@ export default function LeadAutomationPage() {
   const [templates, setTemplates] = useState<TemplateOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploadingBrochure, setUploadingBrochure] = useState(false);
 
   const load = useCallback(async () => {
     if (!clientId) return;
@@ -83,6 +90,47 @@ export default function LeadAutomationPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function handleUploadBrochure(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !clientId) return;
+    setUploadingBrochure(true);
+    try {
+      const fd = new FormData();
+      fd.append("clientId", clientId);
+      fd.append("file", file);
+      const res = await fetch("/api/whatsapp/cloud/brochure", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "No se pudo subir");
+      setSettings((s) => ({
+        ...s,
+        brochure_url: data.brochure_url,
+        brochure_filename: data.brochure_filename,
+        brochure_mode: s.brochure_mode === "off" ? "on_request" : s.brochure_mode,
+      }));
+      toast.success("Catálogo subido");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setUploadingBrochure(false);
+      e.target.value = "";
+    }
+  }
+
+  async function handleRemoveBrochure() {
+    if (!clientId) return;
+    setUploadingBrochure(true);
+    try {
+      const res = await fetch(`/api/whatsapp/cloud/brochure?clientId=${clientId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error || "No se pudo quitar");
+      setSettings((s) => ({ ...s, brochure_url: null, brochure_filename: null, brochure_mode: "off" }));
+      toast.success("Catálogo quitado");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setUploadingBrochure(false);
+    }
+  }
 
   async function handleSave() {
     if (!clientId) return;
@@ -315,6 +363,56 @@ export default function LeadAutomationPage() {
                 />
                 <span className="text-xs text-[#8b949e]">envíos automáticos por hora (seguridad)</span>
               </div>
+            </div>
+
+            {/* Catálogo / brochure */}
+            <div className="rounded-lg border border-[#2d333b] bg-[#161b22] p-4 space-y-3">
+              <p className="text-sm font-medium text-white">Catálogo / brochure</p>
+              <div>
+                <label className="block text-xs text-[#8b949e] mb-1">¿Cuándo lo envía el agente?</label>
+                <select
+                  className={selectCls}
+                  value={settings.brochure_mode}
+                  onChange={(e) => setSettings((s) => ({ ...s, brochure_mode: e.target.value }))}
+                >
+                  <option value="off">No enviar catálogo</option>
+                  <option value="after_greeting">Automáticamente tras el saludo</option>
+                  <option value="on_request">Solo cuando el cliente lo pida</option>
+                </select>
+              </div>
+              {settings.brochure_url ? (
+                <div className="flex items-center justify-between rounded-md border border-[#2d333b] bg-[#0d1117] px-3 py-2">
+                  <a
+                    href={settings.brochure_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-blue-400 hover:underline truncate"
+                  >
+                    📄 {settings.brochure_filename || "catálogo"}
+                  </a>
+                  <button
+                    type="button"
+                    className="text-xs text-red-400 hover:text-red-300 shrink-0 ml-3"
+                    onClick={handleRemoveBrochure}
+                    disabled={uploadingBrochure}
+                  >
+                    Quitar
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <input
+                    type="file"
+                    accept="application/pdf,image/jpeg,image/png"
+                    className="block w-full text-xs text-[#8b949e] file:mr-3 file:rounded-md file:border-0 file:bg-[#21262d] file:px-3 file:py-1.5 file:text-white file:text-xs"
+                    onChange={handleUploadBrochure}
+                    disabled={uploadingBrochure}
+                  />
+                  <p className="mt-1 text-[11px] text-[#8b949e]">
+                    {uploadingBrochure ? "Subiendo…" : "PDF, JPG o PNG · máximo 5 MB"}
+                  </p>
+                </div>
+              )}
             </div>
 
             <button

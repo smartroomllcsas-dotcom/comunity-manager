@@ -645,6 +645,30 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
         .eq("id", conversationId);
 
       if (!duplicateDelivery) processed += 1;
+
+      // Agente IA para Messenger/Instagram: los leads entran directo (sin
+      // plantilla). Se dispara solo con mensajes entrantes de texto, no
+      // duplicados. Best-effort — nunca rompe la persistencia del webhook.
+      if (
+        !duplicateDelivery &&
+        direction === "inbound" &&
+        parsed.type === "text" &&
+        parsed.content.type === "text"
+      ) {
+        try {
+          const { processIncomingWithChatbot } = await import("@/lib/chatbot/engine");
+          await processIncomingWithChatbot({
+            conversationId,
+            contactWaId: contactId,
+            contactId: dbContactId,
+            organizationId: channel.organization_id,
+            channelId: channel.id,
+            messageText: parsed.content.text,
+          });
+        } catch (e) {
+          console.error("[meta-webhook] chatbot Messenger/IG falló:", e);
+        }
+      }
     }
 
     for (const change of entry.changes || []) {
