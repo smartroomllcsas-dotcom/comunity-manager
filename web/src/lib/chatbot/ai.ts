@@ -163,10 +163,44 @@ export async function processWithAIAgent(
     }
   }
 
+  // Contexto por empresa/marca: instrucciones que el administrador definió
+  // para ESTA marca (qué información del proyecto recolectar, tono, objetivo)
+  // y el enlace de agenda al que hay que llevar al cliente.
+  let brandContext = "";
+  try {
+    const { data: convRow } = await admin
+      .from("conversations")
+      .select("brand_id")
+      .eq("id", context.conversationId)
+      .maybeSingle();
+    if (convRow?.brand_id) {
+      const { createAdminClient: createPublicAdmin } = await import("@/lib/supabase/admin");
+      const pub = createPublicAdmin("public");
+      const { data: settings } = await pub
+        .from("cm_lead_agent_settings")
+        .select("agent_context, booking_url")
+        .eq("client_id", convRow.brand_id)
+        .maybeSingle();
+      if (settings?.agent_context || settings?.booking_url) {
+        brandContext = "\n\n## Contexto de esta empresa (definido por el administrador)\n";
+        if (settings.agent_context) brandContext += settings.agent_context + "\n";
+        if (settings.booking_url) {
+          brandContext +=
+            `\n## Objetivo principal: agendar una cita\n` +
+            `Cuando el cliente muestre interés o ya tengas la información básica del proyecto, ` +
+            `invítalo a agendar una reunión y compártele este enlace de agenda: ${settings.booking_url}\n` +
+            `No compartas el enlace en el primer mensaje; primero entiende su necesidad.`;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[chatbot] brand context lookup failed:", e);
+  }
+
   let rawResponse: string;
   try {
     rawResponse = await generateAIResponse({
-      systemPrompt: agentConfig.system_prompt + actionInstructions,
+      systemPrompt: agentConfig.system_prompt + brandContext + actionInstructions,
       conversationHistory: chatHistory,
       knowledgeBase: knowledgeParts.length > 0 ? knowledgeParts.join("\n\n") : undefined,
       maxTokens: agentConfig.max_tokens,

@@ -18,6 +18,7 @@ import { resolveToken } from "@/lib/auth/token-crypto";
 import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { upsertRestrictedContact } from "@/lib/smarttalk/contact-privacy";
+import { sendFirstTouchTemplate } from "@/lib/whatsapp/cloud/lead-engagement";
 
 const META_GRAPH_URL = `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || "v21.0"}`;
 
@@ -275,6 +276,29 @@ export async function ingestGraphLead(
     .select("id")
     .single();
   if (insertError) throw insertError;
+
+  // Abordaje automático: si la marca lo configuró, el lead nuevo recibe la
+  // plantilla de primer contacto por WhatsApp. Best-effort — nunca bloquea
+  // la ingesta del lead.
+  if (phone && inserted?.id) {
+    const firstTouch = await sendFirstTouchTemplate({
+      clientId: channel.brand_id,
+      phone,
+      leadName: fullName,
+      topic: leadMeta.lead_campaign || leadMeta.lead_form_id || null,
+    });
+    const touchMeta: Record<string, string> = firstTouch.sent
+      ? {
+          wa_first_touch: "enviado",
+          wa_first_touch_template: firstTouch.templateName,
+          wa_first_touch_at: new Date().toISOString(),
+        }
+      : { wa_first_touch: `no_enviado (${firstTouch.reason})` };
+    await admin
+      .from("contacts")
+      .update({ custom_fields: { ...customFields, ...touchMeta } })
+      .eq("id", inserted.id);
+  }
 
   return { processed: true, contactId: inserted?.id as string };
 }

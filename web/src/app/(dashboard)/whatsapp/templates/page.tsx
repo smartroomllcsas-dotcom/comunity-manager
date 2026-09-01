@@ -116,6 +116,12 @@ export default function WhatsAppTemplatesPage() {
             <p className="text-sm text-[#8b949e]">Gestión de mensajes de plantilla por empresa · Cloud API oficial</p>
           </div>
           <div className="flex gap-2">
+            <Link
+              href="/whatsapp/automatizacion"
+              className="px-3 py-2 rounded-md bg-[#21262d] hover:bg-[#30363d] text-sm border border-[#30363d]"
+            >
+              ⚡ Automatización de leads
+            </Link>
             <button
               onClick={handleSync}
               disabled={!clientId || syncing}
