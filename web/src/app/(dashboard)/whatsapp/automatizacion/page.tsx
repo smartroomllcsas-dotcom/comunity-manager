@@ -169,8 +169,9 @@ export default function LeadAutomationPage() {
         </Link>
         <h1 className="text-xl font-semibold">Automatización de leads</h1>
         <p className="text-sm text-[#8b949e]">
-          Por empresa: qué plantilla recibe el lead nuevo, cuál retoma la conversación,
-          y las instrucciones del agente IA para llevarlo a una cita.
+          Configura el agente de IA por empresa para <strong>WhatsApp, Messenger e Instagram</strong>:
+          rol, tono, objetivo, datos a recopilar y el enlace de agenda para llevar al lead a una reunión.
+          Las plantillas aplican solo a WhatsApp; en Messenger e Instagram el agente responde directo.
         </p>
       </div>
 

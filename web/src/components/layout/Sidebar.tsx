@@ -111,7 +111,7 @@ const CM_SECTIONS: NavSection[] = [
       { href: "/settings/channels", label: "Canales", icon: Plug },
       { href: "/settings/whatsapp", label: "WhatsApp", icon: MessageSquare },
       { href: "/whatsapp/templates", label: "Plantillas WhatsApp", icon: FileText },
-      { href: "/whatsapp/automatizacion", label: "Automatización IA", icon: Bot },
+      { href: "/whatsapp/automatizacion", label: "Automatización de Leads", icon: Bot },
       { href: "/settings/quick-replies", label: "Respuestas rápidas", icon: Reply },
       { href: "/settings/lifecycle", label: "Lifecycle", icon: Activity },
       { href: "/settings/closing-notes", label: "Notas de cierre", icon: FileText },
@@ -163,7 +163,7 @@ const UNIFIED_SECTIONS: NavSection[] = [
     items: [
       { href: "/chatbot", label: "Chatbot", icon: Bot },
       { href: "/chatbot/ai", label: "Agentes IA", icon: BrainCircuit },
-      { href: "/whatsapp/automatizacion", label: "Automatización WhatsApp", icon: Wand2 },
+      { href: "/whatsapp/automatizacion", label: "Automatización de Leads", icon: Wand2 },
       { href: "/ai-tools", label: "AI Tools", icon: Cpu },
       { href: "/es/os/workflows", label: "Workflows", icon: Workflow },
       { href: "/es/os/skills", label: "Skills", icon: Sparkles },
