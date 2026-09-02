@@ -173,43 +173,23 @@ function useBrands(): BrandLite[] {
 export default function AIAgentsPage() {
   const { data: agents = [], isLoading } = useAIAgents();
   const brands = useBrands();
-  const brandName = (id?: string | null) =>
-    id ? brands.find((b) => b.id === id)?.name ?? "Empresa" : "General (todas)";
-  const createAgent = useCreateAIAgent();
-  const updateAgent = useUpdateAIAgent();
   const deleteAgent = useDeleteAIAgent();
   const toggleAgent = useToggleAIAgent();
 
   const [editingAgent, setEditingAgent] = useState<AIAgent | null>(null);
   const [isCreating, setIsCreating] = useState(false);
-  const [defaultAgentId, setDefaultAgentId] = useState<string>("");
+  const [initialBrandId, setInitialBrandId] = useState<string>("");
 
-  useEffect(() => {
-    const def = agents.find((a) => a.is_default);
-    if (def) setDefaultAgentId(def.id);
-  }, [agents]);
-
-  function handleCreate() {
+  function handleCreate(brandId?: string) {
     setEditingAgent(null);
+    setInitialBrandId(brandId || "");
     setIsCreating(true);
   }
 
   function handleEdit(agent: AIAgent) {
     setEditingAgent(agent);
+    setInitialBrandId("");
     setIsCreating(true);
-  }
-
-  async function handleSetDefault(value: string | null) {
-    const agentId = value || "";
-    setDefaultAgentId(agentId);
-    // Unset previous default
-    const prev = agents.find((a) => a.is_default);
-    if (prev && prev.id !== agentId) {
-      await updateAgent.mutateAsync({ id: prev.id, is_default: false });
-    }
-    if (agentId && agentId !== "none") {
-      await updateAgent.mutateAsync({ id: agentId, is_default: true });
-    }
   }
 
   async function handleDelete(agentId: string) {
@@ -217,10 +197,24 @@ export default function AIAgentsPage() {
     await deleteAgent.mutateAsync(agentId);
   }
 
+  // Agrupa agentes por empresa (modelo de agencia: un agente por cliente).
+  const agentsByBrand = new Map<string, AIAgent[]>();
+  const generalAgents: AIAgent[] = [];
+  for (const a of agents) {
+    if (a.brand_id) {
+      const list = agentsByBrand.get(a.brand_id) || [];
+      list.push(a);
+      agentsByBrand.set(a.brand_id, list);
+    } else {
+      generalAgents.push(a);
+    }
+  }
+
   if (isCreating) {
     return (
       <AgentEditor
         agent={editingAgent}
+        initialBrandId={initialBrandId}
         onClose={() => setIsCreating(false)}
       />
     );
@@ -245,7 +239,7 @@ export default function AIAgentsPage() {
         </div>
         <div className="flex-1" />
         <Button
-          onClick={handleCreate}
+          onClick={() => handleCreate()}
           size="sm"
           className="bg-blue-600 hover:bg-blue-700 text-white"
         >
@@ -255,126 +249,103 @@ export default function AIAgentsPage() {
       </div>
 
       <div className="p-6 max-w-6xl">
-        {/* Default Agent Selector */}
-        <div className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg p-5 mb-6">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center">
-              <Sparkles className="h-5 w-5 text-blue-400" />
-            </div>
-            <div className="flex-1">
-              <h2 className="text-sm font-semibold text-white">
-                Establecer Agente IA predeterminado
-              </h2>
-              <p className="text-xs text-[#8b949e]">
-                Este agente se activara automaticamente en nuevas conversaciones
-                sin flujo asignado
-              </p>
-            </div>
-            <Select value={defaultAgentId} onValueChange={handleSetDefault}>
-              <SelectTrigger className="w-[240px] bg-[#0d1117] border-[#2d333b] text-white h-9">
-                <SelectValue placeholder="Seleccionar agente..." />
-              </SelectTrigger>
-              <SelectContent className="bg-[#1a1f2e] border-[#2d333b]">
-                <SelectItem value="none">Ninguno</SelectItem>
-                {agents.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {a.emoji} {a.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        {/* Explicación del modelo por empresa */}
+        <div className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg p-4 mb-6 flex items-start gap-3">
+          <div className="h-9 w-9 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center shrink-0">
+            <Sparkles className="h-4 w-4 text-blue-400" />
           </div>
+          <p className="text-xs text-[#8b949e] leading-relaxed">
+            Cada empresa tiene su propio agente de IA. El agente responde{" "}
+            <strong className="text-white">solo</strong> a los leads de su empresa
+            (WhatsApp, Messenger e Instagram) — nunca se mezclan. Crea o edita el
+            agente de cada empresa abajo.
+          </p>
         </div>
 
-        {/* Agent Grid */}
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
             <Loader2 className="h-6 w-6 text-[#8b949e] animate-spin" />
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {agents.map((agent) => {
-              const meta = AGENT_TYPE_META[agent.agent_type] || AGENT_TYPE_META.custom;
-              return (
-                <div
-                  key={agent.id}
-                  className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg p-4 hover:border-[#3d444d] transition-colors"
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="h-10 w-10 rounded-lg bg-[#0d1117] border border-[#2d333b] flex items-center justify-center text-lg">
-                      {agent.emoji || "🤖"}
+          <>
+            {/* Una tarjeta por empresa */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {brands.map((brand) => {
+                const agent = (agentsByBrand.get(brand.id) || [])[0];
+                return (
+                  <div key={brand.id} className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg p-4 flex flex-col min-h-[170px]">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-base">🏢</span>
+                      <h3 className="text-sm font-semibold text-white truncate" title={brand.name}>{brand.name}</h3>
                     </div>
-                    <span
-                      className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full border ${meta.color}`}
-                    >
-                      {meta.label}
-                    </span>
-                  </div>
-                  <h4 className="text-sm font-semibold text-white mb-1">
-                    {agent.name}
-                    {agent.is_default && (
-                      <span className="ml-2 text-[10px] bg-blue-600/20 text-blue-400 px-1.5 py-0.5 rounded-full">
-                        Predeterminado
-                      </span>
+                    {agent ? (
+                      <>
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-lg">{agent.emoji || "🤖"}</span>
+                          <span className="text-sm text-white truncate">{agent.name}</span>
+                          <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${agent.is_active ? "bg-green-500/20 text-green-400" : "bg-[#0d1117] text-[#8b949e] border border-[#2d333b]"}`}>
+                            {agent.is_active ? "Activo" : "Apagado"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-[#8b949e] mb-3 line-clamp-2">{agent.description || `${agent.system_prompt.slice(0, 90)}…`}</p>
+                        <div className="flex items-center justify-between mt-auto">
+                          <div className="flex gap-1.5">
+                            <Button variant="outline" size="sm" className="bg-transparent border-[#2d333b] text-[#8b949e] hover:bg-[#0d1117] hover:text-white text-xs h-7" onClick={() => handleEdit(agent)}>
+                              <Pencil className="h-3 w-3 mr-1" /> Editar
+                            </Button>
+                            <Button variant="outline" size="sm" className="bg-transparent border-[#2d333b] text-[#8b949e] hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30 text-xs h-7 px-2" onClick={() => handleDelete(agent.id)}>
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                          <Switch checked={agent.is_active} onCheckedChange={() => toggleAgent.mutate(agent.id)} />
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center flex-1 gap-2 py-2">
+                        <span className="text-xs text-[#8b949e]">Sin agente todavía</span>
+                        <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-8" onClick={() => handleCreate(brand.id)}>
+                          <Plus className="h-3.5 w-3.5 mr-1" /> Crear agente
+                        </Button>
+                      </div>
                     )}
-                  </h4>
-                  <p
-                    className={`text-[11px] mb-2 inline-flex items-center px-1.5 py-0.5 rounded-full border ${
-                      agent.brand_id
-                        ? "bg-blue-500/10 text-blue-300 border-blue-500/20"
-                        : "bg-[#0d1117] text-[#8b949e] border-[#2d333b]"
-                    }`}
-                  >
-                    🏢 {brandName(agent.brand_id)}
-                  </p>
-                  <p className="text-xs text-[#8b949e] mb-3 leading-relaxed line-clamp-2">
-                    {agent.description || agent.system_prompt.slice(0, 100) + "..."}
-                  </p>
-                  <div className="flex items-center justify-between">
-                    <div className="flex gap-1.5">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="bg-transparent border-[#2d333b] text-[#8b949e] hover:bg-[#0d1117] hover:text-white text-xs h-7"
-                        onClick={() => handleEdit(agent)}
-                      >
-                        <Pencil className="h-3 w-3 mr-1" />
-                        Editar
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="bg-transparent border-[#2d333b] text-[#8b949e] hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30 text-xs h-7 px-2"
-                        onClick={() => handleDelete(agent.id)}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                    <Switch
-                      checked={agent.is_active}
-                      onCheckedChange={() => toggleAgent.mutate(agent.id)}
-                    />
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
 
-            {/* Create Card */}
-            <button
-              onClick={handleCreate}
-              className="bg-[#0d1117] border border-dashed border-[#2d333b] rounded-lg p-4 hover:border-blue-500/50 hover:bg-[#1a1f2e]/50 transition-all flex flex-col items-center justify-center gap-2 min-h-[180px]"
-            >
-              <div className="h-10 w-10 rounded-full bg-blue-600/10 border border-blue-500/20 flex items-center justify-center">
-                <Plus className="h-5 w-5 text-blue-400" />
+            {/* Agentes generales (sin empresa) */}
+            {generalAgents.length > 0 && (
+              <div className="mt-8">
+                <h3 className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider mb-3">Agentes generales (sin empresa)</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {generalAgents.map((agent) => (
+                    <div key={agent.id} className="bg-[#1a1f2e] border border-[#2d333b] rounded-lg p-4 flex flex-col min-h-[150px]">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-lg">{agent.emoji || "🤖"}</span>
+                        <span className="text-sm font-semibold text-white truncate">{agent.name}</span>
+                        <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${agent.is_active ? "bg-green-500/20 text-green-400" : "bg-[#0d1117] text-[#8b949e] border border-[#2d333b]"}`}>
+                          {agent.is_active ? "Activo" : "Apagado"}
+                        </span>
+                      </div>
+                      <p className="text-[11px] mb-2 inline-flex w-fit items-center px-1.5 py-0.5 rounded-full border bg-[#0d1117] text-[#8b949e] border-[#2d333b]">🏢 General (todas)</p>
+                      <p className="text-xs text-[#8b949e] mb-3 line-clamp-2">{agent.description || `${agent.system_prompt.slice(0, 90)}…`}</p>
+                      <div className="flex items-center justify-between mt-auto">
+                        <div className="flex gap-1.5">
+                          <Button variant="outline" size="sm" className="bg-transparent border-[#2d333b] text-[#8b949e] hover:bg-[#0d1117] hover:text-white text-xs h-7" onClick={() => handleEdit(agent)}>
+                            <Pencil className="h-3 w-3 mr-1" /> Editar
+                          </Button>
+                          <Button variant="outline" size="sm" className="bg-transparent border-[#2d333b] text-[#8b949e] hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30 text-xs h-7 px-2" onClick={() => handleDelete(agent.id)}>
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <Switch checked={agent.is_active} onCheckedChange={() => toggleAgent.mutate(agent.id)} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <span className="text-sm font-medium text-blue-400">
-                Crear Agente IA
-              </span>
-              <span className="text-xs text-[#8b949e]">
-                Personaliza un nuevo agente
-              </span>
-            </button>
-          </div>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -384,9 +355,11 @@ export default function AIAgentsPage() {
 /* ─── Agent Editor Panel ─── */
 function AgentEditor({
   agent,
+  initialBrandId = "",
   onClose,
 }: {
   agent: AIAgent | null;
+  initialBrandId?: string;
   onClose: () => void;
 }) {
   const createAgent = useCreateAIAgent();
@@ -398,7 +371,7 @@ function AgentEditor({
   const isNew = !agent;
 
   const brands = useBrands();
-  const [brandId, setBrandId] = useState<string>(agent?.brand_id || "");
+  const [brandId, setBrandId] = useState<string>(agent?.brand_id || initialBrandId || "");
   const [name, setName] = useState(agent?.name || "");
   const [description, setDescription] = useState(agent?.description || "");
   const [showDescription, setShowDescription] = useState(!!agent?.description);
