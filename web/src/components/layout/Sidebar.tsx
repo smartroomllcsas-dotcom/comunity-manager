@@ -23,13 +23,10 @@ import {
   Home,
   Target,
   Sparkles,
-  GitBranch,
   FileText,
   Share2,
   Workflow,
-  Inbox,
   CheckSquare,
-  Map,
   Users2,
   Brain,
   Plug,
@@ -38,7 +35,6 @@ import {
   Star,
   DollarSign,
   Building2,
-  BookOpen,
   Radio,
   PenTool,
   Wand2,
@@ -47,10 +43,8 @@ import {
   Reply,
   Lock,
   Key,
-  Hash,
   ClipboardList,
   Cpu,
-  FlaskConical,
   ServerCog,
 } from "lucide-react";
 import {
@@ -130,74 +124,94 @@ const CM_SECTIONS: NavSection[] = [
   },
 ];
 
-// Community OS — 5 grupos matching FounderOS-DEMO (NAV_OPERATE / NAV_AGENTS /
-// NAV_INTELLIGENCE / NAV_SYSTEM / NAV_LIBRARY). Los labels y el orden replican
-// `F:\Proyectos\FounderOS-DEMO\lib\nav.ts` — Personas queda bajo Variants por
-// convención del sidebar upstream, y Goals se mantiene bajo Operate como
-// concepto Community-Manager específico.
-const OS_OPERATE: NavSection = {
-  label: "OS · Operate",
-  accent: true,
-  items: [
-    { href: "/es/os", label: "Home", icon: Home },
-    { href: "/es/os/comms", label: "Comms", icon: Inbox },
-    { href: "/es/os/funnel", label: "Funnel", icon: GitBranch },
-    { href: "/es/os/workflows", label: "Workflows", icon: Workflow },
-    { href: "/es/os/social", label: "Social", icon: Share2 },
-    { href: "/es/os/content", label: "Content", icon: FileText },
-    { href: "/es/os/finances", label: "Finances", icon: DollarSign },
-    { href: "/es/os/goals", label: "Goals", icon: Target },
-  ],
-};
-
-const OS_AGENTS: NavSection = {
-  label: "OS · Agents",
-  accent: true,
-  items: [
-    { href: "/es/os/agents", label: "Agents", icon: Bot },
-    { href: "/es/os/tasks", label: "Tasks", icon: CheckSquare },
-    { href: "/es/os/skills", label: "Skills", icon: Sparkles },
-    { href: "/es/os/org", label: "Org Chart", icon: Building2 },
-  ],
-};
-
-const OS_INTELLIGENCE: NavSection = {
-  label: "OS · Intelligence",
-  accent: true,
-  items: [
-    { href: "/es/os/brain", label: "G-Brain", icon: Brain },
-    { href: "/es/os/intelligence", label: "Intelligence", icon: Cpu },
-  ],
-};
-
-const OS_SYSTEM: NavSection = {
-  label: "OS · System",
-  accent: true,
-  items: [
-    { href: "/es/os/integrations", label: "Connections", icon: Plug },
-    { href: "/es/os/roadmap", label: "Roadmap", icon: Map },
-    { href: "/es/os/analytics", label: "Analytics", icon: TrendingUp },
-    { href: "/es/os/reference", label: "Reference Model", icon: BookOpen },
-    { href: "/es/os/observability", label: "Observability", icon: Activity },
-    { href: "/es/os/system", label: "System", icon: ServerCog },
-  ],
-};
-
-const OS_VARIANTS: NavSection = {
-  label: "OS · Variants",
-  accent: true,
-  items: [
-    { href: "/es/os/personas", label: "Personas", icon: Users2 },
-    { href: "/es/os/variants", label: "Variants", icon: FlaskConical },
-  ],
-};
-
-const OS_SECTIONS: NavSection[] = [
-  OS_OPERATE,
-  OS_AGENTS,
-  OS_INTELLIGENCE,
-  OS_SYSTEM,
-  OS_VARIANTS,
+// ---------------------------------------------------------------------------
+// Menú UNIFICADO (cuando Community OS está activo).
+//
+// Antes se mostraban CM_SECTIONS + las 5 secciones de OS a la vez, lo que
+// duplicaba cada trabajo (Comms↔Bandeja, Content↔Composer, Social↔Analytics,
+// Agents↔Agentes IA, Connections↔Canales). Ahora hay UNA sola puerta por
+// trabajo: se elige la página madura para operar y las páginas nativas de OS
+// solo para lo que el CM no tenía (Goals, Tasks, Finances, Brain, Workflows,
+// Skills, Observability, System, Conectores).
+//
+// Páginas de OS que quedan fuera del menú por duplicar una madura (siguen
+// accesibles por URL): /os/comms → /inbox · /os/content → /composer ·
+// /os/social + /os/analytics → /analytics · /os/agents → /chatbot/ai.
+// Páginas aún en construcción también fuera del menú: /os/funnel, /os/variants,
+// /os/personas, /os/org, /os/roadmap, /os/reference, /os/intelligence.
+// ---------------------------------------------------------------------------
+const UNIFIED_SECTIONS: NavSection[] = [
+  {
+    label: "Principal",
+    items: [
+      { href: "/es/os", label: "Home", icon: Home },
+      { href: "/inbox", label: "Bandeja de Entrada", icon: MessageSquare, badge: true },
+      { href: "/broadcasts", label: "Difusiones", icon: Send },
+      { href: "/contacts", label: "Contactos", icon: Users },
+    ],
+  },
+  {
+    label: "Contenido",
+    items: [
+      { href: "/composer", label: "Composer", icon: PenTool },
+      { href: "/whatsapp/templates", label: "Plantillas WhatsApp", icon: FileText },
+      { href: "/listening", label: "Escucha social", icon: Radio },
+    ],
+  },
+  {
+    label: "Automatización & IA",
+    items: [
+      { href: "/chatbot", label: "Chatbot", icon: Bot },
+      { href: "/chatbot/ai", label: "Agentes IA", icon: BrainCircuit },
+      { href: "/whatsapp/automatizacion", label: "Automatización WhatsApp", icon: Wand2 },
+      { href: "/ai-tools", label: "AI Tools", icon: Cpu },
+      { href: "/es/os/workflows", label: "Workflows", icon: Workflow },
+      { href: "/es/os/skills", label: "Skills", icon: Sparkles },
+    ],
+  },
+  {
+    label: "Gestión OS",
+    accent: true,
+    items: [
+      { href: "/es/os/goals", label: "Goals", icon: Target },
+      { href: "/es/os/tasks", label: "Tasks", icon: CheckSquare },
+      { href: "/es/os/finances", label: "Finances", icon: DollarSign },
+      { href: "/es/os/brain", label: "Brain", icon: Brain },
+    ],
+  },
+  {
+    label: "Analítica",
+    items: [
+      { href: "/analytics", label: "Analytics", icon: TrendingUp },
+      { href: "/reports-cm", label: "Reportes CM", icon: BarChart3 },
+      { href: "/es/os/observability", label: "Observability", icon: Activity },
+    ],
+  },
+  {
+    label: "Sistema & Conexiones",
+    items: [
+      { href: "/settings/channels", label: "Canales", icon: Plug },
+      { href: "/es/os/integrations", label: "Conectores", icon: Share2 },
+      { href: "/es/os/system", label: "System", icon: ServerCog },
+    ],
+  },
+  {
+    label: "Ajustes",
+    items: [
+      { href: "/settings/agents", label: "Equipo", icon: UserRoundCog },
+      { href: "/settings/tags", label: "Etiquetas", icon: Tag },
+      { href: "/settings/contact-fields", label: "Campos custom", icon: ClipboardList },
+      { href: "/settings/whatsapp", label: "WhatsApp", icon: MessageSquare },
+      { href: "/settings/quick-replies", label: "Respuestas rápidas", icon: Reply },
+      { href: "/settings/lifecycle", label: "Lifecycle", icon: Activity },
+      { href: "/settings/closing-notes", label: "Notas de cierre", icon: FileText },
+      { href: "/settings/teams", label: "Equipos", icon: Users2 },
+      { href: "/settings/organization", label: "Organización", icon: Building2 },
+      { href: "/settings/billing", label: "Facturación", icon: CreditCard },
+      { href: "/settings/api", label: "API Keys", icon: Key },
+      { href: "/settings/security", label: "Seguridad", icon: Lock },
+    ],
+  },
 ];
 
 const BOTTOM_ITEMS: NavItem[] = [
@@ -215,7 +229,7 @@ export function Sidebar({ showCommunityOs = false }: SidebarProps) {
   const router = useRouter();
 
   const sections = useMemo<NavSection[]>(
-    () => (showCommunityOs ? [...CM_SECTIONS, ...OS_SECTIONS] : CM_SECTIONS),
+    () => (showCommunityOs ? UNIFIED_SECTIONS : CM_SECTIONS),
     [showCommunityOs]
   );
 
