@@ -1,5 +1,51 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { AIActionConfig } from "@/types/database";
+import { notify } from "@/lib/notify/dispatcher";
+
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || "https://www.comunitymanager.io").replace(/\/$/, "");
+
+/**
+ * Avisa a los asesores (por email) que el agente IA les pasó un lead.
+ * Best-effort: nunca lanza — un fallo de notificación no debe romper el handoff.
+ */
+async function notifyAdvisorsOfAssignment(
+  admin: ReturnType<typeof createAdminClient>,
+  opts: { organizationId: string; conversationId: string; contactId: string; emails: string[]; assigneeLabel: string }
+): Promise<void> {
+  try {
+    const emails = [...new Set(opts.emails.filter((e) => typeof e === "string" && e.includes("@")))];
+    if (emails.length === 0) return;
+
+    let contactName = "Un lead";
+    try {
+      const { data: c } = await admin
+        .from("contacts")
+        .select("name")
+        .eq("id", opts.contactId)
+        .maybeSingle();
+      if (c?.name) contactName = c.name as string;
+    } catch {}
+
+    const link = `${APP_URL}/inbox?conversation=${opts.conversationId}`;
+    const subject = `🔔 Nuevo lead para atender: ${contactName}`;
+    const text =
+      `El agente de IA calificó a ${contactName} y lo asignó a ${opts.assigneeLabel}. ` +
+      `Continúa la conversación aquí: ${link}`;
+    const html =
+      `<p>El agente de IA calificó a <b>${contactName}</b> y lo asignó a <b>${opts.assigneeLabel}</b>.</p>` +
+      `<p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px">Abrir conversación</a></p>`;
+
+    await notify({
+      organizationId: opts.organizationId,
+      channels: ["email"],
+      recipients: { email: emails },
+      template: "custom",
+      variables: { subject, text, html },
+    });
+  } catch (e) {
+    console.warn("[ai-actions] notificación de handoff falló (no crítico):", e);
+  }
+}
 
 export type AIAction =
   | "close_conversation"
@@ -86,7 +132,7 @@ export async function executeAIActions(
           if (action.params[0]) {
             const { data: targetAgent } = await admin
               .from("agents")
-              .select("id")
+              .select("id, name, email")
               .eq("organization_id", context.organizationId)
               .ilike("name", `%${action.params[0]}%`)
               .limit(1)
@@ -101,6 +147,14 @@ export async function executeAIActions(
                 })
                 .eq("id", context.conversationId);
               executed.push(`assign_agent:${action.params[0]}`);
+              // Notifica al asesor asignado.
+              await notifyAdvisorsOfAssignment(admin, {
+                organizationId: context.organizationId,
+                conversationId: context.conversationId,
+                contactId: context.contactId,
+                emails: targetAgent.email ? [targetAgent.email as string] : [],
+                assigneeLabel: (targetAgent.name as string) || "ti",
+              });
             }
           }
           break;
@@ -110,21 +164,44 @@ export async function executeAIActions(
           if (action.params[0]) {
             const { data: team } = await admin
               .from("teams")
-              .select("id")
+              .select("id, name")
               .eq("organization_id", context.organizationId)
               .ilike("name", `%${action.params[0]}%`)
               .limit(1)
               .single();
 
             if (team) {
+              // Merge del metadata: no sobrescribir (preserva ai_turn_count, etc.)
+              const { data: conv } = await admin
+                .from("conversations")
+                .select("metadata")
+                .eq("id", context.conversationId)
+                .maybeSingle();
+              const mergedMeta = { ...((conv?.metadata as Record<string, unknown>) || {}), assigned_team_id: team.id };
               await admin
                 .from("conversations")
                 .update({
-                  metadata: { assigned_team_id: team.id },
+                  metadata: mergedMeta,
                   updated_at: new Date().toISOString(),
                 })
                 .eq("id", context.conversationId);
               executed.push(`assign_team:${action.params[0]}`);
+
+              // Notifica a los miembros del equipo (agent_teams → agents.email).
+              const { data: links } = await admin
+                .from("agent_teams")
+                .select("agent:agents(email)")
+                .eq("team_id", team.id);
+              const emails = (links || [])
+                .map((l) => (l as { agent?: { email?: string } }).agent?.email)
+                .filter((e): e is string => typeof e === "string");
+              await notifyAdvisorsOfAssignment(admin, {
+                organizationId: context.organizationId,
+                conversationId: context.conversationId,
+                contactId: context.contactId,
+                emails,
+                assigneeLabel: `el equipo ${(team.name as string) || action.params[0]}`,
+              });
             }
           }
           break;
