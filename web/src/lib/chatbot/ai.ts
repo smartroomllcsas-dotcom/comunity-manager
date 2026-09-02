@@ -168,6 +168,7 @@ export async function processWithAIAgent(
   // y el enlace de agenda al que hay que llevar al cliente.
   let brandContext = "";
   let brochure: { url: string; filename: string; mode: string } | null = null;
+  let responseDelaySeconds = 0;
   try {
     const { data: convRow } = await admin
       .from("conversations")
@@ -179,9 +180,12 @@ export async function processWithAIAgent(
       const pub = createPublicAdmin("public");
       const { data: settings } = await pub
         .from("cm_lead_agent_settings")
-        .select("agent_context, booking_url, agent_role, agent_tone, agent_goal, brochure_url, brochure_filename, brochure_mode")
+        .select("agent_context, booking_url, agent_role, agent_tone, agent_goal, brochure_url, brochure_filename, brochure_mode, response_delay_seconds")
         .eq("client_id", convRow.brand_id)
         .maybeSingle();
+      if (settings?.response_delay_seconds) {
+        responseDelaySeconds = Math.max(0, Math.min(300, Number(settings.response_delay_seconds) || 0));
+      }
       if (settings?.brochure_url && settings.brochure_mode && settings.brochure_mode !== "off") {
         brochure = {
           url: settings.brochure_url as string,
@@ -218,6 +222,12 @@ export async function processWithAIAgent(
     }
   } catch (e) {
     console.warn("[chatbot] brand context lookup failed:", e);
+  }
+
+  // Intervalo de respuesta configurable por empresa: espera antes de contestar
+  // para una sensación más humana (0 = inmediato; tope 300s por serverless).
+  if (responseDelaySeconds > 0) {
+    await new Promise((resolve) => setTimeout(resolve, responseDelaySeconds * 1000));
   }
 
   let rawResponse: string;

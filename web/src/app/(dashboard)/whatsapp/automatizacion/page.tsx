@@ -30,6 +30,7 @@ interface Settings {
   brochure_url: string | null;
   brochure_filename: string | null;
   brochure_mode: string;
+  response_delay_seconds: number;
 }
 
 const DEFAULT_CONTEXT = `Eres el asesor comercial de esta empresa. Tu objetivo es calificar al lead y llevarlo a agendar una cita.
@@ -60,6 +61,7 @@ const emptySettings: Settings = {
   brochure_url: null,
   brochure_filename: null,
   brochure_mode: "off",
+  response_delay_seconds: 0,
 };
 
 export default function LeadAutomationPage() {
@@ -314,6 +316,29 @@ export default function LeadAutomationPage() {
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className="block text-xs text-[#8b949e] mb-1">
+                  ¿Cuánto espera antes de responder? (intervalo)
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    max={300}
+                    className="w-24 rounded-md bg-[#0d1117] border border-[#2d333b] px-3 py-2 text-sm text-white"
+                    value={settings.response_delay_seconds}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        response_delay_seconds: Math.max(0, Math.min(300, Number(e.target.value) || 0)),
+                      }))
+                    }
+                  />
+                  <span className="text-xs text-[#8b949e]">
+                    segundos (0 = responde de inmediato · máx 300 = 5 min)
+                  </span>
+                </div>
               </div>
               <div className="flex items-center justify-between">
                 <label className="block text-xs text-[#8b949e]">

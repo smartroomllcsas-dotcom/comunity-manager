@@ -32,6 +32,7 @@ const putSchema = z.object({
   agent_context: z.string().max(8000).nullable().optional(),
   booking_url: z.string().url().max(500).nullable().optional(),
   max_sends_per_hour: z.number().int().min(1).max(500).optional(),
+  response_delay_seconds: z.number().int().min(0).max(300).optional(),
 });
 
 async function loadPayload(clientId: string) {
