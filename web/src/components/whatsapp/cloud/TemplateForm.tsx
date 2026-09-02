@@ -14,6 +14,8 @@ export interface TemplateFormValue {
   category: WaTemplateCategory;
   components: WaComponent[];
   tag: string;
+  /** Ejemplo real de cada variable, en orden ({{1}}→[0], {{2}}→[1], …). */
+  examples: string[];
 }
 
 const DEFAULT: TemplateFormValue = {
@@ -22,6 +24,7 @@ const DEFAULT: TemplateFormValue = {
   category: "UTILITY",
   components: [{ type: "BODY", text: "Hola {{1}}, tu pedido {{2}} fue enviado." }],
   tag: "",
+  examples: ["Juan", "#1045"],
 };
 
 const LANGUAGES = [
@@ -235,6 +238,36 @@ export function TemplateForm({
           </p>
         </div>
 
+        {/* Ejemplos por variable (Meta los exige para aprobar) */}
+        {variables > 0 && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
+            <h4 className="text-sm font-medium text-amber-300">Ejemplos para variables</h4>
+            <p className="text-xs text-[#8b949e]">
+              Escribe un valor de muestra para cada variable — es lo que Meta usa para revisar
+              la plantilla (no se envía a tus clientes).
+            </p>
+            {Array.from({ length: variables }, (_, i) => (
+              <div key={i}>
+                <label className="block text-xs text-amber-200 mb-1">
+                  Ejemplo para {`{{${i + 1}}}`}
+                </label>
+                <input
+                  className="input w-full"
+                  value={value.examples[i] ?? ""}
+                  onChange={(e) =>
+                    setValue((v) => {
+                      const ex = [...v.examples];
+                      ex[i] = e.target.value;
+                      return { ...v, examples: ex };
+                    })
+                  }
+                  placeholder={i === 0 ? "Juan" : "#1045"}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* FOOTER opcional */}
         <div className="rounded-lg border border-[#2d333b] bg-[#0d1117] p-3">
           <div className="flex items-center justify-between mb-2">
@@ -343,7 +376,7 @@ export function TemplateForm({
           <h4 className="text-sm text-[#8b949e]">Vista previa</h4>
           <TemplatePreview
             components={value.components}
-            samples={Array.from({ length: variables }, (_, i) => `Muestra ${i + 1}`)}
+            samples={Array.from({ length: variables }, (_, i) => value.examples[i] || `Muestra ${i + 1}`)}
           />
           <p className="text-xs text-[#8b949e]">Variables se rellenan con datos reales al enviar.</p>
         </div>

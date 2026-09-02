@@ -35,27 +35,33 @@ export default function NewTemplatePage() {
    * example igual). Convertimos a parámetros con nombre ({{var1}}) y
    * generamos los example obligatorios antes de enviar a Meta.
    */
-  function toNamedParams(components: TemplateFormValue["components"]) {
+  // Convierte {{1}} → {{var1}} (Meta v26 rechaza posicional en este WABA) y
+  // adjunta los ejemplos REALES que el usuario escribió por variable.
+  function toNamedParams(
+    components: TemplateFormValue["components"],
+    examples: string[]
+  ) {
     let hasVars = false;
     const converted = components.map((c) => {
       if (!c.text || !/\{\{\s*\d+\s*\}\}/.test(c.text)) return c;
       hasVars = true;
-      const names: string[] = [];
+      const nums: number[] = [];
       const text = c.text.replace(/\{\{\s*(\d+)\s*\}\}/g, (_m, n) => {
-        const name = `var${n}`;
-        if (!names.includes(name)) names.push(name);
-        return `{{${name}}}`;
+        const num = Number(n);
+        if (!nums.includes(num)) nums.push(num);
+        return `{{var${num}}}`;
       });
+      const exampleFor = (num: number) => examples[num - 1] || `Ejemplo ${num}`;
       const example =
         c.type === "BODY"
           ? {
-              body_text_named_params: names.map((name, i) => ({
-                param_name: name,
-                example: `Ejemplo ${i + 1}`,
+              body_text_named_params: nums.map((num) => ({
+                param_name: `var${num}`,
+                example: exampleFor(num),
               })),
             }
           : c.type === "HEADER"
-          ? { header_text: names.map((_n, i) => `Ejemplo ${i + 1}`) }
+          ? { header_text: nums.map((num) => exampleFor(num)) }
           : undefined;
       return { ...c, text, ...(example ? { example } : {}) };
     });
@@ -69,7 +75,7 @@ export default function NewTemplatePage() {
     }
     setSubmitting(true);
     try {
-      const { converted, parameterFormat } = toNamedParams(v.components);
+      const { converted, parameterFormat } = toNamedParams(v.components, v.examples);
       const res = await fetch("/api/whatsapp/cloud/templates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
