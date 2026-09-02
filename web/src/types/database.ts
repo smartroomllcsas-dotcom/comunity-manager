@@ -670,6 +670,8 @@ export interface AIActionConfig {
 export interface AIAgent {
   id: string;
   organization_id: string;
+  /** Empresa/marca dueña del agente (cm_clients.id). null = agente general. */
+  brand_id?: string | null;
   name: string;
   description: string | null;
   emoji: string;

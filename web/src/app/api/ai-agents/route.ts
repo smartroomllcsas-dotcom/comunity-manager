@@ -78,24 +78,31 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { name, description, emoji, agent_type, system_prompt, actions, max_tokens, is_default } = body;
+  const { name, description, emoji, agent_type, system_prompt, actions, max_tokens, is_default, brand_id } = body;
 
   if (!name?.trim()) {
     return Response.json({ error: "El nombre es requerido" }, { status: 400 });
   }
 
-  // If setting as default, unset other defaults
+  // brand_id define a qué empresa pertenece el agente (modelo de agencia).
+  // null = agente general (sin empresa). El predeterminado es POR empresa:
+  // sólo se limpia el default dentro del mismo ámbito (misma marca, o los
+  // agentes sin marca entre sí).
+  const brandId: string | null = brand_id || null;
   if (is_default) {
-    await admin
+    let unset = admin
       .from("ai_agents")
       .update({ is_default: false })
       .eq("organization_id", agent.organization_id);
+    unset = brandId ? unset.eq("brand_id", brandId) : unset.is("brand_id", null);
+    await unset;
   }
 
   const { data: aiAgent, error } = await admin
     .from("ai_agents")
     .insert({
       organization_id: agent.organization_id,
+      brand_id: brandId,
       name: name.trim(),
       description: description || null,
       emoji: emoji || "🤖",

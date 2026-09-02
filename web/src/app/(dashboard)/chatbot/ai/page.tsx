@@ -148,9 +148,33 @@ function getDefaultActions(): AIActionConfig[] {
   }));
 }
 
+/* ─── Empresas (marcas) para asignar agentes por empresa ─── */
+type BrandLite = { id: string; name: string };
+function useBrands(): BrandLite[] {
+  const [brands, setBrands] = useState<BrandLite[]>([]);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/inbox/brands", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : { brands: [] }))
+      .then((d) => {
+        if (alive) setBrands((d.brands as BrandLite[]) || []);
+      })
+      .catch(() => {
+        if (alive) setBrands([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return brands;
+}
+
 /* ─── Main Page ─── */
 export default function AIAgentsPage() {
   const { data: agents = [], isLoading } = useAIAgents();
+  const brands = useBrands();
+  const brandName = (id?: string | null) =>
+    id ? brands.find((b) => b.id === id)?.name ?? "Empresa" : "General (todas)";
   const createAgent = useCreateAIAgent();
   const updateAgent = useUpdateAIAgent();
   const deleteAgent = useDeleteAIAgent();
@@ -294,6 +318,15 @@ export default function AIAgentsPage() {
                       </span>
                     )}
                   </h4>
+                  <p
+                    className={`text-[11px] mb-2 inline-flex items-center px-1.5 py-0.5 rounded-full border ${
+                      agent.brand_id
+                        ? "bg-blue-500/10 text-blue-300 border-blue-500/20"
+                        : "bg-[#0d1117] text-[#8b949e] border-[#2d333b]"
+                    }`}
+                  >
+                    🏢 {brandName(agent.brand_id)}
+                  </p>
                   <p className="text-xs text-[#8b949e] mb-3 leading-relaxed line-clamp-2">
                     {agent.description || agent.system_prompt.slice(0, 100) + "..."}
                   </p>
@@ -364,6 +397,8 @@ function AgentEditor({
 
   const isNew = !agent;
 
+  const brands = useBrands();
+  const [brandId, setBrandId] = useState<string>(agent?.brand_id || "");
   const [name, setName] = useState(agent?.name || "");
   const [description, setDescription] = useState(agent?.description || "");
   const [showDescription, setShowDescription] = useState(!!agent?.description);
@@ -427,6 +462,7 @@ function AgentEditor({
         system_prompt: systemPrompt,
         actions,
         max_tokens: maxTokens,
+        brand_id: brandId || null,
       };
 
       if (isNew) {
@@ -601,6 +637,30 @@ function AgentEditor({
                   placeholder="Ej: Asistente de Ventas"
                   className="bg-[#0d1117] border-[#2d333b] text-white h-9"
                 />
+              </div>
+
+              {/* Empresa (marca) — a qué empresa atiende este agente */}
+              <div className="space-y-2">
+                <Label className="text-xs text-[#8b949e]">Empresa</Label>
+                <Select
+                  value={brandId || "none"}
+                  onValueChange={(v) => setBrandId(!v || v === "none" ? "" : v)}
+                >
+                  <SelectTrigger className="bg-[#0d1117] border-[#2d333b] text-white h-9">
+                    <SelectValue placeholder="Selecciona la empresa..." />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#1a1f2e] border-[#2d333b]">
+                    <SelectItem value="none">General (todas las empresas)</SelectItem>
+                    {brands.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-[#8b949e]">
+                  Este agente responderá SOLO a los leads de esta empresa. Cada empresa debe tener el suyo; &quot;General&quot; se usa como respaldo si una empresa no tiene agente propio.
+                </p>
               </div>
 
               {/* Description toggle */}
