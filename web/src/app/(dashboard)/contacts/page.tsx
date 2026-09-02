@@ -19,13 +19,6 @@ export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 25;
 
-const lifecycleColors: Record<string, string> = {
-  lead: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-  customer: "bg-green-500/20 text-green-400 border-green-500/30",
-  opportunity: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-  churned: "bg-red-500/20 text-red-400 border-red-500/30",
-};
-
 const tagColors = [
   "bg-purple-500/20 text-purple-400 border-purple-500/30",
   "bg-cyan-500/20 text-cyan-400 border-cyan-500/30",
@@ -71,6 +64,24 @@ export default function ContactsPage() {
   const [addContactDialogOpen, setAddContactDialogOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
 
+  // Etapas del ciclo de vida (estado del cliente): id → { name, color }.
+  const [stages, setStages] = useState<{ id: string; name: string; color: string }[]>([]);
+  const [lifecycleFilter, setLifecycleFilter] = useState<string>("");
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/lifecycle", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => {
+        const arr = Array.isArray(d) ? d : d.stages || d.data || d.lifecycle_stages || [];
+        if (alive) setStages(arr.map((s: { id: string; name: string; color?: string }) => ({ id: s.id, name: s.name, color: s.color || "#6b7280" })));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const stageById = new Map(stages.map((s) => [s.id, s]));
+
   const { data: segments } = useSegments();
   const { data: restrictedLeads } = useRestrictedLeads(brandId || undefined);
 
@@ -80,7 +91,7 @@ export default function ContactsPage() {
   // Reset to page 0 when search changes
   useEffect(() => {
     setPage(0);
-  }, [search, activeSegment]);
+  }, [search, activeSegment, lifecycleFilter]);
 
   const { data: contactsData, isLoading } = useContacts({
     brandId,
@@ -88,6 +99,7 @@ export default function ContactsPage() {
     page,
     pageSize: PAGE_SIZE,
     visibilityStatus: activeSegment === "blocked" ? "restricted" : undefined,
+    lifecycleStageId: lifecycleFilter || undefined,
   });
 
   const contacts = contactsData?.contacts;
@@ -246,10 +258,20 @@ export default function ContactsPage() {
               className="pl-9 bg-[#0d1117] border-[#2d333b] text-white placeholder:text-[#8b949e] focus:border-blue-500 h-9"
             />
           </div>
-          <Button variant="outline" size="sm" className="bg-transparent border-[#2d333b] text-[#8b949e] hover:bg-[#1a1f2e] hover:text-white">
-            <Filter className="h-4 w-4 mr-1.5" />
-            Filtros
-          </Button>
+          <div className="relative flex items-center">
+            <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#8b949e] pointer-events-none" />
+            <select
+              aria-label="Filtrar por estado"
+              value={lifecycleFilter}
+              onChange={(e) => setLifecycleFilter(e.target.value)}
+              className="h-9 rounded-md border border-[#2d333b] bg-[#0d1117] pl-8 pr-3 text-sm text-white"
+            >
+              <option value="">Todos los estados</option>
+              {stages.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
           <div className="flex-1" />
           <Button
             variant="outline"
@@ -333,7 +355,9 @@ export default function ContactsPage() {
                   const displayName = contact.name || "Sin nombre";
                   const initials = displayName.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
                   const restricted = contact.visibility_status === "restricted";
-                  const lifecycle = restricted ? null : contact.custom_fields?.lifecycle;
+                  // Estado real del cliente: contacts.lifecycle_stage_id → etapa.
+                  const stageId = (contact as { lifecycle_stage_id?: string }).lifecycle_stage_id;
+                  const stage = restricted || !stageId ? null : stageById.get(stageId);
                   const email = restricted ? null : contact.custom_fields?.email;
                   const assignedTo = restricted ? null : contact.custom_fields?.assigned_to;
 
@@ -369,9 +393,13 @@ export default function ContactsPage() {
                         {restricted ? <span className="text-amber-300">Oculto por límite del plan</span> : contact.wa_id || "---"}
                       </td>
                       <td className="px-3 py-2.5">
-                        {lifecycle ? (
-                          <span className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full border ${lifecycleColors[lifecycle] || "bg-gray-500/20 text-gray-400 border-gray-500/30"}`}>
-                            {lifecycle}
+                        {stage ? (
+                          <span
+                            className="inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium rounded-full border"
+                            style={{ color: stage.color, borderColor: `${stage.color}55`, backgroundColor: `${stage.color}22` }}
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: stage.color }} />
+                            {stage.name}
                           </span>
                         ) : (
                           <span className="text-[#8b949e] text-sm">---</span>
