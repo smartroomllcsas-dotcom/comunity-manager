@@ -21,15 +21,34 @@ export async function GET() {
     .single();
   if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
 
+  // No usamos embed `knowledge_sources(*)`: la FK cruzada de esquemas no está
+  // en el schema cache de PostgREST y hacía fallar TODO el listado con
+  // "Could not find a relationship between 'ai_agents' and 'knowledge_sources'".
+  // Traemos los agentes y adjuntamos sus fuentes en una consulta aparte.
   const { data: aiAgents, error } = await admin
     .from("ai_agents")
-    .select("*, knowledge_sources(*)")
+    .select("*")
     .eq("organization_id", agent.organization_id)
     .order("created_at", { ascending: false });
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
-  return Response.json({ agents: aiAgents || [] });
+  let agents = aiAgents || [];
+  if (agents.length) {
+    const { data: sources } = await admin
+      .from("knowledge_sources")
+      .select("*")
+      .in("ai_agent_id", agents.map((a) => a.id));
+    const byAgent: Record<string, unknown[]> = {};
+    for (const s of sources || []) {
+      const key = (s as { ai_agent_id?: string }).ai_agent_id;
+      if (!key) continue;
+      (byAgent[key] ||= []).push(s);
+    }
+    agents = agents.map((a) => ({ ...a, knowledge_sources: byAgent[a.id] || [] }));
+  }
+
+  return Response.json({ agents });
 }
 
 export async function POST(request: NextRequest) {
