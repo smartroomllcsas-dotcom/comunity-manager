@@ -7,6 +7,7 @@ import { BrandAccountPicker } from "@/components/whatsapp/cloud/BrandAccountPick
 import { StatusBadge, QualityBadge } from "@/components/whatsapp/cloud/StatusBadge";
 import { useActiveBrand } from "@/hooks/useActiveBrand";
 import type { CmWaTemplate } from "@/lib/whatsapp/cloud/types";
+import { Search, X } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -140,35 +141,80 @@ export default function WhatsAppTemplatesPage() {
       </div>
 
       <div className="px-6 py-4 space-y-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <BrandAccountPicker
-            clientId={clientId}
-            accountId={accountId}
-            onChange={(cid, aid) => {
-              setClientId(cid);
-              setAccountId(aid);
-            }}
-          />
-          <label className="block">
-            <span className="block text-xs text-[#8b949e] mb-1">Estado</span>
-            <select className="input min-w-[180px]" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              {STATUS_FILTERS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-          </label>
-          <label className="block flex-1 max-w-md">
-            <span className="block text-xs text-[#8b949e] mb-1">Buscar por nombre</span>
-            <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="pedido_..." />
-          </label>
-        </div>
-
-        {clientId && (
-          <div className="flex gap-3 text-xs text-[#8b949e]">
-            <span>Total: <strong className="text-white">{counts.total}</strong></span>
-            <span>Aprobadas: <strong className="text-green-400">{counts.approved}</strong></span>
-            <span>Pendientes: <strong className="text-yellow-400">{counts.pending}</strong></span>
-            <span>Rechazadas: <strong className="text-red-400">{counts.rejected}</strong></span>
+        {/* Barra de filtros */}
+        <div className="rounded-xl border border-[#2d333b] bg-[#161b22] p-4 space-y-4">
+          {/* Fila 1: marca/cuenta + buscador */}
+          <div className="flex flex-wrap items-end gap-3">
+            <BrandAccountPicker
+              clientId={clientId}
+              accountId={accountId}
+              onChange={(cid, aid) => {
+                setClientId(cid);
+                setAccountId(aid);
+              }}
+            />
+            <label className="block flex-1 min-w-[220px]">
+              <span className="block text-xs text-[#8b949e] mb-1">Buscar</span>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#8b949e]" />
+                <input
+                  className="input w-full pl-9 pr-9"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Buscar por nombre de plantilla…"
+                />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8b949e] hover:text-white"
+                    aria-label="Limpiar búsqueda"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            </label>
           </div>
-        )}
+
+          {/* Fila 2: chips de estado con contadores */}
+          {clientId && (
+            <div className="flex flex-wrap gap-2">
+              {STATUS_FILTERS.map((s) => {
+                const active = statusFilter === s.value;
+                const count =
+                  s.value === "" ? counts.total
+                  : s.value === "APPROVED" ? counts.approved
+                  : s.value === "PENDING" ? counts.pending
+                  : s.value === "REJECTED" ? counts.rejected
+                  : null;
+                return (
+                  <button
+                    key={s.value}
+                    type="button"
+                    onClick={() => setStatusFilter(s.value)}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                      active
+                        ? "border-blue-500 bg-blue-500/15 text-blue-300"
+                        : "border-[#2d333b] bg-[#0d1117] text-[#8b949e] hover:border-[#3d444d] hover:text-white"
+                    }`}
+                  >
+                    {s.label}
+                    {count !== null && (
+                      <span
+                        className={`rounded-full px-1.5 py-0.5 text-[10px] leading-none ${
+                          active ? "bg-blue-500/30 text-blue-100" : "bg-[#21262d] text-[#8b949e]"
+                        }`}
+                      >
+                        {count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         {!clientId ? (
           <div className="rounded-lg border border-[#2d333b] bg-[#161b22] p-8 text-center text-[#8b949e]">
