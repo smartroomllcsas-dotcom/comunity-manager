@@ -118,7 +118,7 @@ export default function WhatsAppTemplatesPage() {
           </div>
           <div className="flex gap-2">
             <Link
-              href="/whatsapp/automatizacion"
+              href="/automatizacion-leads"
               className="px-3 py-2 rounded-md bg-[#21262d] hover:bg-[#30363d] text-sm border border-[#30363d]"
             >
               ⚡ Automatización de leads

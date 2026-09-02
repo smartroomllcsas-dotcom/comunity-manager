@@ -17,6 +17,18 @@ const nextConfig: NextConfig = {
     '/api/uploads/chat-media': ['./node_modules/ffmpeg-static/**/*'],
   },
   allowedDevOrigins: ['3c2a-38-191-41-53.ngrok-free.app'],
+  async redirects() {
+    return [
+      // La pantalla de automatización pasó de /whatsapp/automatizacion (nombre
+      // confuso, parecía solo WhatsApp) a /automatizacion-leads. Redirigimos la
+      // ruta vieja para no romper enlaces o marcadores guardados.
+      {
+        source: '/whatsapp/automatizacion',
+        destination: '/automatizacion-leads',
+        permanent: true,
+      },
+    ]
+  },
   async headers() {
     return [
       {
