@@ -116,7 +116,8 @@ const CM_SECTIONS: NavSection[] = [
     items: [
       { href: "/settings/channels", label: "Canales", icon: Plug },
       { href: "/settings/whatsapp", label: "WhatsApp", icon: MessageSquare },
-      { href: "/settings/templates", label: "Templates", icon: FileText },
+      { href: "/whatsapp/templates", label: "Plantillas WhatsApp", icon: FileText },
+      { href: "/whatsapp/automatizacion", label: "Automatización IA", icon: Bot },
       { href: "/settings/quick-replies", label: "Respuestas rápidas", icon: Reply },
       { href: "/settings/lifecycle", label: "Lifecycle", icon: Activity },
       { href: "/settings/closing-notes", label: "Notas de cierre", icon: FileText },
