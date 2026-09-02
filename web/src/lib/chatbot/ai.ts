@@ -4,6 +4,10 @@ import { processAIActions, executeAIActions } from "@/lib/ai/actions";
 import type { AIActionConfig } from "@/types/database";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+// Modelo del agente de IA. Configurable por env para poder cambiarlo sin
+// redeploy. El anterior "claude-sonnet-4-20250514" quedó descontinuado y
+// Anthropic devolvía 404 (model not_found), por eso el agente no respondía.
+const CHATBOT_MODEL = process.env.CHATBOT_AI_MODEL || "claude-sonnet-5";
 
 export async function generateAIResponse(params: {
   systemPrompt: string;
@@ -24,7 +28,7 @@ export async function generateAIResponse(params: {
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
+      model: CHATBOT_MODEL,
       max_tokens: params.maxTokens || 1024,
       system: fullSystemPrompt,
       messages: params.conversationHistory,
