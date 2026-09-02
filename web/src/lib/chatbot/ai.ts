@@ -41,7 +41,19 @@ export async function generateAIResponse(params: {
   }
 
   const data = await response.json();
-  return data.content[0].text;
+  // Extrae el texto de TODOS los bloques tipo "text" (no asumir content[0]):
+  // algunos modelos devuelven otros bloques primero, y content[0].text sería
+  // undefined → rompía processAIActions con "Cannot read properties of
+  // undefined (reading 'replace')".
+  const blocks: Array<{ type?: string; text?: string }> = Array.isArray(data?.content)
+    ? data.content
+    : [];
+  const text = blocks
+    .filter((b) => b?.type === "text" && typeof b.text === "string")
+    .map((b) => b.text as string)
+    .join("")
+    .trim();
+  return text;
 }
 
 interface AIContext {
@@ -244,6 +256,12 @@ export async function processWithAIAgent(
     });
   } catch (error) {
     console.error("AI call failed:", error);
+    return false;
+  }
+
+  // Sin texto de la IA no hay nada que enviar (evita crash y mensajes vacíos).
+  if (!rawResponse || !rawResponse.trim()) {
+    console.warn("[chatbot] respuesta de IA vacía; no se envía nada");
     return false;
   }
 
