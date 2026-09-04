@@ -28,6 +28,8 @@ interface PendingLead {
 
 /** Motivo técnico de no envío → texto para el usuario. */
 function reasonLabel(reason: string): string {
+  // Meta aceptó el envío pero no pudo entregarlo (número sin WhatsApp, etc.).
+  if (reason.startsWith("fallido (")) return `WhatsApp no lo entregó: ${reason.slice(9, -1)}`;
   if (reason.startsWith("no_enviado (")) reason = reason.slice(12, -1);
   const map: Record<string, string> = {
     disabled: "abordaje automático apagado",

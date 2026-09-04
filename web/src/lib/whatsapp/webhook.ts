@@ -292,6 +292,70 @@ export async function processStatusUpdate(status: WebhookStatus, phoneNumberId: 
     .update({ status: status.status })
     .eq("wa_message_id", status.id)
     .in("conversation_id", conversationIds);
+
+  // Plantilla de primer contacto que Meta NO pudo entregar (número sin
+  // WhatsApp, país con restricciones de marketing, etc.): se marca el lead
+  // como "fallido" para que vuelva a la lista de pendientes con el motivo, y
+  // se deja nota para que el asesor lo contacte por otro medio.
+  if (status.status === "failed") {
+    await markFirstTouchFailed(admin, status, conversationIds);
+  }
+}
+
+const WA_ERROR_LABELS: Record<number, string> = {
+  131026: "el número no tiene WhatsApp o no acepta mensajes",
+  131049: "Meta limitó los mensajes de marketing a este número",
+  131050: "el usuario dejó de recibir mensajes de marketing",
+  131047: "ventana de 24 h vencida",
+  130472: "número en experimento de Meta (no recibe marketing)",
+  131053: "medio no descargable",
+  131000: "error genérico de WhatsApp",
+};
+
+async function markFirstTouchFailed(
+  admin: ReturnType<typeof createAdminClient>,
+  status: WebhookStatus,
+  conversationIds: string[],
+) {
+  try {
+    const { data: msg } = await admin
+      .from("messages")
+      .select("id, conversation_id, contact_id, type, is_bot, content")
+      .eq("wa_message_id", status.id)
+      .in("conversation_id", conversationIds)
+      .maybeSingle();
+    if (!msg || msg.type !== "template" || !msg.is_bot || !msg.contact_id) return;
+
+    const err = status.errors?.[0];
+    const reason = err
+      ? `${WA_ERROR_LABELS[err.code] || err.title || "error"} (código ${err.code})`
+      : "sin motivo reportado por Meta";
+
+    const { data: contact } = await admin
+      .from("contacts")
+      .select("custom_fields")
+      .eq("id", msg.contact_id)
+      .maybeSingle();
+    const cf = { ...((contact?.custom_fields as Record<string, unknown> | null) || {}) };
+    if (cf.wa_first_touch !== undefined) {
+      cf.wa_first_touch = `fallido (${reason})`;
+      cf.wa_first_touch_failed_at = new Date().toISOString();
+      await admin.from("contacts").update({ custom_fields: cf }).eq("id", msg.contact_id);
+    }
+
+    const templateName =
+      (msg.content as { template_name?: string } | null)?.template_name || "plantilla";
+    const { addSystemNote } = await import("@/lib/smarttalk/internal-notes");
+    await addSystemNote({
+      conversationId: msg.conversation_id as string,
+      content:
+        `⚠️ WhatsApp no pudo entregar la ${templateName}: ${reason}. ` +
+        `Conviene contactar al lead por llamada o correo.`,
+      prefix: "[WhatsApp]",
+    });
+  } catch (e) {
+    console.warn("[whatsapp-webhook] no se pudo marcar el primer contacto como fallido:", e);
+  }
 }
 
 /**
