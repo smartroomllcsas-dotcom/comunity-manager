@@ -57,6 +57,24 @@ export async function generateAIResponse(params: {
   return text;
 }
 
+// Ventana para agrupar mensajes seguidos del cliente antes de responder.
+const COALESCE_INBOUND_MS = Number(process.env.CHATBOT_COALESCE_MS) || 4000;
+
+async function latestInboundMessageId(
+  admin: ReturnType<typeof createAdminClient>,
+  conversationId: string
+): Promise<string | null> {
+  const { data } = await admin
+    .from("messages")
+    .select("id")
+    .eq("conversation_id", conversationId)
+    .eq("direction", "inbound")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data?.id as string | undefined) || null;
+}
+
 /**
  * metadata de la conversación con un parche aplicado. Antes se escribía
  * `{ ai_turn_count, ai_agent_id }` a secas y se perdía todo lo demás:
@@ -317,8 +335,17 @@ export async function processWithAIAgent(
 
   // Intervalo de respuesta configurable por empresa: espera antes de contestar
   // para una sensación más humana (0 = inmediato; tope 300s por serverless).
-  if (responseDelaySeconds > 0) {
-    await new Promise((resolve) => setTimeout(resolve, responseDelaySeconds * 1000));
+  // Además, un mínimo de espera para agrupar mensajes seguidos del cliente
+  // ("No tengo nada" + "No"): si durante la espera llegó otro mensaje, esta
+  // ejecución se retira y responde la que disparó el mensaje más reciente,
+  // que ya tiene todo el contexto. Antes el agente contestaba dos veces.
+  const latestInboundBefore = await latestInboundMessageId(admin, context.conversationId);
+  await new Promise((resolve) =>
+    setTimeout(resolve, Math.max(responseDelaySeconds * 1000, COALESCE_INBOUND_MS))
+  );
+  const latestInboundAfter = await latestInboundMessageId(admin, context.conversationId);
+  if (latestInboundAfter && latestInboundAfter !== latestInboundBefore) {
+    return true; // llegó un mensaje más nuevo: responde su ejecución
   }
 
   let rawResponse: string;
@@ -492,6 +519,12 @@ export async function processWithAI(
     config.knowledge_base.length > 0
       ? config.knowledge_base.join("\n\n")
       : undefined;
+
+  // Agrupar mensajes seguidos del cliente (ver processWithAIAgent).
+  const latestInboundBefore = await latestInboundMessageId(admin, context.conversationId);
+  await new Promise((resolve) => setTimeout(resolve, COALESCE_INBOUND_MS));
+  const latestInboundAfter = await latestInboundMessageId(admin, context.conversationId);
+  if (latestInboundAfter && latestInboundAfter !== latestInboundBefore) return true;
 
   let aiResponse: string;
   try {
