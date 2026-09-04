@@ -63,10 +63,18 @@ export async function DELETE(
     }
   }
 
-  const { error } = await admin
-    .from("invitations")
-    .update({ status: "cancelled" })
-    .eq("id", id);
+  // Sólo se pueden cancelar invitaciones que siguen pendientes.
+  if (invitation.status !== "pending") {
+    return Response.json(
+      { error: "La invitación ya fue aceptada o venció; no se puede cancelar." },
+      { status: 409 }
+    );
+  }
+
+  // Se elimina la fila (las asignaciones de marca caen en cascada). Antes se
+  // intentaba poner status="cancelled", valor que el enum invitation_status
+  // no admite: la cancelación fallaba siempre y la UI no avisaba.
+  const { error } = await admin.from("invitations").delete().eq("id", id);
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
 

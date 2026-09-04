@@ -245,15 +245,23 @@ export default function AgentsSettingsPage() {
     }
   }
 
-  async function handleCancelInvitation(invitationId: string) {
+  async function handleCancelInvitation(invitationId: string, email: string) {
+    if (!window.confirm(`¿Cancelar la invitación a ${email}? El enlace que recibió dejará de funcionar.`)) {
+      return;
+    }
     setActionLoading(invitationId);
     try {
       const res = await fetch(`/api/invitations/${invitationId}`, {
         method: "DELETE",
       });
-      if (res.ok) {
-        queryClient.invalidateQueries({ queryKey: ["invitations"] });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        window.alert(payload.error || "No se pudo cancelar la invitación. Inténtalo de nuevo.");
+        return;
       }
+      queryClient.invalidateQueries({ queryKey: ["invitations"] });
+    } catch {
+      window.alert("No se pudo cancelar la invitación. Revisa tu conexión e inténtalo de nuevo.");
     } finally {
       setActionLoading(null);
     }
@@ -819,7 +827,7 @@ export default function AgentsSettingsPage() {
                                 : "Reenviar"}
                             </button>
                             <button
-                              onClick={() => handleCancelInvitation(invitation.id)}
+                              onClick={() => handleCancelInvitation(invitation.id, invitation.email)}
                               disabled={actionLoading === invitation.id}
                               className="text-xs text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
                             >
