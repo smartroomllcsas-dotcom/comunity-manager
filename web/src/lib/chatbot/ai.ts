@@ -188,7 +188,7 @@ export async function processWithAIAgent(
   try {
     const { data: convRow } = await admin
       .from("conversations")
-      .select("brand_id")
+      .select("brand_id, metadata")
       .eq("id", context.conversationId)
       .maybeSingle();
     if (convRow?.brand_id) {
@@ -223,7 +223,21 @@ export async function processWithAIAgent(
         if (settings.agent_context) {
           parts.push("Instrucciones adicionales del administrador:\n" + settings.agent_context);
         }
-        if (settings.booking_url) {
+        // Reserva hecha en Cal.com (la escribe /api/webhook/calcom): el agente
+        // debe confirmarla y dejar de insistir con el enlace.
+        const booking = (convRow.metadata as { booking?: { status?: string; when_text?: string; title?: string } } | null)?.booking;
+        if (booking?.status === "agendada" || booking?.status === "reprogramada") {
+          parts.push(
+            `IMPORTANTE: el cliente YA agendó la reunión "${booking.title || "Reunión"}" para ${booking.when_text}. ` +
+              `NO vuelvas a enviar el enlace de agenda ni pidas agendar. Si escribe, confírmale la cita, ` +
+              `resuelve dudas puntuales y dile que el equipo lo contactará a esa hora.`
+          );
+        } else if (booking?.status === "cancelada") {
+          parts.push(
+            `El cliente canceló la reunión que tenía agendada. Si retoma la charla, pregunta con tacto si quiere ` +
+              `reprogramar y, sólo si acepta, comparte de nuevo el enlace de agenda.`
+          );
+        } else if (settings.booking_url) {
           parts.push(
             `Para agendar la cita comparte este enlace de agenda: ${settings.booking_url}\n` +
               `No compartas el enlace en el primer mensaje; primero entiende la necesidad del cliente.`
