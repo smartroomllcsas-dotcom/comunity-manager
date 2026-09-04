@@ -31,6 +31,7 @@ export const maxDuration = 60;
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || "https://www.comunitymanager.io").replace(/\/$/, "");
 const DEFAULT_TZ = process.env.CALCOM_DEFAULT_TIMEZONE || "America/Bogota";
+const CALCOM_BASE_URL = (process.env.CALCOM_BASE_URL?.trim() || "https://cal.smartgenapp.com").replace(/\/$/, "");
 
 type CalPerson = { name?: string; email?: string; timeZone?: string; phoneNumber?: string };
 type CalPayload = {
@@ -319,6 +320,8 @@ export async function POST(request: NextRequest) {
   cf.cita_inicio = payload.startTime || null;
   cf.cita_cuando = whenText;
   cf.cita_uid = payload.uid || null;
+  // Enlace a la reserva en Cal.com (ver/reprogramar/cancelar) para la ficha del contacto.
+  cf.cita_url = payload.uid ? `${CALCOM_BASE_URL}/booking/${encodeURIComponent(payload.uid)}` : null;
   if (email) cf.cita_correo = email;
   if (phone) cf.cita_telefono = `+${phone}`;
   if (state === "agendada") cf.cita_agendada_at = now;

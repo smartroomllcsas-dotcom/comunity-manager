@@ -6,8 +6,15 @@ import { useParams, useRouter } from "next/navigation";
 import type { Contact, Conversation } from "@/types/database";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { ArrowLeft, Phone, Mail, Tag, MessageSquare, Clock, Trash2 } from "lucide-react";
+import { ArrowLeft, Phone, Mail, Tag, MessageSquare, Clock, Trash2, CalendarCheck, ExternalLink } from "lucide-react";
 import Link from "next/link";
+
+/** Estado de la cita guardada por el webhook de Cal.com (custom_fields.cita_*). */
+const citaConfig: Record<string, { label: string; bg: string; text: string; border: string }> = {
+  agendada: { label: "Agendada", bg: "bg-green-500/15", text: "text-green-300", border: "border-green-500/30" },
+  reprogramada: { label: "Reprogramada", bg: "bg-amber-500/15", text: "text-amber-300", border: "border-amber-500/30" },
+  cancelada: { label: "Cancelada", bg: "bg-red-500/15", text: "text-red-300", border: "border-red-500/30" },
+};
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +75,18 @@ export default function ContactDetailPage() {
 
   const displayName = contact.name || "Sin nombre";
   const initials = displayName.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
+
+  // Cita (Cal.com) y chat más reciente, para los accesos directos de la ficha.
+  const cf = (contact.custom_fields || {}) as Record<string, unknown>;
+  const cita = typeof cf.cita_estado === "string" ? citaConfig[cf.cita_estado] : null;
+  const citaCuando = typeof cf.cita_cuando === "string" ? cf.cita_cuando : "";
+  const citaTitulo = typeof cf.cita_titulo === "string" ? cf.cita_titulo : null;
+  const citaUrl = typeof cf.cita_url === "string" && cf.cita_url ? cf.cita_url : null;
+  const citaDatos = [cf.cita_telefono, cf.cita_correo]
+    .filter((v): v is string => typeof v === "string" && v.length > 0)
+    .join(" · ");
+  const latestConversation = conversations?.[0] || null;
+  const chatHref = latestConversation ? `/inbox?conversation=${latestConversation.id}` : null;
 
   async function handleDelete() {
     if (!window.confirm(`¿Eliminar a ${displayName}? Esta acción libera un cupo del plan y no se puede deshacer.`)) {
@@ -158,6 +177,48 @@ export default function ContactDetailPage() {
           </div>
         )}
 
+        {/* Agenda: reunión reservada por el lead en Cal.com */}
+        {contact.visibility_status !== "restricted" && cita && (
+          <div className={`rounded-lg border ${cita.border} ${cita.bg} p-5 mb-6`}>
+            <div className="flex items-start gap-3">
+              <CalendarCheck className={`h-5 w-5 mt-0.5 shrink-0 ${cita.text}`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm font-semibold text-white">Reunión</h3>
+                  <span className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full ${cita.bg} ${cita.text} border ${cita.border}`}>
+                    {cita.label}
+                  </span>
+                </div>
+                <p className="text-base text-white mt-1">{citaCuando}</p>
+                {citaTitulo && <p className="text-xs text-[#8b949e] mt-0.5">{citaTitulo}</p>}
+                {citaDatos && (
+                  <p className="text-xs text-[#8b949e] mt-1.5">Datos dejados al agendar: {citaDatos}</p>
+                )}
+                <div className="flex gap-2 mt-3 flex-wrap">
+                  {chatHref && (
+                    <Link
+                      href={chatHref}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 hover:bg-blue-700 px-3 py-1.5 text-xs font-medium text-white"
+                    >
+                      <MessageSquare className="h-3.5 w-3.5" /> Ir al chat
+                    </Link>
+                  )}
+                  {citaUrl && (
+                    <a
+                      href={citaUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-md border border-[#2d333b] bg-[#161b22] hover:bg-[#21262d] px-3 py-1.5 text-xs font-medium text-white"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" /> Ver reserva en Cal.com
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Información del contacto (respuestas de formulario + atribución) */}
         {contact.visibility_status !== "restricted" &&
           contact.custom_fields &&
@@ -176,7 +237,9 @@ export default function ContactDetailPage() {
                   .filter(
                     ([key, val]) =>
                       val &&
-                      !["quota_restricted", "requires_upgrade", "source", "leadgen_id"].includes(key)
+                      !["quota_restricted", "requires_upgrade", "source", "leadgen_id"].includes(key) &&
+                      // La cita ya se muestra en su propia tarjeta arriba.
+                      !key.startsWith("cita_")
                   )
                   .map(([key, val]) => (
                     <div key={key} className="px-5 py-2.5 flex gap-4 text-sm">
@@ -207,7 +270,11 @@ export default function ContactDetailPage() {
               {conversations?.map((conv) => {
                 const sc = statusConfig[conv.status] || statusConfig.open;
                 return (
-                  <div key={conv.id} className="px-5 py-3 hover:bg-[#161b22] transition-colors flex items-center justify-between">
+                  <Link
+                    key={conv.id}
+                    href={`/inbox?conversation=${conv.id}`}
+                    className="px-5 py-3 hover:bg-[#161b22] transition-colors flex items-center justify-between gap-3"
+                  >
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-white truncate">{conv.last_message_preview || "Sin mensajes"}</p>
                       <p className="text-xs text-[#8b949e] mt-0.5 flex items-center gap-1">
@@ -218,7 +285,8 @@ export default function ContactDetailPage() {
                     <span className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full ${sc.bg} ${sc.text}`}>
                       {sc.label}
                     </span>
-                  </div>
+                    <span className="text-xs text-blue-400 shrink-0">Abrir chat →</span>
+                  </Link>
                 );
               })}
             </div>
