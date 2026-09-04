@@ -332,6 +332,10 @@ export interface AttachmentMeta {
   size_bytes?: number;
   source?: "meta" | "whatsapp" | "respond_io";
   media_error?: string;
+  /** Texto derivado por IA (transcripción / descripción) para el agente. */
+  ai_text?: string;
+  ai_text_source?: string;
+  ai_text_error?: string;
 }
 
 export type MessageContent =

@@ -28,6 +28,7 @@ import {
   type MetaWebhookEntry,
   type MetaWebhookPayload,
 } from "@/lib/smarttalk/meta-parser";
+import { understandInboundMedia, inboundContentToText } from "@/lib/chatbot/media-understanding";
 
 type ContactIdentity = {
   name: string | null;
@@ -617,16 +618,34 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
 
       const duplicateDelivery = isDuplicate || !insertedMessage || insertedMessage.length === 0;
 
-      // Mensaje guardado; el medio se resuelve después y sin bloquear. Un
-      // reenvío duplicado de Meta no vuelve a descargar nada.
-      if (!duplicateDelivery && parsed.type !== "text" && insertedMessage?.[0]?.id) {
-        scheduleAttachmentResolution({
-          messageId: insertedMessage[0].id as string,
+      // Mensaje guardado. Un reenvío duplicado de Meta no vuelve a descargar
+      // nada. Para adjuntos entrantes se descarga el medio y se convierte en
+      // texto (transcripción / descripción) para que el agente de IA también
+      // responda a audios, imágenes y videos. Si eso falla, el medio queda
+      // programado para resolverse después sin bloquear.
+      let mediaText = "";
+      const isAttachment =
+        parsed.type !== "text" && parsed.type !== "location" && insertedMessage?.[0]?.id;
+      if (!duplicateDelivery && isAttachment) {
+        const mediaInput = {
+          messageId: insertedMessage![0].id as string,
           organizationId: channel.organization_id,
           brandId: channel.brand_id,
           channelId: channel.id,
           content: parsed.content as AttachmentContent,
-        });
+        };
+        if (direction === "inbound") {
+          try {
+            mediaText = await understandInboundMedia(mediaInput);
+          } catch (e) {
+            console.error("[meta-webhook] análisis de medio falló:", e);
+            scheduleAttachmentResolution(mediaInput);
+          }
+        } else {
+          scheduleAttachmentResolution(mediaInput);
+        }
+      } else if (!duplicateDelivery && parsed.type === "location") {
+        mediaText = inboundContentToText(parsed.content);
       }
 
       await admin
@@ -647,14 +666,12 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
       if (!duplicateDelivery) processed += 1;
 
       // Agente IA para Messenger/Instagram: los leads entran directo (sin
-      // plantilla). Se dispara solo con mensajes entrantes de texto, no
-      // duplicados. Best-effort — nunca rompe la persistencia del webhook.
-      if (
-        !duplicateDelivery &&
-        direction === "inbound" &&
-        parsed.type === "text" &&
-        parsed.content.type === "text"
-      ) {
+      // plantilla). Se dispara con mensajes entrantes no duplicados: texto, o
+      // el texto derivado de un adjunto. Best-effort — nunca rompe la
+      // persistencia del webhook.
+      const chatbotText =
+        parsed.content.type === "text" ? parsed.content.text : mediaText;
+      if (!duplicateDelivery && direction === "inbound" && chatbotText) {
         try {
           const { processIncomingWithChatbot } = await import("@/lib/chatbot/engine");
           await processIncomingWithChatbot({
@@ -663,7 +680,7 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
             contactId: dbContactId,
             organizationId: channel.organization_id,
             channelId: channel.id,
-            messageText: parsed.content.text,
+            messageText: chatbotText,
           });
         } catch (e) {
           console.error("[meta-webhook] chatbot Messenger/IG falló:", e);

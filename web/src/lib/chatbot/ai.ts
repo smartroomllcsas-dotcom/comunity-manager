@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendText, getOrgWhatsAppCredentials } from "@/lib/whatsapp/api";
 import { processAIActions, executeAIActions } from "@/lib/ai/actions";
+import { inboundContentToText } from "@/lib/chatbot/media-understanding";
 import type { AIActionConfig } from "@/types/database";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -115,10 +116,9 @@ export async function processWithAIAgent(
 
   const chatHistory = (recentMessages || []).reverse().map((m) => ({
     role: m.direction === "inbound" ? ("user" as const) : ("assistant" as const),
-    content:
-      m.content && typeof m.content === "object" && "text" in m.content
-        ? (m.content as { text: string }).text
-        : "[media]",
+    // Adjuntos: usa la transcripción/descripción guardada en content.ai_text
+    // (ver media-understanding.ts) en vez de un "[media]" opaco.
+    content: inboundContentToText(m.content),
   }));
 
   // Build knowledge base from agent's sources
@@ -408,10 +408,9 @@ export async function processWithAI(
 
   const chatHistory = (recentMessages || []).reverse().map((m) => ({
     role: m.direction === "inbound" ? ("user" as const) : ("assistant" as const),
-    content:
-      m.content && typeof m.content === "object" && "text" in m.content
-        ? (m.content as { text: string }).text
-        : "[media]",
+    // Adjuntos: usa la transcripción/descripción guardada en content.ai_text
+    // (ver media-understanding.ts) en vez de un "[media]" opaco.
+    content: inboundContentToText(m.content),
   }));
 
   const knowledgeContext =

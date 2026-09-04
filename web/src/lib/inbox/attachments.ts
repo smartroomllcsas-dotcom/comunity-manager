@@ -59,6 +59,10 @@ export interface AttachmentContent {
   source: AttachmentSource;
   /** Motivo por el que el medio no se pudo resolver, para poder reintentar. */
   media_error?: string;
+  /** Texto derivado por IA (transcripción / descripción) para el agente. */
+  ai_text?: string;
+  ai_text_source?: string;
+  ai_text_error?: string;
 }
 
 /** Proyección segura para respuestas que llegan al navegador. */

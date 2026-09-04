@@ -8,6 +8,7 @@ import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { upsertRestrictedContact } from "@/lib/smarttalk/contact-privacy";
 import { recordContactOverageEvent } from "@/lib/smarttalk/contact-overage";
+import { understandInboundMedia, inboundContentToText } from "@/lib/chatbot/media-understanding";
 
 export async function processIncomingMessage(
   message: WebhookMessage,
@@ -182,17 +183,33 @@ export async function processIncomingMessage(
   if (messageError) throw messageError;
   if (!insertedMessage?.length) return;
 
-  // El mensaje ya está guardado; ahora —y sin bloquear— se intenta el medio.
-  // Si falla, el mensaje conserva su `provider_media_id` y el endpoint
+  // El mensaje ya está guardado. Para adjuntos se descarga el medio y se
+  // convierte en texto (transcripción / descripción) para que el agente de IA
+  // también responda a audios, imágenes y videos, no sólo a texto. Si el
+  // análisis falla, el mensaje conserva su `provider_media_id` y el endpoint
   // /api/inbox/messages/[id]/media lo reintentará al abrirlo.
+  let mediaText = "";
   if (content.type !== "text" && "provider_media_id" in content) {
-    scheduleAttachmentResolution({
-      messageId: insertedMessage[0].id as string,
-      organizationId: org.id,
-      brandId: channel.brand_id,
-      channelId: channel.id,
-      content: content as AttachmentContent,
-    });
+    try {
+      mediaText = await understandInboundMedia({
+        messageId: insertedMessage[0].id as string,
+        organizationId: org.id,
+        brandId: channel.brand_id,
+        channelId: channel.id,
+        content: content as AttachmentContent,
+      });
+    } catch (e) {
+      console.error("[whatsapp-webhook] análisis de medio falló:", e);
+      scheduleAttachmentResolution({
+        messageId: insertedMessage[0].id as string,
+        organizationId: org.id,
+        brandId: channel.brand_id,
+        channelId: channel.id,
+        content: content as AttachmentContent,
+      });
+    }
+  } else if (content.type === "location") {
+    mediaText = inboundContentToText(content);
   }
 
   // 6. Update conversation
@@ -207,9 +224,9 @@ export async function processIncomingMessage(
     })
     .eq("id", conversation.id);
 
-  // 7. Process with chatbot/AI
+  // 7. Process with chatbot/AI (texto, o el texto derivado del adjunto)
   const textContent =
-    content.type === "text" ? (content as { type: "text"; text: string }).text : "";
+    content.type === "text" ? (content as { type: "text"; text: string }).text : mediaText;
 
   if (textContent) {
     const handled = await processIncomingWithChatbot({

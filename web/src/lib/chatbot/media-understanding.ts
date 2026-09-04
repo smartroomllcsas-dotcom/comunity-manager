@@ -1,0 +1,374 @@
+/**
+ * Comprensión de medios entrantes para el agente de IA.
+ *
+ * Hasta ahora el agente sólo se ejecutaba con mensajes de texto: un audio, una
+ * imagen o un video entraban al Inbox pero el agente ni los veía ni respondía.
+ * Este módulo convierte el adjunto en texto para que el agente tenga contexto:
+ *
+ *   - Imágenes, stickers y PDF → Claude (visión / documentos), nativo.
+ *   - Audio y video → Gemini (transcripción + descripción). Claude no acepta
+ *     audio ni video, así que se usa un proveedor que sí. Requiere
+ *     `GEMINI_API_KEY`; sin ella el agente recibe un aviso y pide al cliente
+ *     que escriba.
+ *
+ * El texto derivado se guarda en `content.ai_text` del mensaje para no volver
+ * a pagar el análisis cuando se reconstruye el historial.
+ *
+ * **Sólo servidor.** Contrato BEST-EFFORT: nunca lanza. Un fallo aquí no puede
+ * tumbar un webhook ni impedir que el agente responda con lo que tenga.
+ */
+import Anthropic from "@anthropic-ai/sdk";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { downloadAsset } from "@/lib/media/storage";
+import {
+  channelToken,
+  loadChannelForMedia,
+  resolveAndPersistAttachment,
+} from "@/lib/inbox/media-resolver";
+import type { AttachmentContent } from "@/lib/inbox/attachments";
+import type { MessageContent } from "@/types/database";
+
+// Modelo para leer imágenes/PDF. Configurable por env para cambiarlo sin
+// redeploy (mismo criterio que CHATBOT_AI_MODEL).
+const MEDIA_MODEL = process.env.CHATBOT_MEDIA_MODEL || "claude-opus-5";
+const GEMINI_MODEL = process.env.GEMINI_MEDIA_MODEL || "gemini-2.5-flash";
+
+// Límites de los proveedores: Claude acepta imágenes hasta ~5 MB y PDF hasta
+// 32 MB; Gemini inline hasta ~20 MB por request. Por encima no se analiza.
+const CLAUDE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const CLAUDE_PDF_MAX_BYTES = 32 * 1024 * 1024;
+const GEMINI_INLINE_MAX_BYTES = 19 * 1024 * 1024;
+
+const CLAUDE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+const GEMINI_AUDIO_TYPES = new Set([
+  "audio/ogg",
+  "audio/opus",
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/mp4",
+  "audio/aac",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/amr",
+  "audio/webm",
+]);
+const GEMINI_VIDEO_TYPES = new Set([
+  "video/mp4",
+  "video/quicktime",
+  "video/mov",
+  "video/webm",
+  "video/3gpp",
+  "video/mpeg",
+]);
+
+const LABELS: Record<string, string> = {
+  image: "Imagen",
+  sticker: "Sticker",
+  video: "Video",
+  audio: "Audio de voz",
+  document: "Documento",
+};
+
+function log(event: string, context: Record<string, unknown>) {
+  console.warn(`[media-understanding] ${event} ${JSON.stringify(context)}`);
+}
+
+function cleanMime(value: string | null | undefined): string {
+  return (value || "").split(";")[0].trim().toLowerCase();
+}
+
+/**
+ * Texto que representa un mensaje para el historial del agente. Para texto
+ * devuelve el texto; para adjuntos usa `ai_text` si ya fue analizado; para el
+ * resto, una etiqueta que al menos dice qué llegó.
+ */
+export function inboundContentToText(content: unknown): string {
+  if (!content || typeof content !== "object") return "[mensaje]";
+  const value = content as Record<string, unknown>;
+  const type = String(value.type || "");
+
+  if (type === "text" && typeof value.text === "string") return value.text;
+
+  if (type === "location") {
+    const name = typeof value.name === "string" && value.name ? ` (${value.name})` : "";
+    return `[Ubicación compartida${name}: ${value.latitude}, ${value.longitude}]`;
+  }
+
+  if (type === "interactive" && typeof value.body === "string") return value.body;
+  if (type === "template" && typeof value.template_name === "string") {
+    return `[Plantilla enviada: ${value.template_name}]`;
+  }
+
+  const label = LABELS[type] || "Adjunto";
+  const caption =
+    typeof value.caption === "string" && value.caption.trim()
+      ? ` Texto que lo acompaña: «${value.caption.trim()}»`
+      : "";
+
+  if (typeof value.ai_text === "string" && value.ai_text.trim()) {
+    return `[${label} enviado por el cliente. Contenido: ${value.ai_text.trim()}]${caption}`;
+  }
+
+  if (typeof value.ai_text_error === "string") {
+    return (
+      `[${label} recibido pero no se pudo interpretar automáticamente.` +
+      ` Pídele amablemente al cliente que lo escriba en texto.]${caption}`
+    );
+  }
+
+  return `[${label} recibido]${caption}`;
+}
+
+async function describeWithClaude(input: {
+  kind: "image" | "pdf";
+  mimeType: string;
+  data: Buffer;
+}): Promise<string | null> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    log("sin_anthropic_api_key", {});
+    return null;
+  }
+  const client = new Anthropic({ apiKey });
+  const base64 = input.data.toString("base64");
+
+  const block: Anthropic.ContentBlockParam =
+    input.kind === "image"
+      ? {
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: input.mimeType as Anthropic.Base64ImageSource["media_type"],
+            data: base64,
+          },
+        }
+      : {
+          type: "document",
+          source: { type: "base64", media_type: "application/pdf", data: base64 },
+        };
+
+  const prompt =
+    input.kind === "image"
+      ? "Un cliente envió esta imagen por chat a una agencia de marketing y desarrollo de software. " +
+        "Describe en español y en máximo 80 palabras qué muestra, transcribe cualquier texto visible " +
+        "(nombres, precios, marcas, mensajes) y di si parece relacionada con un proyecto digital " +
+        "(web, app, tienda, anuncios), con otra cosa, o si es sólo un saludo/meme/sticker."
+      : "Un cliente envió este documento por chat a una agencia de marketing y desarrollo de software. " +
+        "Resume en español y en máximo 120 palabras de qué trata, qué pide o propone, y cualquier " +
+        "dato clave (empresa, contacto, presupuesto, fechas).";
+
+  const response = await client.messages.create({
+    model: MEDIA_MODEL,
+    max_tokens: 1024,
+    system:
+      "Eres un asistente que convierte adjuntos de chat en contexto breve y fiel para un " +
+      "agente comercial. No inventes: si algo no se ve o no se entiende, dilo.",
+    messages: [{ role: "user", content: [block, { type: "text", text: prompt }] }],
+  });
+
+  if (response.stop_reason === "refusal") {
+    log("claude_refusal", { kind: input.kind });
+    return null;
+  }
+
+  const text = response.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("")
+    .trim();
+  return text || null;
+}
+
+async function transcribeWithGemini(input: {
+  kind: "audio" | "video";
+  mimeType: string;
+  data: Buffer;
+}): Promise<string | null> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    log("sin_gemini_api_key", { kind: input.kind });
+    return null;
+  }
+
+  const prompt =
+    input.kind === "audio"
+      ? "Transcribe fielmente este audio de voz en español (o en el idioma en que esté). " +
+        "Devuelve sólo la transcripción, sin comentarios. Si no se entiende, escribe " +
+        "[inaudible] en esa parte."
+      : "Un cliente envió este video por chat a una agencia de marketing y desarrollo de software. " +
+        "En español y en máximo 120 palabras: transcribe lo que se dice y describe qué se muestra " +
+        "(producto, local, pantalla, etc.). Sin comentarios adicionales.";
+
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/` +
+    `${encodeURIComponent(GEMINI_MODEL)}:generateContent`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+    body: JSON.stringify({
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { inline_data: { mime_type: input.mimeType, data: input.data.toString("base64") } },
+            { text: prompt },
+          ],
+        },
+      ],
+      generationConfig: { temperature: 0.2, maxOutputTokens: 1024 },
+    }),
+  });
+
+  if (!response.ok) {
+    const body = (await response.text()).slice(0, 300);
+    log("gemini_error", { status: response.status, body, kind: input.kind });
+    return null;
+  }
+
+  const payload = (await response.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  const text = (payload.candidates?.[0]?.content?.parts || [])
+    .map((p) => p.text || "")
+    .join("")
+    .trim();
+  return text || null;
+}
+
+/**
+ * Se asegura de que el adjunto esté descargado en `cm-assets` (lo resuelve si
+ * hace falta, igual que el resolver diferido del Inbox) y devuelve el contenido
+ * ya con `storage_path`, o null si no se pudo.
+ */
+async function ensureStored(input: {
+  messageId: string;
+  organizationId: string;
+  brandId: string;
+  channelId?: string | null;
+  content: AttachmentContent;
+}): Promise<AttachmentContent | null> {
+  const { content } = input;
+  if (content.storage_path) return content;
+  if (!content.provider_media_id && !content.provider_url) return null;
+
+  const channel = input.channelId ? await loadChannelForMedia(input.channelId) : null;
+  const resolved = await resolveAndPersistAttachment({
+    source: content.source,
+    organizationId: input.organizationId,
+    brandId: input.brandId,
+    providerType: content.type,
+    providerMediaId: content.provider_media_id || null,
+    providerUrl: content.provider_url || null,
+    filename: content.filename || null,
+    caption: content.caption || null,
+    mimeType: content.mime_type || null,
+    token: channel ? channelToken(channel) : null,
+  });
+
+  if (!resolved.storage_path) {
+    log("descarga_fallida", { message_id: input.messageId, reason: resolved.media_error });
+    return null;
+  }
+
+  const merged = { ...content, ...resolved };
+  const admin = createAdminClient("smarttalk");
+  await admin.from("messages").update({ content: merged }).eq("id", input.messageId);
+  return merged;
+}
+
+async function persistAiText(
+  messageId: string,
+  content: AttachmentContent,
+  patch: { ai_text?: string; ai_text_source?: string; ai_text_error?: string },
+) {
+  const admin = createAdminClient("smarttalk");
+  await admin
+    .from("messages")
+    .update({ content: { ...content, ...patch } })
+    .eq("id", messageId);
+}
+
+/**
+ * Convierte un adjunto entrante en texto para el agente. Descarga el medio si
+ * hace falta, lo analiza con el modelo adecuado, guarda el resultado en el
+ * mensaje y devuelve el texto listo para `messageText`.
+ *
+ * Nunca lanza: si algo falla, devuelve igualmente un texto que le dice al
+ * agente qué llegó y que no pudo interpretarse.
+ */
+export async function understandInboundMedia(input: {
+  messageId: string;
+  organizationId: string;
+  brandId: string;
+  channelId?: string | null;
+  content: AttachmentContent;
+}): Promise<string> {
+  const { content } = input;
+  const withError = (error: string) =>
+    inboundContentToText({ ...content, ai_text_error: error } as unknown as MessageContent);
+
+  try {
+    const stored = await ensureStored(input);
+    if (!stored?.storage_path) {
+      await persistAiText(input.messageId, content, { ai_text_error: "sin_archivo" }).catch(
+        () => undefined,
+      );
+      return withError("sin_archivo");
+    }
+
+    const file = await downloadAsset(stored.storage_path);
+    if (!file.ok) {
+      log("lectura_storage_fallida", { message_id: input.messageId, reason: file.error });
+      await persistAiText(input.messageId, stored, { ai_text_error: "lectura_storage" });
+      return withError("lectura_storage");
+    }
+
+    const mimeType = cleanMime(stored.mime_type) || cleanMime(file.mimeType);
+    let aiText: string | null = null;
+    let source: string | null = null;
+    let error: string | null = null;
+
+    if (stored.type === "image" || stored.type === "sticker") {
+      if (!CLAUDE_IMAGE_TYPES.has(mimeType)) error = `formato_no_soportado:${mimeType}`;
+      else if (file.buffer.byteLength > CLAUDE_IMAGE_MAX_BYTES) error = "imagen_demasiado_grande";
+      else {
+        aiText = await describeWithClaude({ kind: "image", mimeType, data: file.buffer });
+        source = "claude";
+      }
+    } else if (stored.type === "document") {
+      if (mimeType !== "application/pdf") error = `formato_no_soportado:${mimeType}`;
+      else if (file.buffer.byteLength > CLAUDE_PDF_MAX_BYTES) error = "pdf_demasiado_grande";
+      else {
+        aiText = await describeWithClaude({ kind: "pdf", mimeType, data: file.buffer });
+        source = "claude";
+      }
+    } else if (stored.type === "audio" || stored.type === "video") {
+      const allowed = stored.type === "audio" ? GEMINI_AUDIO_TYPES : GEMINI_VIDEO_TYPES;
+      if (!process.env.GEMINI_API_KEY) error = "sin_gemini_api_key";
+      else if (!allowed.has(mimeType)) error = `formato_no_soportado:${mimeType}`;
+      else if (file.buffer.byteLength > GEMINI_INLINE_MAX_BYTES) error = "archivo_demasiado_grande";
+      else {
+        aiText = await transcribeWithGemini({ kind: stored.type, mimeType, data: file.buffer });
+        source = "gemini";
+      }
+    } else {
+      error = `tipo_no_analizable:${stored.type}`;
+    }
+
+    if (aiText && source) {
+      const updated = { ...stored, ai_text: aiText, ai_text_source: source };
+      await persistAiText(input.messageId, stored, { ai_text: aiText, ai_text_source: source });
+      return inboundContentToText(updated as unknown as MessageContent);
+    }
+
+    const reason = error || "analisis_sin_resultado";
+    log("sin_texto", { message_id: input.messageId, type: stored.type, reason });
+    await persistAiText(input.messageId, stored, { ai_text_error: reason });
+    return withError(reason);
+  } catch (e) {
+    const reason = e instanceof Error ? e.message.slice(0, 200) : "error_desconocido";
+    log("excepcion", { message_id: input.messageId, reason });
+    return withError("excepcion");
+  }
+}
