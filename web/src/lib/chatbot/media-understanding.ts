@@ -8,9 +8,10 @@
  *   - Imágenes, stickers, PDF y documentos → Claude. Imágenes y PDF van
  *     nativos (visión / documentos); Word, Excel, PowerPoint, TXT y CSV se
  *     convierten a texto antes (son ZIP con XML, o texto plano).
- *   - Audio y video → Gemini (transcripción + descripción). Claude no acepta
- *     audio ni video, así que se usa un proveedor que sí. Requiere
- *     `GEMINI_API_KEY`; sin ella el agente recibe un aviso y pide al cliente
+ *   - Audio y video → OpenAI (transcripción con gpt-4o-transcribe). Claude no
+ *     acepta audio ni video, así que se usa un proveedor que sí. De un video
+ *     se transcribe la pista de audio (no se describen las imágenes). Requiere
+ *     `OPENAI_API_KEY`; sin ella el agente recibe un aviso y pide al cliente
  *     que escriba.
  *
  * El texto derivado se guarda en `content.ai_text` del mensaje para no volver
@@ -34,17 +35,17 @@ import type { MessageContent } from "@/types/database";
 // Modelo para leer imágenes/PDF. Configurable por env para cambiarlo sin
 // redeploy (mismo criterio que CHATBOT_AI_MODEL).
 const MEDIA_MODEL = process.env.CHATBOT_MEDIA_MODEL || "claude-opus-5";
-const GEMINI_MODEL = process.env.GEMINI_MEDIA_MODEL || "gemini-2.5-flash";
+const TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-transcribe";
 
 // Límites de los proveedores: Claude acepta imágenes hasta 10 MB (API directa)
-// y PDF hasta 32 MB; Gemini inline hasta ~20 MB por request. Por encima no se
+// y PDF hasta 32 MB; OpenAI transcribe archivos hasta 25 MB. Por encima no se
 // analiza. Los documentos convertidos a texto se recortan a un tope de
 // caracteres para no disparar el costo con un Excel enorme.
 const CLAUDE_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 const CLAUDE_PDF_MAX_BYTES = 32 * 1024 * 1024;
 const OFFICE_MAX_BYTES = 25 * 1024 * 1024;
 const DOCUMENT_TEXT_MAX_CHARS = 40_000;
-const GEMINI_INLINE_MAX_BYTES = 19 * 1024 * 1024;
+const OPENAI_AUDIO_MAX_BYTES = 25 * 1024 * 1024;
 
 const CLAUDE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 const PLAIN_TEXT_TYPES = new Set(["text/plain", "text/csv", "text/markdown"]);
@@ -53,26 +54,27 @@ const OFFICE_TYPES: Record<string, "docx" | "xlsx" | "pptx"> = {
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
 };
-const GEMINI_AUDIO_TYPES = new Set([
-  "audio/ogg",
-  "audio/opus",
-  "audio/mpeg",
-  "audio/mp3",
-  "audio/mp4",
-  "audio/aac",
-  "audio/wav",
-  "audio/x-wav",
-  "audio/amr",
-  "audio/webm",
-]);
-const GEMINI_VIDEO_TYPES = new Set([
-  "video/mp4",
-  "video/quicktime",
-  "video/mov",
-  "video/webm",
-  "video/3gpp",
-  "video/mpeg",
-]);
+// Formatos que acepta /v1/audio/transcriptions. La extensión del nombre de
+// archivo es lo que OpenAI usa para detectar el formato, por eso se manda una
+// coherente con el mime. (AMR, 3GP y MOV no están soportados.)
+const OPENAI_AUDIO_EXT: Record<string, string> = {
+  "audio/ogg": "ogg",
+  "audio/opus": "ogg",
+  "audio/mpeg": "mp3",
+  "audio/mp3": "mp3",
+  "audio/mp4": "m4a",
+  "audio/x-m4a": "m4a",
+  "audio/aac": "m4a",
+  "audio/wav": "wav",
+  "audio/x-wav": "wav",
+  "audio/webm": "webm",
+  "audio/flac": "flac",
+};
+const OPENAI_VIDEO_EXT: Record<string, string> = {
+  "video/mp4": "mp4",
+  "video/webm": "webm",
+  "video/mpeg": "mpeg",
+};
 
 const LABELS: Record<string, string> = {
   image: "Imagen",
@@ -285,60 +287,48 @@ async function describeWithClaude(input: {
   return text || null;
 }
 
-async function transcribeWithGemini(input: {
+async function transcribeWithOpenAI(input: {
   kind: "audio" | "video";
   mimeType: string;
+  extension: string;
   data: Buffer;
 }): Promise<string | null> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    log("sin_gemini_api_key", { kind: input.kind });
+    log("sin_openai_api_key", { kind: input.kind });
     return null;
   }
 
-  const prompt =
-    input.kind === "audio"
-      ? "Transcribe fielmente este audio de voz en español (o en el idioma en que esté). " +
-        "Devuelve sólo la transcripción, sin comentarios. Si no se entiende, escribe " +
-        "[inaudible] en esa parte."
-      : "Un cliente envió este video por chat a una agencia de marketing y desarrollo de software. " +
-        "En español y en máximo 120 palabras: transcribe lo que se dice y describe qué se muestra " +
-        "(producto, local, pantalla, etc.). Sin comentarios adicionales.";
+  const form = new FormData();
+  form.append(
+    "file",
+    new Blob([new Uint8Array(input.data)], { type: input.mimeType }),
+    `${input.kind}.${input.extension}`,
+  );
+  form.append("model", TRANSCRIBE_MODEL);
+  form.append("response_format", "json");
+  // El prompt orienta vocabulario y estilo; no fuerza el idioma.
+  form.append(
+    "prompt",
+    "Mensaje de voz de un cliente por WhatsApp a una agencia de marketing y desarrollo de " +
+      "software (páginas web, apps, CRM, tiendas online, anuncios). Mayormente en español.",
+  );
 
-  const url =
-    `https://generativelanguage.googleapis.com/v1beta/models/` +
-    `${encodeURIComponent(GEMINI_MODEL)}:generateContent`;
-
-  const response = await fetch(url, {
+  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { inline_data: { mime_type: input.mimeType, data: input.data.toString("base64") } },
-            { text: prompt },
-          ],
-        },
-      ],
-      generationConfig: { temperature: 0.2, maxOutputTokens: 1024 },
-    }),
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+    signal: AbortSignal.timeout(120_000),
   });
 
   if (!response.ok) {
     const body = (await response.text()).slice(0, 300);
-    log("gemini_error", { status: response.status, body, kind: input.kind });
+    log("openai_error", { status: response.status, body, kind: input.kind });
     return null;
   }
 
-  const payload = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-  const text = (payload.candidates?.[0]?.content?.parts || [])
-    .map((p) => p.text || "")
-    .join("")
-    .trim();
+  const payload = (await response.json()) as { text?: string };
+  const text = (payload.text || "").trim();
   return text || null;
 }
 
@@ -473,13 +463,18 @@ export async function understandInboundMedia(input: {
         error = `formato_no_soportado:${mimeType}`;
       }
     } else if (stored.type === "audio" || stored.type === "video") {
-      const allowed = stored.type === "audio" ? GEMINI_AUDIO_TYPES : GEMINI_VIDEO_TYPES;
-      if (!process.env.GEMINI_API_KEY) error = "sin_gemini_api_key";
-      else if (!allowed.has(mimeType)) error = `formato_no_soportado:${mimeType}`;
-      else if (file.buffer.byteLength > GEMINI_INLINE_MAX_BYTES) error = "archivo_demasiado_grande";
+      const extension = (stored.type === "audio" ? OPENAI_AUDIO_EXT : OPENAI_VIDEO_EXT)[mimeType];
+      if (!process.env.OPENAI_API_KEY) error = "sin_openai_api_key";
+      else if (!extension) error = `formato_no_soportado:${mimeType}`;
+      else if (file.buffer.byteLength > OPENAI_AUDIO_MAX_BYTES) error = "archivo_demasiado_grande";
       else {
-        aiText = await transcribeWithGemini({ kind: stored.type, mimeType, data: file.buffer });
-        source = "gemini";
+        aiText = await transcribeWithOpenAI({
+          kind: stored.type,
+          mimeType,
+          extension,
+          data: file.buffer,
+        });
+        source = "openai";
       }
     } else {
       error = `tipo_no_analizable:${stored.type}`;

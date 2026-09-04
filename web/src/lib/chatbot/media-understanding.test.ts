@@ -54,7 +54,7 @@ describe("inboundContentToText", () => {
   });
 
   it("pide al cliente que escriba cuando el adjunto no pudo interpretarse", () => {
-    const text = inboundContentToText({ type: "video", url: "", ai_text_error: "sin_gemini_api_key" });
+    const text = inboundContentToText({ type: "video", url: "", ai_text_error: "sin_openai_api_key" });
     expect(text).toContain("Video recibido pero no se pudo interpretar");
     expect(text).toContain("escriba en texto");
   });
