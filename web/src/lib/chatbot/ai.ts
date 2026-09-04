@@ -58,6 +58,24 @@ export async function generateAIResponse(params: {
 }
 
 /**
+ * metadata de la conversación con un parche aplicado. Antes se escribía
+ * `{ ai_turn_count, ai_agent_id }` a secas y se perdía todo lo demás:
+ * assigned_team_id (handoff), booking (Cal.com), source/channel…
+ */
+async function mergedMetadata(
+  admin: ReturnType<typeof createAdminClient>,
+  conversationId: string,
+  patch: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const { data } = await admin
+    .from("conversations")
+    .select("metadata")
+    .eq("id", conversationId)
+    .maybeSingle();
+  return { ...((data?.metadata as Record<string, unknown> | null) || {}), ...patch };
+}
+
+/**
  * Enlace de agenda personalizado para un contacto. Cal.com acepta en la URL
  * `name`, `email` (prellenan el formulario) y `metadata[clave]=valor`, que
  * devuelve tal cual en el webhook de la reserva: con eso /api/webhook/calcom
@@ -123,7 +141,7 @@ export async function processWithAIAgent(
       if (lowerMsg.includes(keyword.toLowerCase())) {
         await admin
           .from("conversations")
-          .update({ metadata: { ai_turn_count: 0 } })
+          .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
           .eq("id", context.conversationId);
         return false;
       }
@@ -135,7 +153,7 @@ export async function processWithAIAgent(
   if (turnCount >= maxTurns) {
     await admin
       .from("conversations")
-      .update({ metadata: { ai_turn_count: 0 } })
+      .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
       .eq("id", context.conversationId);
     return false;
   }
@@ -328,7 +346,7 @@ export async function processWithAIAgent(
   if (cleanText.includes("[ESCALATE]")) {
     await admin
       .from("conversations")
-      .update({ metadata: { ai_turn_count: 0 } })
+      .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
       .eq("id", context.conversationId);
     return false;
   }
@@ -410,11 +428,11 @@ export async function processWithAIAgent(
   await admin
     .from("conversations")
     .update({
-      metadata: {
+      metadata: await mergedMetadata(admin, context.conversationId, {
         ai_turn_count: turnCount + 1,
         ai_agent_id: agentConfig.id,
         ...(brochureSent ? { brochure_sent: true } : {}),
-      },
+      }),
       last_message_preview: cleanText.slice(0, 100),
       updated_at: new Date().toISOString(),
     })
@@ -442,7 +460,7 @@ export async function processWithAI(
     if (lowerMsg.includes(keyword.toLowerCase())) {
       await admin
         .from("conversations")
-        .update({ metadata: { ai_turn_count: 0 } })
+        .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
         .eq("id", context.conversationId);
       return false;
     }
@@ -451,7 +469,7 @@ export async function processWithAI(
   if (turnCount >= config.max_turns) {
     await admin
       .from("conversations")
-      .update({ metadata: { ai_turn_count: 0 } })
+      .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
       .eq("id", context.conversationId);
     return false;
   }
@@ -490,7 +508,7 @@ export async function processWithAI(
   if (aiResponse.includes("[ESCALATE]")) {
     await admin
       .from("conversations")
-      .update({ metadata: { ai_turn_count: 0 } })
+      .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
       .eq("id", context.conversationId);
     return false;
   }
@@ -519,7 +537,7 @@ export async function processWithAI(
   await admin
     .from("conversations")
     .update({
-      metadata: { ai_turn_count: turnCount + 1 },
+      metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: turnCount + 1 }),
       last_message_preview: aiResponse.slice(0, 100),
     })
     .eq("id", context.conversationId);
