@@ -47,6 +47,8 @@ type CalPayload = {
   cancellationReason?: string;
   rescheduleUid?: string;
   rescheduleStartTime?: string;
+  /** Lo que el agente puso en la URL: metadata[contact_id], metadata[conversation_id]. */
+  metadata?: Record<string, unknown> | null;
 };
 type CalEvent = { triggerEvent?: string; createdAt?: string; payload?: CalPayload };
 
@@ -109,14 +111,45 @@ type ContactRow = {
   lifecycle_stage_id: string | null;
 };
 
+type ConversationRef = { id: string; assigned_agent_id: string | null; metadata: Record<string, unknown> | null };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function findContact(
   admin: ReturnType<typeof createAdminClient>,
+  ids: { contactId: string | null; conversationId: string | null },
   phone: string | null,
   email: string | null,
-): Promise<{ contact: ContactRow; conversation: { id: string; assigned_agent_id: string | null; metadata: Record<string, unknown> | null } | null } | null> {
+): Promise<{ contact: ContactRow; conversation: ConversationRef | null; matchedBy: string } | null> {
   const select = "id, organization_id, brand_id, name, custom_fields, lifecycle_stage_id";
   let candidates: ContactRow[] = [];
 
+  // 1. Identificadores que el agente puso en el enlace: match exacto, sin
+  //    depender de lo que el cliente escribió en el formulario.
+  if (ids.conversationId) {
+    const { data: conv } = await admin
+      .from("conversations")
+      .select("id, assigned_agent_id, metadata, contact_id")
+      .eq("id", ids.conversationId)
+      .maybeSingle();
+    if (conv?.contact_id) {
+      const { data: contact } = await admin.from("contacts").select(select).eq("id", conv.contact_id).maybeSingle();
+      if (contact) {
+        return {
+          contact: contact as ContactRow,
+          conversation: { id: conv.id as string, assigned_agent_id: conv.assigned_agent_id as string | null, metadata: (conv.metadata as Record<string, unknown>) || null },
+          matchedBy: "conversation_id",
+        };
+      }
+    }
+  }
+  if (ids.contactId) {
+    const { data } = await admin.from("contacts").select(select).eq("id", ids.contactId).limit(1);
+    candidates = (data || []) as ContactRow[];
+    if (candidates.length) return { ...(await pickBestConversation(admin, candidates))!, matchedBy: "contact_id" };
+  }
+
+  // 2. Teléfono y correo, como respaldo.
   if (phone) {
     const { data } = await admin
       .from("contacts")
@@ -136,10 +169,19 @@ async function findContact(
     candidates = (data || []) as ContactRow[];
   }
   if (candidates.length === 0) return null;
+  const best = await pickBestConversation(admin, candidates);
+  return best ? { ...best, matchedBy: phone ? "phone" : "email" } : null;
+}
 
-  // El mismo número puede existir en varias marcas: se prefiere el contacto
-  // con la conversación más reciente (es con quien el agente habló).
-  let best: { contact: ContactRow; conversation: { id: string; assigned_agent_id: string | null; metadata: Record<string, unknown> | null } | null; at: string } | null = null;
+/**
+ * El mismo número puede existir en varias marcas: se prefiere el contacto
+ * con la conversación más reciente (es con quien el agente habló).
+ */
+async function pickBestConversation(
+  admin: ReturnType<typeof createAdminClient>,
+  candidates: ContactRow[],
+): Promise<{ contact: ContactRow; conversation: ConversationRef | null } | null> {
+  let best: { contact: ContactRow; conversation: ConversationRef | null; at: string } | null = null;
   for (const contact of candidates) {
     const { data: conv } = await admin
       .from("conversations")
@@ -215,20 +257,39 @@ export async function POST(request: NextRequest) {
 
   const phone = extractPhone(payload);
   const email = extractEmail(payload);
+  const meta = (payload.metadata || {}) as Record<string, unknown>;
+  const idsFromLink = {
+    contactId: typeof meta.contact_id === "string" && UUID_RE.test(meta.contact_id) ? meta.contact_id : null,
+    conversationId:
+      typeof meta.conversation_id === "string" && UUID_RE.test(meta.conversation_id) ? meta.conversation_id : null,
+  };
   const admin = createAdminClient("smarttalk");
 
-  const match = await findContact(admin, phone, email);
+  const match = await findContact(admin, idsFromLink, phone, email);
   if (!match) {
     console.warn("[calcom-webhook] reserva sin contacto en la plataforma", {
       trigger,
       uid: payload.uid,
       has_phone: Boolean(phone),
       has_email: Boolean(email),
+      has_link_ids: Boolean(idsFromLink.contactId || idsFromLink.conversationId),
     });
     return NextResponse.json({ ok: true, matched: false });
   }
 
-  const { contact, conversation } = match;
+  const { contact, conversation, matchedBy } = match;
+
+  // Datos que el cliente escribió al agendar y que difieren de los del chat:
+  // se guardan aparte y se avisan al asesor (puede ser otro número para la
+  // llamada, o un correo corporativo distinto).
+  const knownCf = contact.custom_fields || {};
+  const knownEmail = String(knownCf.correo || knownCf.email || "").toLowerCase();
+  const knownPhone = String(knownCf.phone || knownCf.celular || "").replace(/[^\d]/g, "");
+  const differences: string[] = [];
+  if (email && knownEmail && email !== knownEmail) differences.push(`correo distinto al del chat: ${email}`);
+  if (phone && !(await phoneBelongsToContact(admin, contact.id, phone, knownPhone))) {
+    differences.push(`teléfono distinto al del chat: +${phone}`);
+  }
   const timeZone = payload.attendees?.[0]?.timeZone || payload.organizer?.timeZone || DEFAULT_TZ;
   const whenText = formatWhen(payload.startTime, timeZone);
   const title = payload.title || "Reunión";
@@ -258,6 +319,8 @@ export async function POST(request: NextRequest) {
   cf.cita_inicio = payload.startTime || null;
   cf.cita_cuando = whenText;
   cf.cita_uid = payload.uid || null;
+  if (email) cf.cita_correo = email;
+  if (phone) cf.cita_telefono = `+${phone}`;
   if (state === "agendada") cf.cita_agendada_at = now;
   const contactPatch: Record<string, unknown> = { custom_fields: cf };
   if (state !== "cancelada") {
@@ -281,7 +344,8 @@ export async function POST(request: NextRequest) {
   const contactLine = [phone ? `Tel: +${phone}` : null, email ? `Correo: ${email}` : null]
     .filter(Boolean)
     .join(" · ");
-  const note = `${noteByState[state]}${contactLine ? ` ${contactLine}.` : ""}`;
+  const diffLine = differences.length ? ` ⚠️ Ojo: ${differences.join("; ")}.` : "";
+  const note = `${noteByState[state]}${contactLine ? ` ${contactLine}.` : ""}${diffLine}`;
 
   if (conversation) {
     await admin
@@ -325,5 +389,18 @@ export async function POST(request: NextRequest) {
     console.warn("[calcom-webhook] aviso al asesor falló (no crítico):", e);
   }
 
-  return NextResponse.json({ ok: true, matched: true, state, contactId: contact.id });
+  return NextResponse.json({ ok: true, matched: true, matchedBy, state, contactId: contact.id });
+}
+
+/** ¿El teléfono de la reserva es el del contacto (wa_id) o el que dio en el chat? */
+async function phoneBelongsToContact(
+  admin: ReturnType<typeof createAdminClient>,
+  contactId: string,
+  phone: string,
+  knownPhone: string,
+): Promise<boolean> {
+  if (knownPhone && (knownPhone.endsWith(phone) || phone.endsWith(knownPhone))) return true;
+  const { data } = await admin.from("contacts").select("wa_id").eq("id", contactId).maybeSingle();
+  const waId = String(data?.wa_id || "").replace(/[^\d]/g, "");
+  return Boolean(waId) && (waId.endsWith(phone) || phone.endsWith(waId));
 }

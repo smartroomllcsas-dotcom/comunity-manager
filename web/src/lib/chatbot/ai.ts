@@ -57,6 +57,40 @@ export async function generateAIResponse(params: {
   return text;
 }
 
+/**
+ * Enlace de agenda personalizado para un contacto. Cal.com acepta en la URL
+ * `name`, `email` (prellenan el formulario) y `metadata[clave]=valor`, que
+ * devuelve tal cual en el webhook de la reserva: con eso /api/webhook/calcom
+ * identifica al contacto aunque el cliente escriba otros datos al agendar.
+ */
+async function buildBookingLink(
+  admin: ReturnType<typeof createAdminClient>,
+  baseUrl: string,
+  ids: { conversationId: string; contactId: string | null }
+): Promise<string> {
+  try {
+    const url = new URL(baseUrl);
+    url.searchParams.set("metadata[conversation_id]", ids.conversationId);
+    if (ids.contactId) {
+      url.searchParams.set("metadata[contact_id]", ids.contactId);
+      const { data: contact } = await admin
+        .from("contacts")
+        .select("name, custom_fields")
+        .eq("id", ids.contactId)
+        .maybeSingle();
+      const cf = (contact?.custom_fields as Record<string, unknown> | null) || {};
+      const name = (typeof cf.nombre === "string" && cf.nombre) || (contact?.name as string | null) || "";
+      const email =
+        (typeof cf.correo === "string" && cf.correo) || (typeof cf.email === "string" && cf.email) || "";
+      if (name && !/^[\d+\s-]+$/.test(name)) url.searchParams.set("name", name);
+      if (email.includes("@")) url.searchParams.set("email", email);
+    }
+    return url.toString();
+  } catch {
+    return baseUrl;
+  }
+}
+
 interface AIContext {
   conversationId: string;
   contactWaId: string;
@@ -188,7 +222,7 @@ export async function processWithAIAgent(
   try {
     const { data: convRow } = await admin
       .from("conversations")
-      .select("brand_id, metadata")
+      .select("brand_id, metadata, contact_id")
       .eq("id", context.conversationId)
       .maybeSingle();
     if (convRow?.brand_id) {
@@ -238,8 +272,17 @@ export async function processWithAIAgent(
               `reprogramar y, sólo si acepta, comparte de nuevo el enlace de agenda.`
           );
         } else if (settings.booking_url) {
+          // Enlace personalizado: lleva el id del contacto y la conversación
+          // en metadata (Cal.com lo devuelve en el webhook) y prellena nombre
+          // y correo. Así la reserva se cruza con el contacto aunque el
+          // cliente escriba otro correo o teléfono al agendar.
+          const link = await buildBookingLink(admin, settings.booking_url as string, {
+            conversationId: context.conversationId,
+            contactId: (convRow.contact_id as string | null) || context.contactId || null,
+          });
           parts.push(
-            `Para agendar la cita comparte este enlace de agenda: ${settings.booking_url}\n` +
+            `Para agendar la cita comparte EXACTAMENTE este enlace de agenda (cópialo completo, ` +
+              `sin acortarlo ni quitarle nada): ${link}\n` +
               `No compartas el enlace en el primer mensaje; primero entiende la necesidad del cliente.`
           );
         }
