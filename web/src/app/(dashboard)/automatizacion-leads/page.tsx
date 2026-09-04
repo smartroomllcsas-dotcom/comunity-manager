@@ -16,6 +16,32 @@ interface TemplateOption {
   category: string;
 }
 
+interface PendingLead {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  created_at: string;
+  reason: string | null;
+  campaign: string | null;
+  company: string | null;
+}
+
+/** Motivo técnico de no envío → texto para el usuario. */
+function reasonLabel(reason: string): string {
+  if (reason.startsWith("no_enviado (")) reason = reason.slice(12, -1);
+  const map: Record<string, string> = {
+    disabled: "abordaje automático apagado",
+    no_template_configured: "sin plantilla de primer contacto",
+    template_not_found: "plantilla no encontrada",
+    rate_limited: "límite por hora alcanzado",
+    invalid_phone: "teléfono inválido",
+    sin_telefono: "sin teléfono",
+  };
+  if (map[reason]) return map[reason];
+  if (reason.startsWith("template_")) return `plantilla ${reason.slice(9)}`;
+  return reason;
+}
+
 interface Settings {
   enabled: boolean;
   first_touch_template_id: string | null;
@@ -72,6 +98,52 @@ export default function LeadAutomationPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploadingBrochure, setUploadingBrochure] = useState(false);
+  const [pendingLeads, setPendingLeads] = useState<PendingLead[]>([]);
+  const [loadingLeads, setLoadingLeads] = useState(false);
+  const [sendingLeads, setSendingLeads] = useState<string | "all" | null>(null);
+
+  // Leads de formulario que llegaron antes de configurar la automatización y
+  // nunca recibieron la plantilla. Se listan aparte para poder "sincronizarlos"
+  // a mano; los nuevos la reciben solos al entrar.
+  const loadPendingLeads = useCallback(async () => {
+    if (!clientId) return;
+    setLoadingLeads(true);
+    try {
+      const res = await fetch(`/api/whatsapp/cloud/lead-backfill?clientId=${clientId}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "No se pudieron cargar los leads pendientes");
+      setPendingLeads(Array.isArray(data.leads) ? data.leads : []);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setLoadingLeads(false);
+    }
+  }, [clientId]);
+
+  async function handleSendPending(contactIds?: string[]) {
+    if (!clientId) return;
+    setSendingLeads(contactIds?.length === 1 ? contactIds[0] : "all");
+    try {
+      const res = await fetch("/api/whatsapp/cloud/lead-backfill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, contactIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "No se pudo enviar");
+      const failed = (data.results as Array<{ sent: boolean; reason?: string }>).filter((r) => !r.sent);
+      if (data.sent > 0) toast.success(`Plantilla enviada a ${data.sent} lead${data.sent === 1 ? "" : "s"}`);
+      if (failed.length > 0) {
+        const reasons = Array.from(new Set(failed.map((r) => r.reason || "error")));
+        toast.error(`${failed.length} sin enviar: ${reasons.map(reasonLabel).join(", ")}`);
+      }
+      await loadPendingLeads();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSendingLeads(null);
+    }
+  }
 
   const load = useCallback(async () => {
     if (!clientId) return;
@@ -91,7 +163,8 @@ export default function LeadAutomationPage() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadPendingLeads();
+  }, [load, loadPendingLeads]);
 
   async function handleUploadBrochure(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -448,6 +521,89 @@ export default function LeadAutomationPage() {
             >
               {saving ? "Guardando..." : "Guardar configuración"}
             </button>
+
+            {/* Leads anteriores sin abordar */}
+            <div className="rounded-lg border border-[#2d333b] bg-[#161b22] p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-white">
+                    Leads de formulario sin abordar
+                    {pendingLeads.length > 0 && (
+                      <span className="ml-2 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-300">
+                        {pendingLeads.length}
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs text-[#8b949e]">
+                    Llegaron antes de activar la automatización (o falló el envío) y nunca recibieron
+                    la plantilla de primer contacto. Sincronízalos para que el agente inicie la
+                    conversación. Usa la configuración <strong>guardada</strong> arriba.
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleSendPending()}
+                  disabled={
+                    sendingLeads !== null || loadingLeads || pendingLeads.length === 0
+                  }
+                  className="shrink-0 rounded-md bg-amber-600 hover:bg-amber-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                >
+                  {sendingLeads === "all"
+                    ? "Enviando…"
+                    : `Sincronizar todos (${pendingLeads.length})`}
+                </button>
+              </div>
+
+              {loadingLeads ? (
+                <p className="text-xs text-[#8b949e]">Cargando…</p>
+              ) : pendingLeads.length === 0 ? (
+                <p className="text-xs text-[#8b949e]">No hay leads pendientes. ✔</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="text-[#8b949e]">
+                      <tr className="text-left">
+                        <th className="py-1 pr-3 font-normal">Lead</th>
+                        <th className="py-1 pr-3 font-normal">Teléfono</th>
+                        <th className="py-1 pr-3 font-normal">Llegó</th>
+                        <th className="py-1 pr-3 font-normal">Motivo</th>
+                        <th className="py-1 font-normal"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pendingLeads.map((lead) => (
+                        <tr key={lead.id} className="border-t border-[#2d333b]">
+                          <td className="py-1.5 pr-3 text-white">
+                            {lead.name || "—"}
+                            {lead.company && (
+                              <span className="block text-[11px] text-[#8b949e]">{lead.company}</span>
+                            )}
+                          </td>
+                          <td className="py-1.5 pr-3 font-mono">{lead.phone || "—"}</td>
+                          <td className="py-1.5 pr-3 text-[#8b949e]">
+                            {new Date(lead.created_at).toLocaleDateString("es-CO", {
+                              day: "2-digit",
+                              month: "short",
+                            })}
+                          </td>
+                          <td className="py-1.5 pr-3 text-[#8b949e]">
+                            {lead.reason ? reasonLabel(lead.reason) : "sin intento"}
+                          </td>
+                          <td className="py-1.5 text-right">
+                            <button
+                              onClick={() => handleSendPending([lead.id])}
+                              disabled={sendingLeads !== null || !lead.phone}
+                              className="rounded-md border border-[#2d333b] px-2 py-1 text-[11px] text-white hover:bg-[#21262d] disabled:opacity-50"
+                            >
+                              {sendingLeads === lead.id ? "Enviando…" : "Enviar"}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </>
         )}
       </div>
