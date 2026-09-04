@@ -255,11 +255,17 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               <FileCheck2 className="h-4 w-4 shrink-0" />
               <span className="text-xs font-semibold">Plantilla enviada</span>
             </div>
-            <p className="mt-1 text-[13px] leading-relaxed text-[#f8fafc]">
-              {content.template_name}
-            </p>
+            {content.text ? (
+              <p className="mt-1 text-[13px] leading-relaxed text-[#f8fafc] whitespace-pre-wrap">
+                {content.text}
+              </p>
+            ) : (
+              <p className="mt-1 text-[13px] leading-relaxed text-[#f8fafc]">
+                {content.template_name}
+              </p>
+            )}
             <p className="mt-0.5 text-[10px] text-amber-100/60">
-              Idioma: {content.language}
+              {content.text ? `${content.template_name} · ` : ""}Idioma: {content.language}
             </p>
           </div>
         );

@@ -344,7 +344,7 @@ export type MessageContent =
   | ({ type: "video"; url: string; caption?: string } & AttachmentMeta)
   | ({ type: "audio"; url: string; caption?: string } & AttachmentMeta)
   | ({ type: "document"; url: string; filename: string; caption?: string } & AttachmentMeta)
-  | { type: "template"; template_name: string; language: string; components: unknown[] }
+  | { type: "template"; template_name: string; language: string; components: unknown[]; text?: string }
   | { type: "interactive"; interactive_type: "button" | "list"; body: string; buttons?: { id: string; title: string }[]; sections?: { title: string; rows: { id: string; title: string; description?: string }[] }[] }
   | { type: "location"; latitude: number; longitude: number; name?: string }
   | ({ type: "sticker"; url: string; caption?: string } & AttachmentMeta);

@@ -8,6 +8,7 @@
  * retorno y se registra en cm_wa_template_sends + custom_fields.
  */
 import { supabaseAdmin } from "@/lib/supabase";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getWabaCredentialsForClient } from "@/lib/whatsapp/cloud/business-account";
 import { WabaCloudClient } from "@/lib/whatsapp/cloud/client";
 import type { WaComponent } from "@/lib/whatsapp/cloud/types";
@@ -54,6 +55,109 @@ function bodyPositionalCount(components: WaComponent[]): number {
     [...body.text.matchAll(/\{\{\s*(\d+)\s*\}\}/g)].map((m) => Number(m[1]))
   );
   return nums.size;
+}
+
+/** Texto del BODY con las variables ya reemplazadas, para mostrarlo en el chat. */
+function renderBody(components: WaComponent[], values: Record<string, string>): string {
+  const body = components.find((c) => c.type === "BODY");
+  if (!body?.text) return "";
+  return body.text.replace(/\{\{\s*([\w]+)\s*\}\}/g, (match, key: string) => values[key] ?? match);
+}
+
+/**
+ * Deja constancia del envío en la conversación del Inbox (mensaje saliente
+ * tipo "template", como cuando un asesor la manda desde el chat). Sin esto el
+ * asesor no ve que el lead ya recibió la plantilla y la vuelve a mandar.
+ * Best-effort: nunca lanza.
+ */
+async function recordFirstTouchInInbox(input: {
+  clientId: string;
+  to: string;
+  wamid: string | undefined;
+  phoneNumberId: string;
+  templateName: string;
+  language: string;
+  components: unknown[];
+  renderedText: string;
+}) {
+  try {
+    const admin = createAdminClient("smarttalk");
+
+    const { data: contact } = await admin
+      .from("contacts")
+      .select("id, organization_id")
+      .eq("brand_id", input.clientId)
+      .in("wa_id", [input.to, `+${input.to}`])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!contact) return;
+
+    const { data: channels } = await admin
+      .from("channels")
+      .select("id, organization_id, whatsapp_phone_number_id")
+      .eq("brand_id", input.clientId)
+      .in("type", ["whatsapp_business_api", "whatsapp_cloud_api"])
+      .eq("status", "active");
+    const channel =
+      (channels || []).find((c) => c.whatsapp_phone_number_id === input.phoneNumberId) ||
+      (channels || [])[0];
+    if (!channel) return;
+
+    const { data: existing } = await admin
+      .from("conversations")
+      .select("id")
+      .eq("contact_id", contact.id)
+      .eq("channel_id", channel.id)
+      .in("status", ["open", "pending"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    let conversationId = existing?.id as string | undefined;
+    if (!conversationId) {
+      const { data: created } = await admin
+        .from("conversations")
+        .insert({
+          organization_id: channel.organization_id,
+          brand_id: input.clientId,
+          contact_id: contact.id,
+          channel_id: channel.id,
+          status: "open",
+        })
+        .select("id")
+        .single();
+      conversationId = created?.id as string | undefined;
+    }
+    if (!conversationId) return;
+
+    const now = new Date().toISOString();
+    await admin.from("messages").insert({
+      conversation_id: conversationId,
+      contact_id: contact.id,
+      direction: "outbound",
+      type: "template",
+      content: {
+        type: "template",
+        template_name: input.templateName,
+        language: input.language,
+        components: input.components,
+        text: input.renderedText,
+      },
+      wa_message_id: input.wamid ?? null,
+      status: "sent",
+      is_bot: true,
+    });
+    await admin
+      .from("conversations")
+      .update({
+        last_message_preview: `Plantilla: ${(input.renderedText || input.templateName).slice(0, 90)}`,
+        updated_at: now,
+      })
+      .eq("id", conversationId);
+  } catch (e) {
+    console.warn("[lead-engagement] no se pudo registrar la plantilla en el Inbox:", e);
+  }
 }
 
 export interface FirstTouchInput {
@@ -126,17 +230,17 @@ export async function sendFirstTouchTemplate(
     };
 
     let sendComponents: unknown[] = [];
+    const renderValues: Record<string, string> = {};
     if (template.parameter_format === "NAMED") {
       const names = bodyParamNames(components);
       if (names.length > 0) {
         sendComponents = [
           {
             type: "body",
-            parameters: names.map((name, i) => ({
-              type: "text",
-              parameter_name: name,
-              text: valueFor(name, i),
-            })),
+            parameters: names.map((name, i) => {
+              renderValues[name] = valueFor(name, i);
+              return { type: "text", parameter_name: name, text: renderValues[name] };
+            }),
           },
         ];
       }
@@ -146,10 +250,10 @@ export async function sendFirstTouchTemplate(
         sendComponents = [
           {
             type: "body",
-            parameters: Array.from({ length: n }, (_v, i) => ({
-              type: "text",
-              text: i === 0 ? firstName : topic,
-            })),
+            parameters: Array.from({ length: n }, (_v, i) => {
+              renderValues[String(i + 1)] = i === 0 ? firstName : topic;
+              return { type: "text", text: renderValues[String(i + 1)] };
+            }),
           },
         ];
       }
@@ -172,6 +276,17 @@ export async function sendFirstTouchTemplate(
       language: template.language,
       wamid: wamid ?? null,
       status: "sent",
+    });
+
+    await recordFirstTouchInInbox({
+      clientId: input.clientId,
+      to,
+      wamid,
+      phoneNumberId: creds.account.phone_number_id,
+      templateName: template.name,
+      language: template.language,
+      components: sendComponents,
+      renderedText: renderBody(components, renderValues),
     });
 
     return { sent: true, wamid, templateName: template.name };

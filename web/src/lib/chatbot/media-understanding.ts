@@ -111,7 +111,9 @@ export function inboundContentToText(content: unknown): string {
 
   if (type === "interactive" && typeof value.body === "string") return value.body;
   if (type === "template" && typeof value.template_name === "string") {
-    return `[Plantilla enviada: ${value.template_name}]`;
+    return typeof value.text === "string" && value.text.trim()
+      ? value.text.trim()
+      : `[Plantilla enviada: ${value.template_name}]`;
   }
 
   const label = LABELS[type] || "Adjunto";
