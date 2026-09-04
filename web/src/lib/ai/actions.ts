@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { AIActionConfig } from "@/types/database";
 import { notify } from "@/lib/notify/dispatcher";
+import { addSystemNote } from "@/lib/smarttalk/internal-notes";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || "https://www.comunitymanager.io").replace(/\/$/, "");
 
@@ -277,12 +278,15 @@ export async function executeAIActions(
 
         case "add_comment": {
           if (action.params[0]) {
-            await admin.from("internal_notes").insert({
-              conversation_id: context.conversationId,
-              agent_id: null,
-              content: `[IA] ${action.params.join(":")}`,
+            // agent_id es NOT NULL: la nota se atribuye a un asesor real
+            // (ver lib/smarttalk/internal-notes.ts); antes fallaba en silencio.
+            const noteId = await addSystemNote({
+              conversationId: context.conversationId,
+              organizationId: context.organizationId,
+              content: action.params.join(":"),
+              prefix: "[IA]",
             });
-            executed.push("add_comment");
+            if (noteId) executed.push("add_comment");
           }
           break;
         }

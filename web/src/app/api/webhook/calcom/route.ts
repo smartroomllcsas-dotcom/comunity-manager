@@ -25,6 +25,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notify } from "@/lib/notify/dispatcher";
+import { addSystemNote } from "@/lib/smarttalk/internal-notes";
 
 export const maxDuration = 60;
 
@@ -287,10 +288,12 @@ export async function POST(request: NextRequest) {
       .from("conversations")
       .update({ metadata: { ...(conversation.metadata || {}), booking }, updated_at: now })
       .eq("id", conversation.id);
-    await admin.from("internal_notes").insert({
-      conversation_id: conversation.id,
-      agent_id: null,
+    await addSystemNote({
+      conversationId: conversation.id,
+      organizationId: contact.organization_id,
+      agentId: conversation.assigned_agent_id,
       content: note,
+      prefix: "[Agenda]",
     });
   }
 
