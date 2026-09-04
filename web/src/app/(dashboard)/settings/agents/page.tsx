@@ -236,9 +236,14 @@ export default function AgentsSettingsPage() {
     setActionLoading(agentId);
     try {
       const res = await fetch(`/api/agents/${agentId}`, { method: "DELETE" });
-      if (res.ok) {
-        queryClient.invalidateQueries({ queryKey: ["agents"] });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        window.alert(payload.error || "No se pudo eliminar al miembro. Inténtalo de nuevo.");
+        return;
       }
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+    } catch {
+      window.alert("No se pudo eliminar al miembro. Revisa tu conexión e inténtalo de nuevo.");
     } finally {
       setActionLoading(null);
       setRemoveConfirm(null);
