@@ -343,16 +343,22 @@ async function markFirstTouchFailed(
       await admin.from("contacts").update({ custom_fields: cf }).eq("id", msg.contact_id);
     }
 
-    const templateName =
-      (msg.content as { template_name?: string } | null)?.template_name || "plantilla";
-    const { addSystemNote } = await import("@/lib/smarttalk/internal-notes");
-    await addSystemNote({
-      conversationId: msg.conversation_id as string,
-      content:
-        `⚠️ WhatsApp no pudo entregar la ${templateName}: ${reason}. ` +
-        `Conviene contactar al lead por llamada o correo.`,
-      prefix: "[WhatsApp]",
-    });
+    // Aviso a los asesores de la marca (una sola vez por lead) + nota en el chat.
+    const { data: conv } = await admin
+      .from("conversations")
+      .select("brand_id")
+      .eq("id", msg.conversation_id)
+      .maybeSingle();
+    if (conv?.brand_id) {
+      const { notifyLeadNeedsManualContact } = await import("@/lib/smarttalk/lead-alerts");
+      await notifyLeadNeedsManualContact({
+        contactId: msg.contact_id as string,
+        brandId: conv.brand_id as string,
+        conversationId: msg.conversation_id as string,
+        cause: "whatsapp_failed",
+        detail: reason,
+      });
+    }
   } catch (e) {
     console.warn("[whatsapp-webhook] no se pudo marcar el primer contacto como fallido:", e);
   }

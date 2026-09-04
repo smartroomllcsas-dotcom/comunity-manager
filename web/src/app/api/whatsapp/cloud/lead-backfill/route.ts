@@ -20,6 +20,7 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCmClientAccess } from "@/lib/cm-client-access";
 import { sendFirstTouchTemplate } from "@/lib/whatsapp/cloud/lead-engagement";
+import { notifyLeadNeedsManualContact } from "@/lib/smarttalk/lead-alerts";
 
 export const maxDuration = 300;
 
@@ -134,6 +135,7 @@ export async function POST(request: NextRequest) {
     const lead = toPending(row);
     if (!lead.phone) {
       results.push({ id: row.id, name: row.name, sent: false, reason: "sin_telefono" });
+      await notifyLeadNeedsManualContact({ contactId: row.id, brandId: access.clientId, cause: "no_phone" });
       continue;
     }
 
@@ -164,6 +166,9 @@ export async function POST(request: NextRequest) {
         ? { id: row.id, name: row.name, sent: true }
         : { id: row.id, name: row.name, sent: false, reason: outcome.reason }
     );
+    if (!outcome.sent && outcome.reason === "invalid_phone") {
+      await notifyLeadNeedsManualContact({ contactId: row.id, brandId: access.clientId, cause: "invalid_phone" });
+    }
 
     if (!outcome.sent && outcome.reason === "rate_limited") break;
   }

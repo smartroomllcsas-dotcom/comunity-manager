@@ -19,6 +19,7 @@ import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { upsertRestrictedContact } from "@/lib/smarttalk/contact-privacy";
 import { sendFirstTouchTemplate } from "@/lib/whatsapp/cloud/lead-engagement";
+import { notifyLeadNeedsManualContact } from "@/lib/smarttalk/lead-alerts";
 
 const META_GRAPH_URL = `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || "v21.0"}`;
 
@@ -298,6 +299,23 @@ export async function ingestGraphLead(
       .from("contacts")
       .update({ custom_fields: { ...customFields, ...touchMeta } })
       .eq("id", inserted.id);
+
+    // Teléfono inválido: no hay forma de abordarlo por WhatsApp → avisar a
+    // los asesores para que lo contacten a mano.
+    if (!firstTouch.sent && firstTouch.reason === "invalid_phone") {
+      await notifyLeadNeedsManualContact({
+        contactId: inserted.id as string,
+        brandId: channel.brand_id,
+        cause: "invalid_phone",
+      });
+    }
+  } else if (inserted?.id) {
+    // Lead sin teléfono: sólo se le puede escribir al correo.
+    await notifyLeadNeedsManualContact({
+      contactId: inserted.id as string,
+      brandId: channel.brand_id,
+      cause: "no_phone",
+    });
   }
 
   return { processed: true, contactId: inserted?.id as string };
