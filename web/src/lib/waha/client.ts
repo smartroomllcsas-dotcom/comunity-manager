@@ -82,6 +82,10 @@ export class WahaClient {
     });
   }
 
+  async restartSession(name: string): Promise<WahaSession> {
+    return this.request<WahaSession>("POST", `/api/sessions/${encodeURIComponent(name)}/restart`);
+  }
+
   async logout(name: string): Promise<void> {
     await this.request<unknown>("POST", `/api/sessions/${encodeURIComponent(name)}/logout`);
   }

@@ -145,28 +145,17 @@ export async function POST(request: NextRequest) {
     await waha.createSession(sessionInput);
   } catch (err) {
     // 422 = la sesión ya existe en WAHA (reintento/doble clic) → reusarla,
-    // pero si está muerta (FAILED/STOPPED o QR caducado) recrearla desde cero
+    // pero si está muerta (FAILED/STOPPED o QR caducado) reiniciarla.
+    // restart evita el race de delete+create (WAHA tarda en liberar el nombre).
     if (err instanceof WahaError && err.status === 422) {
       try {
         const live = await waha.getSession(sessionName);
         if (live.status === "FAILED" || live.status === "STOPPED") {
-          await waha.deleteSession(sessionName);
-          // WAHA tarda en liberar el nombre tras el delete
-          await new Promise((r) => setTimeout(r, 1500));
-          try {
-            await waha.createSession(sessionInput);
-          } catch (retryErr) {
-            if (retryErr instanceof WahaError && retryErr.status === 422) {
-              await new Promise((r) => setTimeout(r, 2500));
-              await waha.createSession(sessionInput);
-            } else {
-              throw retryErr;
-            }
-          }
+          await waha.restartSession(sessionName);
         }
       } catch (recreateErr) {
         const fullMsg = recreateErr instanceof Error ? recreateErr.message : String(recreateErr);
-        console.error("[waha/connect] recreate failed:", fullMsg);
+        console.error("[waha/connect] restart failed:", fullMsg);
         if (channelIdCreated) {
           await admin.from("channels").delete().eq("id", channelRowId);
         }
