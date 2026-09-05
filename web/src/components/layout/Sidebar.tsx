@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -244,6 +244,23 @@ export function Sidebar({ showCommunityOs = false }: SidebarProps) {
     : "";
   const isSuperAdmin = currentAgent?.is_super_admin === true;
   const [expanded, setExpanded] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const apply = () => {
+      setIsMobile(mq.matches);
+      if (mq.matches) setExpanded(false);
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
+  useEffect(() => {
+    if (isMobile) setExpanded(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   const isActive = (href: string) => {
     if (href === "/es/os") return pathname === "/es/os" || pathname === "/en/os";
@@ -252,10 +269,19 @@ export function Sidebar({ showCommunityOs = false }: SidebarProps) {
 
   return (
     <TooltipProvider>
+      {isMobile && expanded && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50"
+          onClick={() => setExpanded(false)}
+          aria-hidden="true"
+        />
+      )}
       <aside
         className={cn(
           "bg-[var(--surface-base)] flex flex-col h-screen shrink-0 border-r border-border overflow-hidden transition-[width] duration-200",
-          expanded ? "w-[240px]" : "w-[56px]"
+          expanded ? "w-[240px]" : "w-[56px]",
+          // En móvil el sidebar expandido flota sobre el contenido en vez de empujarlo.
+          isMobile && expanded && "fixed inset-y-0 left-0 z-40 shadow-2xl"
         )}
       >
         {/* Logo + collapse toggle */}
