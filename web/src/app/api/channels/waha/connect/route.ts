@@ -135,15 +135,36 @@ export async function POST(request: NextRequest) {
   }
   const webhookUrl = `${appUrl}/api/webhook/waha`;
 
+  const waha = wahaFromEnv();
+  const sessionInput = {
+    name: sessionName,
+    webhookUrl,
+    webhookHmacSecret: hmac,
+  };
   try {
-    await wahaFromEnv().createSession({
-      name: sessionName,
-      webhookUrl,
-      webhookHmacSecret: hmac,
-    });
+    await waha.createSession(sessionInput);
   } catch (err) {
-    // 422 = la sesión ya existe en WAHA (reintento/doble clic) → reusarla
-    if (!(err instanceof WahaError && err.status === 422)) {
+    // 422 = la sesión ya existe en WAHA (reintento/doble clic) → reusarla,
+    // pero si está muerta (FAILED/STOPPED o QR caducado) recrearla desde cero
+    if (err instanceof WahaError && err.status === 422) {
+      try {
+        const live = await waha.getSession(sessionName);
+        if (live.status === "FAILED" || live.status === "STOPPED") {
+          await waha.deleteSession(sessionName);
+          await waha.createSession(sessionInput);
+        }
+      } catch (recreateErr) {
+        const fullMsg = recreateErr instanceof Error ? recreateErr.message : String(recreateErr);
+        console.error("[waha/connect] recreate failed:", fullMsg);
+        if (channelIdCreated) {
+          await admin.from("channels").delete().eq("id", channelRowId);
+        }
+        return NextResponse.json(
+          { error: "Upstream WAHA error creating session" },
+          { status: 502 }
+        );
+      }
+    } else {
       // H2: sanitize — WahaError.message may include the upstream body which
       // could echo secret headers. Log the full error server-side, return generic.
       const fullMsg = err instanceof Error ? err.message : String(err);
