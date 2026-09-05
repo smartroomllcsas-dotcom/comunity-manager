@@ -91,10 +91,22 @@ export class WahaClient {
   }
 
   async getQr(name: string): Promise<{ mimetype: string; data: string }> {
-    return this.request<{ mimetype: string; data: string }>(
-      "GET",
-      `/api/${encodeURIComponent(name)}/auth/qr?format=image`
-    );
+    // WAHA responde PNG binario con format=image (no JSON) — no usar request()
+    const url = `${this.baseUrl}/api/${encodeURIComponent(name)}/auth/qr?format=image`;
+    const fetchFn = this.fetchImpl ?? globalThis.fetch;
+    const res = await fetchFn(url, {
+      headers: { "X-Api-Key": this.apiKey, Accept: "application/json" },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => undefined);
+      throw new WahaError(res.status, text);
+    }
+    const contentType = res.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      return res.json() as Promise<{ mimetype: string; data: string }>;
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    return { mimetype: contentType || "image/png", data: buf.toString("base64") };
   }
 
   async sendText({
