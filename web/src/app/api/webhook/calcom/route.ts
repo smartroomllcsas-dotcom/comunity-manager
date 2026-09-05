@@ -33,6 +33,11 @@ export const maxDuration = 60;
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || "https://www.comunitymanager.io").replace(/\/$/, "");
 const DEFAULT_TZ = process.env.CALCOM_DEFAULT_TIMEZONE || "America/Bogota";
 const CALCOM_BASE_URL = (process.env.CALCOM_BASE_URL?.trim() || "https://cal.smartgenapp.com").replace(/\/$/, "");
+// Reservas desde la web pública (smartdigitalmedia.co/reuniones): el visitante
+// aún no existe como contacto — se crea como lead bajo esta marca para no
+// perder la cita. Sin estas vars el comportamiento vuelve al best-effort viejo.
+const FALLBACK_BRAND_ID = process.env.CALCOM_FALLBACK_BRAND_ID?.trim() || "";
+const FALLBACK_ORG_ID = process.env.CALCOM_FALLBACK_ORG_ID?.trim() || "";
 
 type CalPerson = { name?: string; email?: string; timeZone?: string; phoneNumber?: string };
 type CalPayload = {
@@ -200,6 +205,38 @@ async function pickBestConversation(
   return best ? { contact: best.contact, conversation: best.conversation } : null;
 }
 
+/** Reserva de la web sin contacto previo: se crea el lead para no perder la cita. */
+async function createFallbackContact(
+  admin: ReturnType<typeof createAdminClient>,
+  payload: CalPayload,
+  phone: string | null,
+  email: string | null,
+): Promise<ContactRow | null> {
+  if (!FALLBACK_BRAND_ID || !FALLBACK_ORG_ID) return null;
+  const waId = phone || email;
+  if (!waId) return null;
+  const name = payload.attendees?.[0]?.name?.trim() || null;
+  const cf: Record<string, unknown> = { origen: "calcom_web" };
+  if (email) cf.correo = email;
+  if (phone) cf.phone = `+${phone}`;
+  const { data, error } = await admin
+    .from("contacts")
+    .insert({
+      organization_id: FALLBACK_ORG_ID,
+      brand_id: FALLBACK_BRAND_ID,
+      wa_id: waId,
+      name: name || email || `+${phone}`,
+      custom_fields: cf,
+    })
+    .select("id, organization_id, brand_id, name, custom_fields, lifecycle_stage_id")
+    .maybeSingle();
+  if (error || !data) {
+    console.error("[calcom-webhook] no se pudo crear el lead de la web:", error?.message);
+    return null;
+  }
+  return data as ContactRow;
+}
+
 async function advisorEmails(
   admin: ReturnType<typeof createAdminClient>,
   conversation: { assigned_agent_id: string | null; metadata: Record<string, unknown> | null } | null,
@@ -267,7 +304,11 @@ export async function POST(request: NextRequest) {
   };
   const admin = createAdminClient("smarttalk");
 
-  const match = await findContact(admin, idsFromLink, phone, email);
+  let match = await findContact(admin, idsFromLink, phone, email);
+  if (!match && state === "agendada") {
+    const created = await createFallbackContact(admin, payload, phone, email);
+    if (created) match = { contact: created, conversation: null, matchedBy: "created_web" };
+  }
   if (!match) {
     console.warn("[calcom-webhook] reserva sin contacto en la plataforma", {
       trigger,
