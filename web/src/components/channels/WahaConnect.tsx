@@ -17,6 +17,8 @@ export default function WahaConnect({ brandId, onConnected }: Props) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const qrRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentQrUrlRef = useRef<string | null>(null);
+  const restartingRef = useRef(false);
+  const startRef = useRef<(() => Promise<void>) | null>(null);
 
   const cleanup = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -50,11 +52,21 @@ export default function WahaConnect({ brandId, onConnected }: Props) {
       setOpen(false);
     }
     if (j.status === "FAILED" || j.status === "STOPPED") {
-      setError(j.last_error ?? `Sesion termino en ${j.status}`);
+      // QR caducado sin escanear → la sesion muere en WAHA; regenerarla sola
+      // mientras el modal siga abierto (connect reinicia sesiones FAILED)
+      if (!restartingRef.current) {
+        restartingRef.current = true;
+        cleanup();
+        setStatus("STARTING");
+        void startRef.current?.().finally(() => {
+          restartingRef.current = false;
+        });
+      }
     }
   }, [cleanup, onConnected]);
 
   const start = useCallback(async () => {
+    cleanup();
     setError(null);
     const res = await fetch("/api/channels/waha/connect", {
       method: "POST",
@@ -72,7 +84,9 @@ export default function WahaConnect({ brandId, onConnected }: Props) {
     await refreshQr(j.channelId);
     qrRef.current = setInterval(() => refreshQr(j.channelId), 25_000);
     pollRef.current = setInterval(() => pollStatus(j.channelId), 3_000);
-  }, [brandId, refreshQr, pollStatus]);
+  }, [brandId, cleanup, refreshQr, pollStatus]);
+
+  useEffect(() => { startRef.current = start; }, [start]);
 
   useEffect(() => () => cleanup(), [cleanup]);
 
