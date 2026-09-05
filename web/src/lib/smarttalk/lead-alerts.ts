@@ -30,22 +30,32 @@ const CAUSE_TEXT: Record<ManualContactCause, string> = {
 
 type Admin = ReturnType<typeof createAdminClient>;
 
+/**
+ * Correos de TODOS los asesores asignados a una empresa/marca. Regla de la
+ * casa: cada asesor asignado a una empresa recibe los avisos de sus leads
+ * (handoff, reunión agendada, contactar a mano…), esté o no en un equipo.
+ */
+export async function brandAdvisorEmails(admin: Admin, brandId: string | null): Promise<string[]> {
+  if (!brandId) return [];
+  const { data: assignments } = await admin
+    .from("brand_advisor_assignments")
+    .select("agent:agents!brand_advisor_assignments_agent_id_fkey(email)")
+    .eq("brand_id", brandId);
+  const emails = new Set<string>();
+  for (const row of assignments || []) {
+    const e = (row as { agent?: { email?: string } }).agent?.email;
+    if (e && e.includes("@")) emails.add(e);
+  }
+  return [...emails];
+}
+
 async function recipientsFor(
   admin: Admin,
   organizationId: string,
   brandId: string,
   conversationAssignedAgentId: string | null,
 ): Promise<string[]> {
-  const emails = new Set<string>();
-
-  const { data: assignments } = await admin
-    .from("brand_advisor_assignments")
-    .select("agent:agents!brand_advisor_assignments_agent_id_fkey(email)")
-    .eq("brand_id", brandId);
-  for (const row of assignments || []) {
-    const e = (row as { agent?: { email?: string } }).agent?.email;
-    if (e) emails.add(e);
-  }
+  const emails = new Set<string>(await brandAdvisorEmails(admin, brandId));
 
   if (conversationAssignedAgentId) {
     const { data: agent } = await admin

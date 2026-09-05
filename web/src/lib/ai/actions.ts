@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { AIActionConfig } from "@/types/database";
 import { notify } from "@/lib/notify/dispatcher";
 import { addSystemNote } from "@/lib/smarttalk/internal-notes";
+import { brandAdvisorEmails } from "@/lib/smarttalk/lead-alerts";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || "https://www.comunitymanager.io").replace(/\/$/, "");
 
@@ -14,7 +15,20 @@ async function notifyAdvisorsOfAssignment(
   opts: { organizationId: string; conversationId: string; contactId: string; emails: string[]; assigneeLabel: string }
 ): Promise<void> {
   try {
-    const emails = [...new Set(opts.emails.filter((e) => typeof e === "string" && e.includes("@")))];
+    // Además del asesor/equipo asignado, TODOS los asesores de la empresa del
+    // lead reciben el aviso (regla de la casa: asesor asignado a una empresa
+    // = recibe los correos de sus leads).
+    const { data: conv } = await admin
+      .from("conversations")
+      .select("brand_id")
+      .eq("id", opts.conversationId)
+      .maybeSingle();
+    const brandEmails = await brandAdvisorEmails(admin, (conv?.brand_id as string | null) || null);
+    const emails = [
+      ...new Set(
+        [...opts.emails, ...brandEmails].filter((e) => typeof e === "string" && e.includes("@"))
+      ),
+    ];
     if (emails.length === 0) return;
 
     let contactName = "Un lead";
@@ -140,6 +154,12 @@ export async function executeAIActions(
               .single();
 
             if (targetAgent) {
+              const { data: current } = await admin
+                .from("conversations")
+                .select("assigned_agent_id")
+                .eq("id", context.conversationId)
+                .maybeSingle();
+              const alreadyAssigned = current?.assigned_agent_id === targetAgent.id;
               await admin
                 .from("conversations")
                 .update({
@@ -148,8 +168,9 @@ export async function executeAIActions(
                 })
                 .eq("id", context.conversationId);
               executed.push(`assign_agent:${action.params[0]}`);
-              // Notifica al asesor asignado.
-              await notifyAdvisorsOfAssignment(admin, {
+              // Notifica al asesor asignado (una vez: si el agente repite la
+              // acción en otro turno, no se vuelve a enviar el correo).
+              if (!alreadyAssigned) await notifyAdvisorsOfAssignment(admin, {
                 organizationId: context.organizationId,
                 conversationId: context.conversationId,
                 contactId: context.contactId,
@@ -178,7 +199,9 @@ export async function executeAIActions(
                 .select("metadata")
                 .eq("id", context.conversationId)
                 .maybeSingle();
-              const mergedMeta = { ...((conv?.metadata as Record<string, unknown>) || {}), assigned_team_id: team.id };
+              const previousMeta = (conv?.metadata as Record<string, unknown>) || {};
+              const alreadyAssigned = previousMeta.assigned_team_id === team.id;
+              const mergedMeta = { ...previousMeta, assigned_team_id: team.id };
               await admin
                 .from("conversations")
                 .update({
@@ -188,7 +211,12 @@ export async function executeAIActions(
                 .eq("id", context.conversationId);
               executed.push(`assign_team:${action.params[0]}`);
 
-              // Notifica a los miembros del equipo (agent_teams → agents.email).
+              // Si el agente repite la acción en otro turno, no se reenvía el
+              // correo (antes llegaba duplicado).
+              if (alreadyAssigned) break;
+
+              // Notifica a los miembros del equipo (agent_teams → agents.email)
+              // y, dentro de notifyAdvisorsOfAssignment, a los asesores de la marca.
               const { data: links } = await admin
                 .from("agent_teams")
                 .select("agent:agents(email)")

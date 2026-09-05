@@ -26,6 +26,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notify } from "@/lib/notify/dispatcher";
 import { addSystemNote } from "@/lib/smarttalk/internal-notes";
+import { brandAdvisorEmails } from "@/lib/smarttalk/lead-alerts";
 
 export const maxDuration = 60;
 
@@ -366,7 +367,13 @@ export async function POST(request: NextRequest) {
 
   // 3. Aviso al asesor / equipo (best-effort).
   try {
-    const emails = await advisorEmails(admin, conversation);
+    // Asesor asignado + equipo asignado + TODOS los asesores de la empresa.
+    const emails = [
+      ...new Set([
+        ...(await advisorEmails(admin, conversation)),
+        ...(await brandAdvisorEmails(admin, contact.brand_id)),
+      ]),
+    ];
     if (emails.length > 0) {
       const name = contact.name || "Un lead";
       const link = conversation ? `${APP_URL}/inbox?conversation=${conversation.id}` : `${APP_URL}/contacts`;
