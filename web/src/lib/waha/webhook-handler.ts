@@ -88,13 +88,41 @@ export async function processWahaWebhookEvent(
       type?: string;
       timestamp?: number;
       notifyName?: string;
+      _data?: { key?: { remoteJidAlt?: string }; pushName?: string };
     };
 
     if (p.fromMe) return { ok: true }; // outbound echo
     const from = String(p.from ?? "");
-    if (!from.endsWith("@c.us")) return { ok: true }; // groups/other, skip
-    const waId = from.slice(0, -"@c.us".length);
+    // skip groups, statuses, newsletters
+    if (
+      from === "status@broadcast" ||
+      from.endsWith("@g.us") ||
+      from.endsWith("@newsletter")
+    ) {
+      return { ok: true };
+    }
+
+    let waId = "";
+    if (from.endsWith("@c.us")) {
+      waId = from.slice(0, -"@c.us".length);
+    } else if (from.endsWith("@lid")) {
+      // LID addressing (privacy mode): real phone comes in _data.key.remoteJidAlt
+      const alt = String(p._data?.key?.remoteJidAlt ?? "");
+      waId = alt.includes("@") ? alt.split("@")[0] : from.slice(0, -"@lid".length);
+    } else {
+      return { ok: true }; // unknown addressing, skip
+    }
     if (!waId) return { ok: true };
+
+    // Dedupe: "message" and "message.any" both fire for the same inbound message
+    if (p.id) {
+      const { data: dup } = await admin
+        .from("messages")
+        .select("id")
+        .eq("wa_message_id", p.id)
+        .maybeSingle();
+      if (dup) return { ok: true };
+    }
 
     // Look up channel via session name
     const { data: channel } = await admin
@@ -141,7 +169,7 @@ export async function processWahaWebhookEvent(
           organization_id: orgId,
           brand_id: brandId,
           wa_id: waId,
-          name: p.notifyName ?? null,
+          name: p.notifyName ?? p._data?.pushName ?? null,
           last_message_at: new Date().toISOString(),
         })
         .select("id")
@@ -154,7 +182,9 @@ export async function processWahaWebhookEvent(
         .from("contacts")
         .update({
           last_message_at: new Date().toISOString(),
-          ...(p.notifyName ? { name: p.notifyName } : {}),
+          ...(p.notifyName || p._data?.pushName
+            ? { name: p.notifyName ?? p._data?.pushName }
+            : {}),
         })
         .eq("id", contactRowId);
     }
