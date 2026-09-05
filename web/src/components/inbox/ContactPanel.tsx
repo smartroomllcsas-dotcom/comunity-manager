@@ -167,7 +167,7 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
               contact.tags.map((tag) => (
                 <span
                   key={tag}
-                  className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#388bfd]/15 text-[#58a6ff] border border-[#388bfd]/20"
+                  className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[var(--accent-soft)] text-[var(--accent-text)] border border-[var(--accent-border)]"
                 >
                   {tag}
                 </span>
@@ -183,7 +183,7 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
           <select
             value={conversation.assigned_agent_id || "unassigned"}
             onChange={(e) => handleAssign(e.target.value)}
-            className="w-full h-8 rounded-md bg-[var(--surface-base)] border border-border text-xs text-foreground/85 px-2 focus:outline-none focus:border-[#388bfd] transition-colors"
+            className="w-full h-8 rounded-md bg-[var(--surface-base)] border border-border text-xs text-foreground/85 px-2 focus:outline-none focus:border-[var(--accent-border)] transition-colors"
           >
             <option value="unassigned">Sin asignar</option>
             {agents?.map((a) => (
@@ -199,7 +199,7 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
           <select
             value={conversation.status}
             onChange={(e) => handleStatusChange(e.target.value)}
-            className="w-full h-8 rounded-md bg-[var(--surface-base)] border border-border text-xs text-foreground/85 px-2 focus:outline-none focus:border-[#388bfd] transition-colors"
+            className="w-full h-8 rounded-md bg-[var(--surface-base)] border border-border text-xs text-foreground/85 px-2 focus:outline-none focus:border-[var(--accent-border)] transition-colors"
           >
             <option value="open">Abierta</option>
             <option value="pending">Pendiente</option>
@@ -218,7 +218,7 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
                     "h-2 w-2 rounded-full",
                     i === 0
                       ? "bg-emerald-500"
-                      : "bg-[#30363d]"
+                      : "bg-white/10"
                   )}
                 />
                 <span className="text-[9px] text-muted-foreground/70">{stage}</span>
@@ -231,7 +231,7 @@ export function ContactPanel({ conversation }: ContactPanelProps) {
         <CollapsibleSection title="Notas" icon={StickyNote} defaultOpen={false}>
           <textarea
             placeholder="Agregar una nota..."
-            className="w-full h-16 rounded-md bg-[var(--surface-base)] border border-border text-xs text-foreground/85 placeholder:text-muted-foreground/70 px-2 py-1.5 resize-none focus:outline-none focus:border-[#388bfd] transition-colors"
+            className="w-full h-16 rounded-md bg-[var(--surface-base)] border border-border text-xs text-foreground/85 placeholder:text-muted-foreground/70 px-2 py-1.5 resize-none focus:outline-none focus:border-[var(--accent-border)] transition-colors"
           />
         </CollapsibleSection>
 

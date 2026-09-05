@@ -49,11 +49,11 @@ export function ConversationList({
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
-      <div className="h-12 min-h-[48px] shrink-0 flex items-center justify-between px-4 border-b border-border">
-        <h2 className="text-sm font-semibold text-foreground">Bandeja de entrada</h2>
+      <div className="h-11 min-h-[44px] shrink-0 flex items-center justify-between px-4 border-b border-white/[0.06]">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Bandeja de entrada</h2>
         {openCount > 0 && (
           <span
-            className="text-[10px] font-medium bg-primary/15 text-[#58a6ff] px-1.5 py-0.5 rounded-full"
+            className="text-[10px] font-medium tabular-nums bg-[var(--accent-soft)] text-[var(--accent-text)] px-1.5 py-0.5 rounded"
             aria-label={`${openCount} conversaciones abiertas`}
           >
             {openCount}
@@ -92,7 +92,7 @@ export function ConversationList({
             {isFetchingNextPage ? (
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-label="Cargando más leads" />
             ) : (
-              <span className="text-[10px] text-muted-foreground">Desplaza para cargar más leads</span>
+              <span className="text-[10px] text-[var(--text-tertiary)]">Desplaza para cargar más leads</span>
             )}
           </div>
         )}

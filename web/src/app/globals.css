@@ -186,6 +186,32 @@
   }
 }
 
+/* Hallmark · component-scope inbox restyle · genre: modern-minimal · theme: elegant-dark (Superhuman/Linear) */
+:root {
+  --inbox-canvas: #0a0d16;
+  --inbox-panel: #0d1119;
+  --inbox-raised: #12161f;
+  --inbox-overlay: #161b26;
+  --hairline: rgba(255, 255, 255, 0.06);
+  --hairline-strong: rgba(255, 255, 255, 0.1);
+  --inbox-hover: rgba(255, 255, 255, 0.03);
+  --inbox-active: rgba(255, 255, 255, 0.06);
+  --text-primary: #eef1f6;
+  --text-secondary: #99a1ad;
+  --text-tertiary: #5b6472;
+  --accent-soft: rgba(59, 130, 246, 0.12);
+  --accent-border: rgba(59, 130, 246, 0.35);
+  --accent-text: #6ea8fe;
+  --ch-whatsapp: #25d366;
+  --ch-whatsapp-soft: rgba(37, 211, 102, 0.12);
+  --ch-facebook: #6ea8fe;
+  --ch-facebook-soft: rgba(24, 119, 242, 0.14);
+  --brand-tag: #b5a8f8;
+  --brand-tag-soft: rgba(139, 92, 246, 0.12);
+  --bubble-outbound: #2e5fbf;
+  --bubble-inbound: #1b212d;
+}
+
 /* Icon sizing tokens — reemplazan h-4 w-4 aleatorios por escala consistente. */
 @layer utilities {
   .icon-xs { width: 12px; height: 12px; flex-shrink: 0; }

@@ -44,7 +44,7 @@ function channelMeta(type: string) {
     case "telegram":
       return { label: "Telegram", icon: Send, badge: "bg-sky-500/15 text-sky-300 border-sky-500/30" };
     default:
-      return { label: "Canal", icon: Globe2, badge: "bg-[#484f58]/15 text-[#c9d1d9] border-[#484f58]/30" };
+      return { label: "Canal", icon: Globe2, badge: "bg-white/[0.06] text-[var(--text-secondary)] border-white/10" };
   }
 }
 
@@ -66,16 +66,16 @@ export function InboxChannelsBar({ channels }: { channels: Channel[] }) {
   ] as const;
 
   return (
-    <div className="border-b border-[#2d333b] bg-[#0d1117]">
-      <div className="px-4 py-3">
-        <div className="flex items-center justify-between gap-3 mb-3">
+    <div className="border-b border-white/[0.06] bg-[var(--inbox-panel)]">
+      <div className="px-5 py-3">
+        <div className="flex items-center justify-between gap-3 mb-2.5">
           <div>
-            <h3 className="text-sm font-semibold text-white">Canales conectados</h3>
-            <p className="text-xs text-[#8b949e]">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Canales conectados</h3>
+            <p className="text-xs text-[var(--text-tertiary)]">
               Gestiona conversaciones de WhatsApp, Facebook, Instagram y futuros canales desde un solo lugar.
             </p>
           </div>
-          <span className="text-[11px] px-2 py-1 rounded-full border border-[#2d333b] bg-[#161b22] text-[#8b949e]">
+          <span className="text-[11px] tabular-nums px-2 py-0.5 rounded border border-white/[0.08] text-[var(--text-secondary)]">
             {activeChannels.length} activos
           </span>
         </div>
@@ -88,14 +88,14 @@ export function InboxChannelsBar({ channels }: { channels: Channel[] }) {
               return (
                 <div
                   key={channel.id}
-                  className="flex items-center gap-3 rounded-lg border border-[#2d333b] bg-[#161b22] px-3 py-2.5"
+                  className="flex items-center gap-3 rounded-md border border-white/[0.06] bg-[var(--inbox-raised)] px-3 py-2 transition-colors duration-[var(--duration-fast)] hover:border-white/10"
                 >
-                  <div className={cn("h-9 w-9 rounded-full border flex items-center justify-center", meta.badge)}>
-                    <Icon className="h-4 w-4" />
+                  <div className={cn("h-8 w-8 rounded-md border flex items-center justify-center shrink-0", meta.badge)}>
+                    <Icon className="icon-sm" />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-white truncate">{channel.name}</p>
-                    <p className="text-[11px] text-[#8b949e] truncate">{meta.label}</p>
+                    <p className="text-[13px] font-medium text-[var(--text-primary)] truncate">{channel.name}</p>
+                    <p className="text-[11px] text-[var(--text-tertiary)] truncate">{meta.label}</p>
                     {/* La marca sale de channel.brand_id, no del nombre del canal. */}
                     <div className="mt-1">
                       <BrandTag brandId={channel.brand_id} brandsById={brandsById} />
@@ -105,9 +105,9 @@ export function InboxChannelsBar({ channels }: { channels: Channel[] }) {
               );
             })
           ) : (
-            <div className="col-span-full rounded-lg border border-dashed border-[#2d333b] bg-[#161b22] px-4 py-6 text-center">
-              <p className="text-sm text-white">No hay canales activos conectados</p>
-              <p className="text-xs text-[#8b949e] mt-1">
+            <div className="col-span-full rounded-md border border-dashed border-white/10 bg-[var(--inbox-raised)] px-4 py-6 text-center">
+              <p className="text-[13px] text-[var(--text-primary)]">No hay canales activos conectados</p>
+              <p className="text-xs text-[var(--text-tertiary)] mt-1">
                 Cuando conectes WhatsApp, Facebook o Instagram, aparecerán aquí automáticamente.
               </p>
             </div>
@@ -120,10 +120,10 @@ export function InboxChannelsBar({ channels }: { channels: Channel[] }) {
               key={option.value}
               onClick={() => setChannelFilter(option.value)}
               className={cn(
-                "px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors",
+                "px-2.5 py-1 max-sm:min-h-[var(--touch-target)] rounded-full text-[11px] font-medium border transition-[background-color,color,border-color] duration-[var(--duration-fast)] ease-[var(--easing-out)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] active:scale-[0.98]",
                 channelFilter === option.value
-                  ? "bg-[#388bfd]/15 text-[#58a6ff] border-[#388bfd]/30"
-                  : "bg-[#161b22] text-[#8b949e] border-[#2d333b] hover:text-white hover:border-[#3d444d]"
+                  ? "bg-[var(--accent-soft)] text-[var(--accent-text)] border-[var(--accent-border)]"
+                  : "text-[var(--text-tertiary)] border-white/[0.08] hover:text-[var(--text-primary)] hover:border-white/10 hover:bg-[var(--inbox-hover)]"
               )}
             >
               {option.label}

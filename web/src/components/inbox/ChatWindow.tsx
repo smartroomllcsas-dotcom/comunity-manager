@@ -195,10 +195,10 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
   );
 
   const statusColors: Record<string, string> = {
-    open: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-    pending: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-    resolved: "bg-blue-500/15 text-blue-400 border-blue-500/30",
-    closed: "bg-[#484f58]/20 text-[#8b949e] border-[#484f58]/30",
+    open: "bg-emerald-500/10 text-emerald-400 border-white/[0.08]",
+    pending: "bg-amber-500/10 text-amber-400 border-white/[0.08]",
+    resolved: "bg-blue-500/10 text-blue-400 border-white/[0.08]",
+    closed: "bg-white/[0.04] text-[var(--text-tertiary)] border-white/[0.08]",
   };
 
   const statusLabels: Record<string, string> = {
@@ -209,27 +209,27 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#0d1117]">
+    <div className="flex flex-col h-full bg-[var(--inbox-canvas)]">
       {/* Top Bar */}
-      <div className="h-14 min-h-[56px] border-b border-[#2d333b] bg-[#161b22] flex items-center justify-between px-4">
+      <div className="h-12 min-h-[48px] border-b border-white/[0.06] bg-[var(--inbox-panel)] flex items-center justify-between px-4">
         <div className="flex items-center gap-3 min-w-0">
           <ContactAvatar
             name={displayName}
             photoUrl={contact?.profile_picture_url}
-            className="h-9 w-9 rounded-full text-xs shrink-0"
+            className="h-8 w-8 rounded-full text-xs shrink-0"
             initialsClassName="text-[11px]"
           />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <p className="font-semibold text-sm text-white truncate">{displayName}</p>
+              <p className="font-semibold text-[13px] tracking-[-0.01em] text-[var(--text-primary)] truncate">{displayName}</p>
               <ChannelBadge conversation={conversation} compact />
               {/* Marca del chat abierto: siempre desde brand_id. */}
               <BrandTag brandId={conversation.brand_id} brandsById={brandsById} />
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${statusColors[conversation.status] || statusColors.open}`}>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${statusColors[conversation.status] || statusColors.open}`}>
                 {statusLabels[conversation.status] || conversation.status}
               </span>
               {isSnoozed && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium bg-blue-500/15 text-blue-400 border-blue-500/30 flex items-center gap-1">
+                <span className="text-[10px] px-1.5 py-0.5 rounded border font-medium bg-blue-500/10 text-blue-400 border-white/[0.08] flex items-center gap-1">
                   <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="10" />
                     <polyline points="12 6 12 12 16 14" />
@@ -239,8 +239,8 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
               )}
             </div>
             <div className="flex items-center gap-1.5">
-              <Phone className="h-2.5 w-2.5 text-[#484f58]" />
-              <p className="text-[11px] text-[#8b949e]">{contact?.wa_id}</p>
+              <Phone className="h-2.5 w-2.5 shrink-0 text-[var(--text-tertiary)]" />
+              <p className="text-[11px] tabular-nums text-[var(--text-tertiary)]">{contact?.wa_id}</p>
             </div>
           </div>
         </div>
@@ -259,25 +259,25 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
           {conversation.status === "open" && (
             <button
               onClick={handleResolve}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 max-sm:min-h-[var(--touch-target)] rounded-md text-[11px] font-medium text-emerald-400 transition-[background-color] duration-[var(--duration-fast)] ease-[var(--easing-out)] hover:bg-emerald-500/10 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
             >
-              <CheckCircle2 className="h-3.5 w-3.5" />
+              <CheckCircle2 className="icon-sm" />
               Resolver
             </button>
           )}
           {conversation.status !== "closed" && (
             <button
               onClick={handleCloseClick}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium text-[#8b949e] hover:bg-[#1a1f2e] transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 max-sm:min-h-[var(--touch-target)] rounded-md text-[11px] font-medium text-[var(--text-secondary)] transition-[background-color,color] duration-[var(--duration-fast)] ease-[var(--easing-out)] hover:bg-[var(--inbox-hover)] hover:text-[var(--text-primary)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
             >
-              <XCircle className="h-3.5 w-3.5" />
+              <XCircle className="icon-sm" />
               Cerrar
             </button>
           )}
-          <div className="w-px h-5 bg-[#2d333b] mx-1" />
+          <div className="w-px h-5 bg-white/[0.06] mx-1" />
           <button
             onClick={toggleContactPanel}
-            className="p-1.5 rounded-md text-[#8b949e] hover:bg-[#1a1f2e] hover:text-white transition-colors"
+            className="p-1.5 max-sm:min-h-[var(--touch-target)] max-sm:min-w-[var(--touch-target)] rounded-md text-[var(--text-secondary)] transition-[background-color,color] duration-[var(--duration-fast)] ease-[var(--easing-out)] hover:bg-[var(--inbox-hover)] hover:text-[var(--text-primary)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
             title={contactPanelOpen ? "Ocultar panel" : "Mostrar panel"}
           >
             {contactPanelOpen ? (
@@ -291,38 +291,38 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
 
       {/* Assigned Agent Banner */}
       {assignedAgent && (
-        <div className="flex items-center gap-2 px-4 py-1.5 bg-[#161b22] border-b border-[#2d333b]">
-          <UserPlus className="h-3 w-3 text-[#484f58]" />
-          <span className="text-[11px] text-[#8b949e]">
-            Asignado a: <span className="text-[#c9d1d9] font-medium">{assignedAgent.name}</span>
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-[var(--inbox-panel)] border-b border-white/[0.06]">
+          <UserPlus className="icon-xs text-[var(--text-tertiary)]" />
+          <span className="text-[11px] text-[var(--text-tertiary)]">
+            Asignado a: <span className="text-[var(--text-secondary)] font-medium">{assignedAgent.name}</span>
           </span>
         </div>
       )}
 
       {/* Tab Toggle */}
-      <div className="flex items-center border-b border-[#2d333b] bg-[#161b22] px-4">
+      <div className="flex items-center border-b border-white/[0.06] bg-[var(--inbox-panel)] px-4">
         <button
           onClick={() => setActiveTab("messages")}
           className={cn(
-            "flex items-center gap-1.5 px-3 py-2 text-[12px] font-medium border-b-2 transition-colors",
+            "flex items-center gap-1.5 px-3 py-2 max-sm:min-h-[var(--touch-target)] text-[12px] font-medium border-b-2 transition-[color,border-color] duration-[var(--duration-fast)] ease-[var(--easing-out)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-inset",
             activeTab === "messages"
-              ? "text-white border-[#388bfd]"
-              : "text-[#8b949e] border-transparent hover:text-white"
+              ? "text-[var(--text-primary)] border-primary"
+              : "text-[var(--text-tertiary)] border-transparent hover:text-[var(--text-primary)]"
           )}
         >
-          <MessageSquare className="h-3.5 w-3.5" />
+          <MessageSquare className="icon-sm" />
           Mensajes
         </button>
         <button
           onClick={() => setActiveTab("notes")}
           className={cn(
-            "flex items-center gap-1.5 px-3 py-2 text-[12px] font-medium border-b-2 transition-colors",
+            "flex items-center gap-1.5 px-3 py-2 max-sm:min-h-[var(--touch-target)] text-[12px] font-medium border-b-2 transition-[color,border-color] duration-[var(--duration-fast)] ease-[var(--easing-out)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-inset",
             activeTab === "notes"
               ? "text-amber-300 border-amber-400"
-              : "text-[#8b949e] border-transparent hover:text-amber-300"
+              : "text-[var(--text-tertiary)] border-transparent hover:text-amber-300"
           )}
         >
-          <StickyNote className="h-3.5 w-3.5" />
+          <StickyNote className="icon-sm" />
           Notas
         </button>
       </div>

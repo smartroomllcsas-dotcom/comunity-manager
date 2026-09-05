@@ -37,14 +37,14 @@ const CHANNEL_META: Record<
   whatsapp: {
     label: "WhatsApp",
     icon: MessageCircle,
-    badgeClass: "bg-[#25D366]/15 text-[#25D366] border-[#25D366]/25",
-    iconClass: "text-[#25D366]",
+    badgeClass: "bg-[var(--ch-whatsapp-soft)] text-[var(--ch-whatsapp)] border-white/[0.08]",
+    iconClass: "text-[var(--ch-whatsapp)]",
   },
   facebook: {
     label: "Facebook",
     icon: FacebookGlyph,
-    badgeClass: "bg-[#1877F2]/15 text-[#58a6ff] border-[#1877F2]/25",
-    iconClass: "text-[#58a6ff]",
+    badgeClass: "bg-[var(--ch-facebook-soft)] text-[var(--ch-facebook)] border-white/[0.08]",
+    iconClass: "text-[var(--ch-facebook)]",
   },
   instagram: {
     label: "Instagram",
@@ -73,8 +73,8 @@ const CHANNEL_META: Record<
   custom: {
     label: "Canal",
     icon: MessageSquare,
-    badgeClass: "bg-[#484f58]/15 text-[#c9d1d9] border-[#484f58]/25",
-    iconClass: "text-[#c9d1d9]",
+    badgeClass: "bg-white/[0.06] text-[var(--text-secondary)] border-white/[0.08]",
+    iconClass: "text-[var(--text-secondary)]",
   },
 };
 
@@ -128,13 +128,13 @@ export function ChannelBadge({ conversation, compact = false, className }: Chann
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none",
+        "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium leading-none",
         meta.badgeClass,
         className
       )}
       title={`Canal: ${meta.label}`}
     >
-      <Icon className={cn("h-3 w-3 shrink-0", meta.iconClass)} />
+      <Icon className={cn("icon-xs", meta.iconClass)} />
       {!compact && <span>{meta.label}</span>}
     </span>
   );
@@ -152,7 +152,7 @@ export function ChannelAvatarMark({ conversation, className }: ChannelAvatarMark
   return (
     <div
       className={cn(
-        "absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full border border-[#161b22] flex items-center justify-center bg-[#0d1117]",
+        "absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full border border-[var(--inbox-panel)] flex items-center justify-center bg-[var(--inbox-canvas)]",
         meta.badgeClass,
         className
       )}

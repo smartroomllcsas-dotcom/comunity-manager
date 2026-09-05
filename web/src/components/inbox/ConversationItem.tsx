@@ -37,10 +37,10 @@ export function ConversationItem({ conversation, isSelected, onClick }: Conversa
       aria-current={isSelected ? "true" : undefined}
       aria-label={`Conversación con ${displayName}${conversation.unread_count > 0 ? `, ${conversation.unread_count} sin leer` : ""}`}
       className={cn(
-        "w-full flex items-start gap-2.5 px-3 py-2.5 text-left transition-colors relative group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-inset",
+        "w-full flex items-start gap-2.5 px-3 py-2 min-h-[var(--touch-target)] text-left relative group border-b border-white/[0.03] transition-[background-color] duration-[var(--duration-fast)] ease-[var(--easing-out)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-inset active:bg-[var(--inbox-active)]",
         isSelected
-          ? "bg-[var(--surface-interactive)] border-l-2 border-l-primary"
-          : "hover:bg-[var(--surface-interactive)]/60 border-l-2 border-l-transparent"
+          ? "bg-[var(--inbox-active)] border-l-2 border-l-primary"
+          : "hover:bg-[var(--inbox-hover)] border-l-2 border-l-transparent"
       )}
     >
       {/* Avatar */}
@@ -70,8 +70,8 @@ export function ConversationItem({ conversation, isSelected, onClick }: Conversa
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
             <span className={cn(
-              "text-[13px] truncate",
-              conversation.unread_count > 0 ? "font-semibold text-foreground" : "font-medium text-foreground/85"
+              "text-[13px] truncate tracking-[-0.01em]",
+              conversation.unread_count > 0 ? "font-semibold text-[var(--text-primary)]" : "font-medium text-[var(--text-secondary)]"
             )}>
               {displayName}
             </span>
@@ -81,7 +81,7 @@ export function ConversationItem({ conversation, isSelected, onClick }: Conversa
             {isSnoozed && (
               <Clock className="icon-xs text-blue-400" aria-label="Pospuesta" />
             )}
-            <span className="text-[10px] text-muted-foreground tabular-nums">
+            <span className="text-[10px] text-[var(--text-tertiary)] tabular-nums">
               {formatTimestamp(conversation.updated_at)}
             </span>
           </div>
@@ -93,13 +93,13 @@ export function ConversationItem({ conversation, isSelected, onClick }: Conversa
         <div className="flex items-center justify-between mt-0.5 gap-2">
           <p className={cn(
             "text-xs truncate",
-            conversation.unread_count > 0 ? "text-muted-foreground" : "text-muted-foreground/70"
+            conversation.unread_count > 0 ? "text-[var(--text-secondary)]" : "text-[var(--text-tertiary)]"
           )}>
             {conversation.last_message_preview || "Sin mensajes"}
           </p>
           {conversation.unread_count > 0 && (
             <span
-              className="h-[18px] min-w-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-semibold flex items-center justify-center shrink-0"
+              className="h-[16px] min-w-[16px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-semibold tabular-nums flex items-center justify-center shrink-0"
               aria-label={`${conversation.unread_count} sin leer`}
             >
               {conversation.unread_count}
