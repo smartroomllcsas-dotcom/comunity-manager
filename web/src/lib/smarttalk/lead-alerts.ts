@@ -49,6 +49,18 @@ export async function brandAdvisorEmails(admin: Admin, brandId: string | null): 
   return [...emails];
 }
 
+/** Nombre de la empresa/marca (cm_clients) para que los avisos digan de quién es el lead. */
+export async function brandName(brandId: string | null): Promise<string | null> {
+  if (!brandId) return null;
+  try {
+    const pub = createAdminClient("public");
+    const { data } = await pub.from("cm_clients").select("name").eq("id", brandId).maybeSingle();
+    return (data?.name as string | null) || null;
+  } catch {
+    return null;
+  }
+}
+
 async function recipientsFor(
   admin: Admin,
   organizationId: string,
@@ -152,8 +164,10 @@ export async function notifyLeadNeedsManualContact(input: {
       return { sent: false, reason: "sin_destinatarios" };
     }
 
-    const subject = `📞 Lead para contactar a mano: ${name}${company ? ` (${company})` : ""}`;
+    const brand = (await brandName(input.brandId)) || "tu empresa";
+    const subject = `📞 [${brand}] Lead para contactar a mano: ${name}${company ? ` (${company})` : ""}`;
     const lines = [
+      `Empresa: ${brand}`,
       `${name}${company ? ` · ${company}` : ""} llegó por formulario de Facebook${campaign ? ` (campaña ${campaign})` : ""}, pero ${why}.`,
       `Hay que contactarlo por llamada o correo:`,
       phone ? `• Teléfono: ${phone}` : `• Teléfono: no dejó`,
@@ -163,6 +177,7 @@ export async function notifyLeadNeedsManualContact(input: {
     ].filter(Boolean);
     const text = lines.join("\n");
     const html =
+      `<p style="color:#555">Empresa: <b>${brand}</b></p>` +
       `<p><b>${name}</b>${company ? ` · ${company}` : ""} llegó por formulario de Facebook${campaign ? ` (campaña ${campaign})` : ""}, pero <b>${why}</b>.</p>` +
       `<p>Hay que contactarlo por llamada o correo:</p>` +
       `<ul><li>Teléfono: ${phone ? `<a href="tel:${phone}">${phone}</a>` : "no dejó"}</li>` +

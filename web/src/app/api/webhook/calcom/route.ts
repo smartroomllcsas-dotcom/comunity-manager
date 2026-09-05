@@ -26,7 +26,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notify } from "@/lib/notify/dispatcher";
 import { addSystemNote } from "@/lib/smarttalk/internal-notes";
-import { brandAdvisorEmails } from "@/lib/smarttalk/lead-alerts";
+import { brandAdvisorEmails, brandName } from "@/lib/smarttalk/lead-alerts";
 
 export const maxDuration = 60;
 
@@ -376,15 +376,17 @@ export async function POST(request: NextRequest) {
     ];
     if (emails.length > 0) {
       const name = contact.name || "Un lead";
+      const brand = (await brandName(contact.brand_id)) || "tu empresa";
       const link = conversation ? `${APP_URL}/inbox?conversation=${conversation.id}` : `${APP_URL}/contacts`;
       const subjectByState: Record<BookingState, string> = {
-        agendada: `📅 Reunión agendada: ${name} — ${whenText}`,
-        reprogramada: `📅 Reunión reprogramada: ${name} — ${whenText}`,
-        cancelada: `❌ Reunión cancelada: ${name}`,
+        agendada: `📅 [${brand}] Reunión agendada: ${name} — ${whenText}`,
+        reprogramada: `📅 [${brand}] Reunión reprogramada: ${name} — ${whenText}`,
+        cancelada: `❌ [${brand}] Reunión cancelada: ${name}`,
       };
       const subject = subjectByState[state];
-      const text = `${note} Abre la conversación: ${link}`;
+      const text = `Empresa: ${brand}\n${note} Abre la conversación: ${link}`;
       const html =
+        `<p style="color:#555">Empresa: <b>${brand}</b></p>` +
         `<p>${note}</p>` +
         `<p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px">Abrir conversación</a></p>`;
       await notify({

@@ -2,7 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { AIActionConfig } from "@/types/database";
 import { notify } from "@/lib/notify/dispatcher";
 import { addSystemNote } from "@/lib/smarttalk/internal-notes";
-import { brandAdvisorEmails } from "@/lib/smarttalk/lead-alerts";
+import { brandAdvisorEmails, brandName } from "@/lib/smarttalk/lead-alerts";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || "https://www.comunitymanager.io").replace(/\/$/, "");
 
@@ -41,12 +41,15 @@ async function notifyAdvisorsOfAssignment(
       if (c?.name) contactName = c.name as string;
     } catch {}
 
+    const brand = (await brandName((conv?.brand_id as string | null) || null)) || "tu empresa";
     const link = `${APP_URL}/inbox?conversation=${opts.conversationId}`;
-    const subject = `🔔 Nuevo lead para atender: ${contactName}`;
+    const subject = `🔔 [${brand}] Nuevo lead para atender: ${contactName}`;
     const text =
+      `Empresa: ${brand}\n` +
       `El agente de IA calificó a ${contactName} y lo asignó a ${opts.assigneeLabel}. ` +
       `Continúa la conversación aquí: ${link}`;
     const html =
+      `<p style="color:#555">Empresa: <b>${brand}</b></p>` +
       `<p>El agente de IA calificó a <b>${contactName}</b> y lo asignó a <b>${opts.assigneeLabel}</b>.</p>` +
       `<p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px">Abrir conversación</a></p>`;
 
