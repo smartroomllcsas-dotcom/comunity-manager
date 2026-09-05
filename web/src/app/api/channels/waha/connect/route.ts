@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { agentCanAccessBrand, getBrandInOrganization } from "@/lib/smarttalk/brand-scope";
 import { billingDeniedResponse, checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
-import { wahaFromEnv } from "@/lib/waha/client";
+import { WahaError, wahaFromEnv } from "@/lib/waha/client";
 import { sessionNameForBrand } from "@/lib/waha/session-name";
 
 export const dynamic = "force-dynamic";
@@ -70,32 +70,51 @@ export async function POST(request: NextRequest) {
 
   const displayName = name?.trim() || "WhatsApp (WAHA · beta)";
 
-  const { data: channel, error: channelError } = await admin
+  // Idempotencia: reusar canal waha existente de la marca (doble clic / reintento)
+  const { data: existing } = await admin
     .from("channels")
-    .insert({
-      organization_id: agent.organization_id,
-      brand_id: brand.id,
-      type: "waha",
-      name: displayName,
-      status: "pending",
-      config: {
-        sessionName,
-        brandId,
-        hmacSecretHint: "env:WAHA_WEBHOOK_HMAC_SECRET",
-      },
-    })
-    .select()
-    .single();
+    .select("id")
+    .eq("brand_id", brand.id)
+    .eq("type", "waha")
+    .in("status", ["pending", "active"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  if (channelError || !channel) {
-    return NextResponse.json({ error: channelError?.message ?? "Failed to create channel" }, { status: 500 });
+  let channelIdCreated = false;
+  let channelRowId: string;
+  if (existing) {
+    channelRowId = existing.id;
+  } else {
+    const { data: channel, error: channelError } = await admin
+      .from("channels")
+      .insert({
+        organization_id: agent.organization_id,
+        brand_id: brand.id,
+        type: "waha",
+        name: displayName,
+        status: "pending",
+        config: {
+          sessionName,
+          brandId,
+          hmacSecretHint: "env:WAHA_WEBHOOK_HMAC_SECRET",
+        },
+      })
+      .select()
+      .single();
+
+    if (channelError || !channel) {
+      return NextResponse.json({ error: channelError?.message ?? "Failed to create channel" }, { status: 500 });
+    }
+    channelRowId = channel.id;
+    channelIdCreated = true;
   }
 
   const { error: sessionError } = await admin
     .from("waha_sessions")
     .upsert(
       {
-        channel_id: channel.id,
+        channel_id: channelRowId,
         session_name: sessionName,
         status: "STARTING",
       },
@@ -123,24 +142,29 @@ export async function POST(request: NextRequest) {
       webhookHmacSecret: hmac,
     });
   } catch (err) {
-    // H2: sanitize — WahaError.message may include the upstream body which
-    // could echo secret headers. Log the full error server-side, return generic.
-    const fullMsg = err instanceof Error ? err.message : String(err);
-    console.error("[waha/connect] createSession failed:", fullMsg);
+    // 422 = la sesión ya existe en WAHA (reintento/doble clic) → reusarla
+    if (!(err instanceof WahaError && err.status === 422)) {
+      // H2: sanitize — WahaError.message may include the upstream body which
+      // could echo secret headers. Log the full error server-side, return generic.
+      const fullMsg = err instanceof Error ? err.message : String(err);
+      console.error("[waha/connect] createSession failed:", fullMsg);
 
-    // #3 rollback: DELETE the channel row instead of marking it 'error'.
-    // Orphan 'error' rows would count against CHANNELS_ACTIVE billing quota.
-    // CASCADE removes the waha_sessions row we just upserted.
-    await admin.from("channels").delete().eq("id", channel.id);
+      // #3 rollback: DELETE the channel row instead of marking it 'error'.
+      // Orphan 'error' rows would count against CHANNELS_ACTIVE billing quota.
+      // CASCADE removes the waha_sessions row we just upserted.
+      if (channelIdCreated) {
+        await admin.from("channels").delete().eq("id", channelRowId);
+      }
 
-    return NextResponse.json(
-      { error: "Upstream WAHA error creating session" },
-      { status: 502 }
-    );
+      return NextResponse.json(
+        { error: "Upstream WAHA error creating session" },
+        { status: 502 }
+      );
+    }
   }
 
   return NextResponse.json(
-    { channelId: channel.id, sessionName, status: "STARTING" },
+    { channelId: channelRowId, sessionName, status: "STARTING" },
     { status: 201 }
   );
 }
