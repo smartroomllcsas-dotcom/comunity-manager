@@ -300,7 +300,7 @@ export async function POST(
         ? channelQuery.eq("id", channelId)
         : channelQuery.eq("brand_id", clientId);
       const { data: channel } = await channelQuery
-        .eq("channel_type", "waha")
+        .eq("type", "waha")
         .eq("status", "active")
         .limit(1)
         .maybeSingle();
