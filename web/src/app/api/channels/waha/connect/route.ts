@@ -151,7 +151,18 @@ export async function POST(request: NextRequest) {
         const live = await waha.getSession(sessionName);
         if (live.status === "FAILED" || live.status === "STOPPED") {
           await waha.deleteSession(sessionName);
-          await waha.createSession(sessionInput);
+          // WAHA tarda en liberar el nombre tras el delete
+          await new Promise((r) => setTimeout(r, 1500));
+          try {
+            await waha.createSession(sessionInput);
+          } catch (retryErr) {
+            if (retryErr instanceof WahaError && retryErr.status === 422) {
+              await new Promise((r) => setTimeout(r, 2500));
+              await waha.createSession(sessionInput);
+            } else {
+              throw retryErr;
+            }
+          }
         }
       } catch (recreateErr) {
         const fullMsg = recreateErr instanceof Error ? recreateErr.message : String(recreateErr);
