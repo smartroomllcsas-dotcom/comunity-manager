@@ -226,6 +226,27 @@ export async function getSignedUrl(
   return { ok: true, url: data.signedUrl };
 }
 
+/** Lee un asset ya guardado en cm-assets (server-side) como Buffer. */
+export async function downloadAsset(
+  path: string,
+): Promise<
+  | { ok: true; buffer: Buffer; mimeType: string; size: number }
+  | { ok: false; error: string }
+> {
+  const admin = getStorageAdmin();
+  const { data, error } = await admin.storage.from(BUCKET).download(path);
+  if (error || !data) {
+    return { ok: false, error: error?.message || "no se pudo leer el asset" };
+  }
+  const buffer = Buffer.from(await data.arrayBuffer());
+  return {
+    ok: true,
+    buffer,
+    mimeType: data.type?.split(";")[0].trim() || "application/octet-stream",
+    size: buffer.byteLength,
+  };
+}
+
 /** Descarga una URL externa y retorna Buffer + contentType detectado. */
 export async function downloadRemoteAsset(
   url: string,

@@ -9,6 +9,8 @@ interface UseContactsOptions {
   searchQuery?: string;
   tags?: string[];
   visibilityStatus?: "full" | "restricted";
+  /** Filtra por etapa del ciclo de vida (contacts.lifecycle_stage_id). */
+  lifecycleStageId?: string;
   page?: number;
   pageSize?: number;
 }
@@ -33,6 +35,7 @@ export function useContacts(searchQueryOrOptions?: string | UseContactsOptions, 
     brandId,
     tags: optionTags,
     visibilityStatus,
+    lifecycleStageId,
     page = 0,
     pageSize = 100,
   } = options;
@@ -40,7 +43,7 @@ export function useContacts(searchQueryOrOptions?: string | UseContactsOptions, 
   const effectiveTags = optionTags ?? tags;
 
   return useQuery<UseContactsResult>({
-    queryKey: ["contacts", agent?.organization_id, brandId, searchQuery, effectiveTags, visibilityStatus, page, pageSize],
+    queryKey: ["contacts", agent?.organization_id, brandId, searchQuery, effectiveTags, visibilityStatus, lifecycleStageId, page, pageSize],
     queryFn: async () => {
       const from = page * pageSize;
       const to = from + pageSize - 1;
@@ -56,6 +59,7 @@ export function useContacts(searchQueryOrOptions?: string | UseContactsOptions, 
       if (searchQuery) query = query.or(`name.ilike.%${searchQuery}%,wa_id.ilike.%${searchQuery}%`);
       if (effectiveTags && effectiveTags.length > 0) query = query.overlaps("tags", effectiveTags);
       if (visibilityStatus) query = query.eq("visibility_status", visibilityStatus);
+      if (lifecycleStageId) query = query.eq("lifecycle_stage_id", lifecycleStageId);
 
       const { data, error, count } = await query;
       if (error) throw error;

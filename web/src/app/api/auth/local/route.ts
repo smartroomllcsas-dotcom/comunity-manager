@@ -188,13 +188,20 @@ async function bridgeSmarttalkSession(
   const publicAdmin = createAdminClient('public')
   const smarttalkAdmin = createAdminClient('smarttalk')
 
-  const { data: authUsers, error: listErr } = await publicAdmin.auth.admin.listUsers()
+  // Paginate through auth.users — default listUsers() returns only 50 rows.
+  // If the user lives beyond page 1, bridge would silently treat them as absent
+  // then duplicate-create and fail login. Fetch a bigger page.
+  const { data: authUsers, error: listErr } = await publicAdmin.auth.admin.listUsers({
+    page: 1,
+    perPage: 1000,
+  })
   if (listErr) {
     return `No pude consultar usuarios de autenticación: ${listErr.message}`
   }
 
+  const emailLower = email.trim().toLowerCase()
   const existingAuthUser = authUsers.users.find(
-    (authUser) => authUser.email?.toLowerCase() === email.toLowerCase()
+    (authUser) => authUser.email?.toLowerCase() === emailLower
   )
 
   if (existingAuthUser) {

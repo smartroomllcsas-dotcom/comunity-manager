@@ -11,6 +11,9 @@ import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { upsertRestrictedContact } from "@/lib/smarttalk/contact-privacy";
 import { recordContactOverageEvent } from "@/lib/smarttalk/contact-overage";
+import { processLeadgenChange } from "@/lib/smarttalk/lead-forms";
+import { processWahaWebhookEvent } from "@/lib/waha/webhook-handler";
+import type { WahaMessageEvent } from "@/lib/waha/types";
 import {
   buildDisplayName,
   extractContactId,
@@ -27,6 +30,7 @@ import {
   type MetaWebhookEntry,
   type MetaWebhookPayload,
 } from "@/lib/smarttalk/meta-parser";
+import { understandInboundMedia, inboundContentToText } from "@/lib/chatbot/media-understanding";
 
 type ContactIdentity = {
   name: string | null;
@@ -616,16 +620,34 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
 
       const duplicateDelivery = isDuplicate || !insertedMessage || insertedMessage.length === 0;
 
-      // Mensaje guardado; el medio se resuelve después y sin bloquear. Un
-      // reenvío duplicado de Meta no vuelve a descargar nada.
-      if (!duplicateDelivery && parsed.type !== "text" && insertedMessage?.[0]?.id) {
-        scheduleAttachmentResolution({
-          messageId: insertedMessage[0].id as string,
+      // Mensaje guardado. Un reenvío duplicado de Meta no vuelve a descargar
+      // nada. Para adjuntos entrantes se descarga el medio y se convierte en
+      // texto (transcripción / descripción) para que el agente de IA también
+      // responda a audios, imágenes y videos. Si eso falla, el medio queda
+      // programado para resolverse después sin bloquear.
+      let mediaText = "";
+      const isAttachment =
+        parsed.type !== "text" && parsed.type !== "location" && insertedMessage?.[0]?.id;
+      if (!duplicateDelivery && isAttachment) {
+        const mediaInput = {
+          messageId: insertedMessage![0].id as string,
           organizationId: channel.organization_id,
           brandId: channel.brand_id,
           channelId: channel.id,
           content: parsed.content as AttachmentContent,
-        });
+        };
+        if (direction === "inbound") {
+          try {
+            mediaText = await understandInboundMedia(mediaInput);
+          } catch (e) {
+            console.error("[meta-webhook] análisis de medio falló:", e);
+            scheduleAttachmentResolution(mediaInput);
+          }
+        } else {
+          scheduleAttachmentResolution(mediaInput);
+        }
+      } else if (!duplicateDelivery && parsed.type === "location") {
+        mediaText = inboundContentToText(parsed.content);
       }
 
       await admin
@@ -644,6 +666,28 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
         .eq("id", conversationId);
 
       if (!duplicateDelivery) processed += 1;
+
+      // Agente IA para Messenger/Instagram: los leads entran directo (sin
+      // plantilla). Se dispara con mensajes entrantes no duplicados: texto, o
+      // el texto derivado de un adjunto. Best-effort — nunca rompe la
+      // persistencia del webhook.
+      const chatbotText =
+        parsed.content.type === "text" ? parsed.content.text : mediaText;
+      if (!duplicateDelivery && direction === "inbound" && chatbotText) {
+        try {
+          const { processIncomingWithChatbot } = await import("@/lib/chatbot/engine");
+          await processIncomingWithChatbot({
+            conversationId,
+            contactWaId: contactId,
+            contactId: dbContactId,
+            organizationId: channel.organization_id,
+            channelId: channel.id,
+            messageText: chatbotText,
+          });
+        } catch (e) {
+          console.error("[meta-webhook] chatbot Messenger/IG falló:", e);
+        }
+      }
     }
 
     for (const change of entry.changes || []) {
@@ -664,6 +708,13 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
         .from("channels")
         .update({ last_active_at: new Date().toISOString() })
         .eq("id", channel.id);
+
+      // Lead Ads: un envío de formulario se vuelve contacto CRM, no chat.
+      if (change.field === "leadgen") {
+        const leadResult = await processLeadgenChange(channel, value);
+        if (leadResult.processed) processed += 1;
+        continue;
+      }
 
       const messages = value.messages || [];
       for (const message of messages) {
@@ -919,6 +970,39 @@ export async function processWebhookEventRow(event: {
 }): Promise<{ ok: boolean; processed?: number; error?: string }> {
   const admin = createAdminClient("smarttalk");
   const channel = event.channel as MetaChannelKind;
+
+  // WAHA no usa el formato Meta (sin payload.entry): despachar a su handler
+  // propio. Sin este branch, persistMessengerLikeWebhook procesaba 0 entradas
+  // sin lanzar error y el evento quedaba "processed" sin crear mensajes.
+  if (event.channel === "waha") {
+    const result = await processWahaWebhookEvent({
+      id: event.id,
+      payload: event.payload as unknown as WahaMessageEvent,
+      admin,
+    });
+    if (result.ok) {
+      await admin
+        .from("webhook_events")
+        .update({ status: "processed", processed_at: new Date().toISOString() })
+        .eq("id", event.id);
+      return { ok: true, processed: 1 };
+    }
+    console.error(`[meta-webhook:waha] processing failed`, result.error);
+    const { data: current } = await admin
+      .from("webhook_events")
+      .select("attempts")
+      .eq("id", event.id)
+      .single();
+    await admin
+      .from("webhook_events")
+      .update({
+        status: "failed",
+        attempts: (current?.attempts ?? 0) + 1,
+        last_error: result.error.slice(0, 500),
+      })
+      .eq("id", event.id);
+    return { ok: false, error: result.error };
+  }
 
   try {
     const processed = await persistMessengerLikeWebhook(channel, event.payload);

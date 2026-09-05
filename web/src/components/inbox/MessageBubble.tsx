@@ -11,9 +11,9 @@ interface MessageBubbleProps {
 
 const statusIcons: Record<string, React.ReactNode> = {
   pending: null,
-  sent: <Check className="h-3 w-3 text-[#484f58]" />,
-  delivered: <CheckCheck className="h-3 w-3 text-[#484f58]" />,
-  read: <CheckCheck className="h-3 w-3 text-[#58a6ff]" />,
+  sent: <Check className="h-3 w-3 text-[var(--text-tertiary)]" />,
+  delivered: <CheckCheck className="h-3 w-3 text-[var(--text-tertiary)]" />,
+  read: <CheckCheck className="h-3 w-3 text-[var(--accent-text)]" />,
   failed: <span className="text-red-400 text-[10px] font-medium">Error</span>,
 };
 
@@ -50,7 +50,7 @@ function mediaUrl(
 
 function Unavailable({ label, icon }: { label: string; icon: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-center gap-2 p-6 text-[#484f58]">
+    <div className="flex items-center justify-center gap-2 p-6 text-[var(--text-tertiary)]">
       {icon}
       <span className="text-xs">{label} no disponible</span>
     </div>
@@ -73,9 +73,10 @@ function AttachmentActions({
   className?: string;
 }) {
   const linkClass =
-    "inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-[#58a6ff] " +
-    "hover:bg-[#1f6feb]/15 hover:text-[#79c0ff] focus-visible:outline-none " +
-    "focus-visible:ring-2 focus-visible:ring-[#388bfd] focus-visible:ring-offset-1 focus-visible:ring-offset-[#0d1117]";
+    "inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-[var(--accent-text)] " +
+    "transition-[background-color,color] duration-[var(--duration-fast)] ease-[var(--easing-out)] " +
+    "hover:bg-[var(--accent-soft)] hover:text-[var(--text-primary)] active:scale-[0.98] focus-visible:outline-none " +
+    "focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--inbox-canvas)]";
 
   return (
     <div className={cn("flex items-center gap-1", className)} data-testid="attachment-actions">
@@ -115,7 +116,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         const media = mediaUrl(message.id, content);
         return (
           <div>
-            <div className="rounded-md overflow-hidden bg-[#0d1117] border border-[#2d333b] mb-1">
+            <div className="rounded-md overflow-hidden bg-[var(--inbox-canvas)] border border-white/[0.06] mb-1">
               {media ? (
                 <a href={media} target="_blank" rel="noopener noreferrer" aria-label={`Abrir ${content.filename || "imagen"}`}>
                   <img src={media} alt={content.filename || "Imagen"} className="max-w-[240px] max-h-[200px] object-cover" />
@@ -135,7 +136,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         const media = mediaUrl(message.id, content);
         return (
           <div>
-            <div className="rounded-md overflow-hidden bg-[#0d1117] border border-[#2d333b] mb-1">
+            <div className="rounded-md overflow-hidden bg-[var(--inbox-canvas)] border border-white/[0.06] mb-1">
               {media ? (
                 <video src={media} controls className="max-w-[260px] max-h-[220px] bg-black" />
               ) : (
@@ -153,14 +154,14 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         const media = mediaUrl(message.id, content);
         return (
           <div className="min-w-[220px]">
-            <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2">
-              <Music2 className="h-4 w-4 text-[#58a6ff] shrink-0" />
+            <div className="flex items-center gap-2 bg-[var(--inbox-canvas)] border border-white/[0.06] rounded-md px-3 py-2">
+              <Music2 className="h-4 w-4 text-[var(--accent-text)] shrink-0" />
               {media ? (
                 <audio controls className="w-full h-8">
                   <source src={media} type={content.mime_type || undefined} />
                 </audio>
               ) : (
-                <span className="text-xs text-[#8b949e]">Archivo no disponible</span>
+                <span className="text-xs text-[var(--text-secondary)]">Archivo no disponible</span>
               )}
             </div>
             {media && <AttachmentActions url={media} filename={content.filename} />}
@@ -177,14 +178,14 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         if (looksLikeAudio(content.mime_type) || looksLikeAudio(content.filename) || looksLikeAudio(content.url)) {
           return (
             <div className="min-w-[220px]">
-              <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2">
-                <Music2 className="h-4 w-4 text-[#58a6ff] shrink-0" />
+              <div className="flex items-center gap-2 bg-[var(--inbox-canvas)] border border-white/[0.06] rounded-md px-3 py-2">
+                <Music2 className="h-4 w-4 text-[var(--accent-text)] shrink-0" />
                 {media ? (
                   <audio controls className="w-full h-8">
                     <source src={media} type={content.mime_type || undefined} />
                   </audio>
                 ) : (
-                  <span className="text-xs text-[#8b949e]">Archivo no disponible</span>
+                  <span className="text-xs text-[var(--text-secondary)]">Archivo no disponible</span>
                 )}
               </div>
               {media && <AttachmentActions url={media} filename={content.filename} />}
@@ -198,22 +199,22 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 
         return (
           <div>
-            <div className="bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2 min-w-[220px]">
+            <div className="bg-[var(--inbox-canvas)] border border-white/[0.06] rounded-md px-3 py-2 min-w-[220px]">
               <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4 text-[#58a6ff] shrink-0" />
+                <FileText className="h-4 w-4 text-[var(--accent-text)] shrink-0" />
                 <div className="min-w-0 flex-1">
                   {/* Nunca sólo «archivo»: `resolveFilename` ya garantiza un
                       nombre con extensión deducida del mime o del tipo. */}
-                  <p className="text-xs text-[#c9d1d9] truncate" title={content.filename}>
+                  <p className="text-xs text-[var(--text-secondary)] truncate" title={content.filename}>
                     {content.filename || "Documento"}
                   </p>
-                  {detail && <p className="text-[10px] text-[#8b949e] mt-0.5">{detail}</p>}
+                  {detail && <p className="text-[10px] text-[var(--text-secondary)] mt-0.5">{detail}</p>}
                 </div>
               </div>
               {media ? (
                 <AttachmentActions url={media} filename={content.filename} className="mt-2" />
               ) : (
-                <p className="mt-2 text-[11px] text-[#8b949e]">Archivo no disponible</p>
+                <p className="mt-2 text-[11px] text-[var(--text-secondary)]">Archivo no disponible</p>
               )}
             </div>
             {content.caption && (
@@ -225,7 +226,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       case "sticker": {
         const media = mediaUrl(message.id, content);
         return media ? (
-          <div className="rounded-md overflow-hidden bg-[#0d1117] border border-[#2d333b]">
+          <div className="rounded-md overflow-hidden bg-[var(--inbox-canvas)] border border-white/[0.06]">
             <img
               src={media}
               alt="Sticker"
@@ -233,17 +234,17 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             />
           </div>
         ) : (
-          <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2">
-            <Sticker className="h-4 w-4 text-[#a371f7] shrink-0" />
-            <span className="text-xs text-[#c9d1d9] truncate">Sticker</span>
+          <div className="flex items-center gap-2 bg-[var(--inbox-canvas)] border border-white/[0.06] rounded-md px-3 py-2">
+            <Sticker className="icon-md text-[var(--chart-4)]" />
+            <span className="text-xs text-[var(--text-secondary)] truncate">Sticker</span>
           </div>
         );
       }
       case "location":
         return (
-          <div className="flex items-center gap-2 bg-[#0d1117] border border-[#2d333b] rounded-md px-3 py-2">
-            <MapPin className="h-4 w-4 text-[#f97583] shrink-0" />
-            <span className="text-xs text-[#c9d1d9]">
+          <div className="flex items-center gap-2 bg-[var(--inbox-canvas)] border border-white/[0.06] rounded-md px-3 py-2">
+            <MapPin className="icon-md text-destructive" />
+            <span className="text-xs text-[var(--text-secondary)]">
               {content.name || `${content.latitude}, ${content.longitude}`}
             </span>
           </div>
@@ -255,17 +256,23 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               <FileCheck2 className="h-4 w-4 shrink-0" />
               <span className="text-xs font-semibold">Plantilla enviada</span>
             </div>
-            <p className="mt-1 text-[13px] leading-relaxed text-[#f8fafc]">
-              {content.template_name}
-            </p>
+            {content.text ? (
+              <p className="mt-1 text-[13px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap">
+                {content.text}
+              </p>
+            ) : (
+              <p className="mt-1 text-[13px] leading-relaxed text-[var(--text-primary)]">
+                {content.template_name}
+              </p>
+            )}
             <p className="mt-0.5 text-[10px] text-amber-100/60">
-              Idioma: {content.language}
+              {content.text ? `${content.template_name} · ` : ""}Idioma: {content.language}
             </p>
           </div>
         );
       default:
         return (
-          <p className="text-[13px] text-[#8b949e] italic">[{content.type}]</p>
+          <p className="text-[13px] text-[var(--text-secondary)] italic">[{content.type}]</p>
         );
     }
   }
@@ -274,17 +281,17 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     <div className={cn("flex mb-1.5", isOutbound ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[65%] rounded-xl px-3 py-2 relative",
-          isOutbound && !isBot && "bg-[#4f46e5] text-white rounded-br-sm",
-          !isOutbound && !isBot && "bg-[#2d333b] text-[#e6edf3] rounded-bl-sm",
-          isBot && "bg-[#1a1f2e] text-[#e6edf3] border border-[#2d333b] rounded-bl-sm"
+          "max-w-[65%] rounded-lg px-3 py-2 relative border",
+          isOutbound && !isBot && "bg-[var(--bubble-outbound)] border-transparent text-white rounded-br-sm",
+          !isOutbound && !isBot && "bg-[var(--bubble-inbound)] border-white/[0.06] text-foreground rounded-bl-sm",
+          isBot && "bg-[var(--inbox-raised)] text-foreground border-white/[0.08] rounded-bl-sm"
         )}
       >
         {/* Bot indicator */}
         {isBot && (
           <div className="flex items-center gap-1 mb-1">
-            <Bot className="h-3 w-3 text-[#a371f7]" />
-            <span className="text-[10px] font-medium text-[#a371f7]">Bot</span>
+            <Bot className="icon-xs text-[var(--chart-4)]" />
+            <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--chart-4)]">Bot</span>
           </div>
         )}
 
@@ -302,8 +309,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           isOutbound ? "justify-end" : "justify-start"
         )}>
           <span className={cn(
-            "text-[10px]",
-            isOutbound && !isBot ? "text-white/50" : "text-[#484f58]"
+            "text-[10px] tabular-nums",
+            isOutbound && !isBot ? "text-white/50" : "text-[var(--text-tertiary)]"
           )}>
             {format(new Date(message.created_at), "HH:mm")}
           </span>

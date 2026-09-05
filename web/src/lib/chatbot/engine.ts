@@ -1,7 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendText, sendInteractive, getOrgWhatsAppCredentials } from "@/lib/whatsapp/api";
 import { processWithAI, processWithAIAgent } from "./ai";
-import type { ChatbotFlowNode } from "@/types/database";
+import type { ChatbotFlowNode, AIActionConfig } from "@/types/database";
 
 interface FlowContext {
   conversationId: string;
@@ -17,7 +17,7 @@ export async function processIncomingWithChatbot(context: FlowContext): Promise<
 
   const { data: conversation } = await admin
     .from("conversations")
-    .select("metadata, contact_id")
+    .select("metadata, contact_id, brand_id")
     .eq("id", context.conversationId)
     .single();
   const metadata = (conversation?.metadata || {}) as {
@@ -27,6 +27,9 @@ export async function processIncomingWithChatbot(context: FlowContext): Promise<
     ai_agent_id?: string;
   };
   const contactId = context.contactId || conversation?.contact_id;
+  // Marca (empresa) del lead: define QUÉ agente responde. Modelo de agencia:
+  // cada empresa tiene su propio agente; nunca se usa el de otra empresa.
+  const brandId = (conversation as { brand_id?: string | null } | null)?.brand_id ?? null;
 
   // Continue active flow
   if (metadata.active_flow_id && metadata.current_node_id) {
@@ -97,49 +100,53 @@ export async function processIncomingWithChatbot(context: FlowContext): Promise<
     }
   }
 
-  // Try AI agents (new system) first
-  const { data: defaultAgent } = await admin
+  // Selección de agente POR EMPRESA (modelo de agencia).
+  // 1) Agente propio de la marca del lead (prioridad al predeterminado de esa marca).
+  // 2) Si la marca no tiene agente propio, sólo se usa un agente SIN marca
+  //    (brand_id NULL) marcado como general — NUNCA el agente de otra empresa,
+  //    para evitar que un lead de una marca reciba respuestas de otra.
+  const runAgent = (row: {
+    id: string;
+    system_prompt: string;
+    actions?: AIActionConfig[];
+    max_tokens?: number;
+  }) =>
+    processWithAIAgent(
+      { ...context, contactId },
+      {
+        id: row.id,
+        system_prompt: row.system_prompt,
+        actions: row.actions || [],
+        max_tokens: row.max_tokens || 1024,
+      },
+      metadata.ai_turn_count || 0
+    );
+
+  if (brandId) {
+    const { data: brandAgent } = await admin
+      .from("ai_agents")
+      .select("*")
+      .eq("organization_id", context.organizationId)
+      .eq("brand_id", brandId)
+      .eq("is_active", true)
+      .order("is_default", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (brandAgent) return await runAgent(brandAgent);
+  }
+
+  // Agente general SIN marca (opcional): sólo si está marcado explícitamente
+  // como predeterminado y no tiene brand_id. No filtra a ninguna empresa.
+  const { data: generalAgent } = await admin
     .from("ai_agents")
     .select("*")
     .eq("organization_id", context.organizationId)
+    .is("brand_id", null)
     .eq("is_active", true)
     .eq("is_default", true)
-    .single();
-
-  if (defaultAgent) {
-    return await processWithAIAgent(
-      { ...context, contactId },
-      {
-        id: defaultAgent.id,
-        system_prompt: defaultAgent.system_prompt,
-        actions: defaultAgent.actions || [],
-        max_tokens: defaultAgent.max_tokens || 1024,
-      },
-      metadata.ai_turn_count || 0
-    );
-  }
-
-  // If no default AI agent, try any active AI agent
-  const { data: anyAgent } = await admin
-    .from("ai_agents")
-    .select("*")
-    .eq("organization_id", context.organizationId)
-    .eq("is_active", true)
     .limit(1)
-    .single();
-
-  if (anyAgent) {
-    return await processWithAIAgent(
-      { ...context, contactId },
-      {
-        id: anyAgent.id,
-        system_prompt: anyAgent.system_prompt,
-        actions: anyAgent.actions || [],
-        max_tokens: anyAgent.max_tokens || 1024,
-      },
-      metadata.ai_turn_count || 0
-    );
-  }
+    .maybeSingle();
+  if (generalAgent) return await runAgent(generalAgent);
 
   // Fallback to legacy ai_config
   const { data: aiConfig } = await admin

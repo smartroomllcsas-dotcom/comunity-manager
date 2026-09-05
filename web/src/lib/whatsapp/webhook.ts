@@ -8,6 +8,7 @@ import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { upsertRestrictedContact } from "@/lib/smarttalk/contact-privacy";
 import { recordContactOverageEvent } from "@/lib/smarttalk/contact-overage";
+import { understandInboundMedia, inboundContentToText } from "@/lib/chatbot/media-understanding";
 
 export async function processIncomingMessage(
   message: WebhookMessage,
@@ -182,17 +183,33 @@ export async function processIncomingMessage(
   if (messageError) throw messageError;
   if (!insertedMessage?.length) return;
 
-  // El mensaje ya está guardado; ahora —y sin bloquear— se intenta el medio.
-  // Si falla, el mensaje conserva su `provider_media_id` y el endpoint
+  // El mensaje ya está guardado. Para adjuntos se descarga el medio y se
+  // convierte en texto (transcripción / descripción) para que el agente de IA
+  // también responda a audios, imágenes y videos, no sólo a texto. Si el
+  // análisis falla, el mensaje conserva su `provider_media_id` y el endpoint
   // /api/inbox/messages/[id]/media lo reintentará al abrirlo.
+  let mediaText = "";
   if (content.type !== "text" && "provider_media_id" in content) {
-    scheduleAttachmentResolution({
-      messageId: insertedMessage[0].id as string,
-      organizationId: org.id,
-      brandId: channel.brand_id,
-      channelId: channel.id,
-      content: content as AttachmentContent,
-    });
+    try {
+      mediaText = await understandInboundMedia({
+        messageId: insertedMessage[0].id as string,
+        organizationId: org.id,
+        brandId: channel.brand_id,
+        channelId: channel.id,
+        content: content as AttachmentContent,
+      });
+    } catch (e) {
+      console.error("[whatsapp-webhook] análisis de medio falló:", e);
+      scheduleAttachmentResolution({
+        messageId: insertedMessage[0].id as string,
+        organizationId: org.id,
+        brandId: channel.brand_id,
+        channelId: channel.id,
+        content: content as AttachmentContent,
+      });
+    }
+  } else if (content.type === "location") {
+    mediaText = inboundContentToText(content);
   }
 
   // 6. Update conversation
@@ -207,9 +224,9 @@ export async function processIncomingMessage(
     })
     .eq("id", conversation.id);
 
-  // 7. Process with chatbot/AI
+  // 7. Process with chatbot/AI (texto, o el texto derivado del adjunto)
   const textContent =
-    content.type === "text" ? (content as { type: "text"; text: string }).text : "";
+    content.type === "text" ? (content as { type: "text"; text: string }).text : mediaText;
 
   if (textContent) {
     const handled = await processIncomingWithChatbot({
@@ -275,6 +292,76 @@ export async function processStatusUpdate(status: WebhookStatus, phoneNumberId: 
     .update({ status: status.status })
     .eq("wa_message_id", status.id)
     .in("conversation_id", conversationIds);
+
+  // Plantilla de primer contacto que Meta NO pudo entregar (número sin
+  // WhatsApp, país con restricciones de marketing, etc.): se marca el lead
+  // como "fallido" para que vuelva a la lista de pendientes con el motivo, y
+  // se deja nota para que el asesor lo contacte por otro medio.
+  if (status.status === "failed") {
+    await markFirstTouchFailed(admin, status, conversationIds);
+  }
+}
+
+const WA_ERROR_LABELS: Record<number, string> = {
+  131026: "el número no tiene WhatsApp o no acepta mensajes",
+  131049: "Meta limitó los mensajes de marketing a este número",
+  131050: "el usuario dejó de recibir mensajes de marketing",
+  131047: "ventana de 24 h vencida",
+  130472: "número en experimento de Meta (no recibe marketing)",
+  131053: "medio no descargable",
+  131000: "error genérico de WhatsApp",
+};
+
+async function markFirstTouchFailed(
+  admin: ReturnType<typeof createAdminClient>,
+  status: WebhookStatus,
+  conversationIds: string[],
+) {
+  try {
+    const { data: msg } = await admin
+      .from("messages")
+      .select("id, conversation_id, contact_id, type, is_bot, content")
+      .eq("wa_message_id", status.id)
+      .in("conversation_id", conversationIds)
+      .maybeSingle();
+    if (!msg || msg.type !== "template" || !msg.is_bot || !msg.contact_id) return;
+
+    const err = status.errors?.[0];
+    const reason = err
+      ? `${WA_ERROR_LABELS[err.code] || err.title || "error"} (código ${err.code})`
+      : "sin motivo reportado por Meta";
+
+    const { data: contact } = await admin
+      .from("contacts")
+      .select("custom_fields")
+      .eq("id", msg.contact_id)
+      .maybeSingle();
+    const cf = { ...((contact?.custom_fields as Record<string, unknown> | null) || {}) };
+    if (cf.wa_first_touch !== undefined) {
+      cf.wa_first_touch = `fallido (${reason})`;
+      cf.wa_first_touch_failed_at = new Date().toISOString();
+      await admin.from("contacts").update({ custom_fields: cf }).eq("id", msg.contact_id);
+    }
+
+    // Aviso a los asesores de la marca (una sola vez por lead) + nota en el chat.
+    const { data: conv } = await admin
+      .from("conversations")
+      .select("brand_id")
+      .eq("id", msg.conversation_id)
+      .maybeSingle();
+    if (conv?.brand_id) {
+      const { notifyLeadNeedsManualContact } = await import("@/lib/smarttalk/lead-alerts");
+      await notifyLeadNeedsManualContact({
+        contactId: msg.contact_id as string,
+        brandId: conv.brand_id as string,
+        conversationId: msg.conversation_id as string,
+        cause: "whatsapp_failed",
+        detail: reason,
+      });
+    }
+  } catch (e) {
+    console.warn("[whatsapp-webhook] no se pudo marcar el primer contacto como fallido:", e);
+  }
 }
 
 /**

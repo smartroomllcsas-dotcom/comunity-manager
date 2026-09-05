@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
+import { useActiveBrand } from "@/hooks/useActiveBrand";
 import type { ChatbotFlow } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -15,6 +16,7 @@ export const dynamic = "force-dynamic";
 
 export default function ChatbotPage() {
   const supabase = createClient();
+  const { activeClient } = useActiveBrand();
   const [search, setSearch] = useState("");
 
   const { data: flows, refetch } = useQuery<ChatbotFlow[]>({
@@ -43,6 +45,14 @@ export default function ChatbotPage() {
           <h1 className="text-xl font-bold text-white">Flujos de trabajo</h1>
           <p className="text-xs text-[#8b949e] mt-0.5">Automatiza conversaciones con flujos y chatbots</p>
         </div>
+        {activeClient && (
+          <span
+            className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/30"
+            title="Marca activa (definida en el sidebar)"
+          >
+            {activeClient.name}
+          </span>
+        )}
         <div className="flex-1" />
         <div className="relative max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#8b949e]" />

@@ -30,9 +30,16 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // CM legacy auth: users que loguean via /api/auth/local NO tienen sesion
+  // Supabase Auth — solo la cookie `cm_user_id`. Sin este fallback, cualquier
+  // click en una ruta protegida (Bandeja/Ajustes/Dashboard) los redirige a
+  // /login y parece que "se cerro la sesion".
+  const cmUserId = request.cookies.get("cm_user_id")?.value ?? null;
+  const isAuthenticated = Boolean(user) || Boolean(cmUserId);
+
   const p = request.nextUrl.pathname;
   if (
-    !user &&
+    !isAuthenticated &&
     !p.startsWith("/login") &&
     !p.startsWith("/st/login") &&
     !p.startsWith("/register") &&

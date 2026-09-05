@@ -59,7 +59,7 @@ export async function POST(
 
   const { data: aiAgent } = await admin
     .from("ai_agents")
-    .select("*, knowledge_sources(*)")
+    .select("*")
     .eq("id", id)
     .eq("organization_id", agent.organization_id)
     .single();
@@ -67,6 +67,13 @@ export async function POST(
   if (!aiAgent) {
     return Response.json({ error: "Agente IA no encontrado" }, { status: 404 });
   }
+
+  // knowledge_sources en consulta aparte (la FK embebida no está en el schema cache)
+  const { data: knowledgeSources } = await admin
+    .from("knowledge_sources")
+    .select("*")
+    .eq("ai_agent_id", id);
+  aiAgent.knowledge_sources = knowledgeSources || [];
 
   const { message, conversationHistory } = await request.json();
 

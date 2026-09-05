@@ -42,6 +42,26 @@
     {
       "path": "/api/cron/rate-limit-purge",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/os-goals-sentinel",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/os-brain-ingest",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/os-skills-runner",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/first-touch-undelivered",
+      "schedule": "20 * * * *"
+    },
+    {
+      "path": "/api/cron/waha-watchdog",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

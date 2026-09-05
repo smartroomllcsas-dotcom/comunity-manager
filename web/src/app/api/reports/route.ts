@@ -251,7 +251,6 @@ async function sendReportEmail(
   // Best-effort: si existe una lib de notify, la usamos; si no, dejamos TODO.
   try {
     // Import dinámico para no romper si el módulo no existe todavía.
-    // @ts-expect-error módulo opcional — lo integra otro agente cuando esté listo
     const mod: unknown = await import("@/lib/notify").catch(() => null);
     if (
       mod && typeof mod === "object" &&

@@ -1,9 +1,14 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendText, getOrgWhatsAppCredentials } from "@/lib/whatsapp/api";
 import { processAIActions, executeAIActions } from "@/lib/ai/actions";
+import { inboundContentToText } from "@/lib/chatbot/media-understanding";
 import type { AIActionConfig } from "@/types/database";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+// Modelo del agente de IA. Configurable por env para poder cambiarlo sin
+// redeploy. El anterior "claude-sonnet-4-20250514" quedó descontinuado y
+// Anthropic devolvía 404 (model not_found), por eso el agente no respondía.
+const CHATBOT_MODEL = process.env.CHATBOT_AI_MODEL || "claude-sonnet-5";
 
 export async function generateAIResponse(params: {
   systemPrompt: string;
@@ -24,7 +29,7 @@ export async function generateAIResponse(params: {
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
+      model: CHATBOT_MODEL,
       max_tokens: params.maxTokens || 1024,
       system: fullSystemPrompt,
       messages: params.conversationHistory,
@@ -37,7 +42,89 @@ export async function generateAIResponse(params: {
   }
 
   const data = await response.json();
-  return data.content[0].text;
+  // Extrae el texto de TODOS los bloques tipo "text" (no asumir content[0]):
+  // algunos modelos devuelven otros bloques primero, y content[0].text sería
+  // undefined → rompía processAIActions con "Cannot read properties of
+  // undefined (reading 'replace')".
+  const blocks: Array<{ type?: string; text?: string }> = Array.isArray(data?.content)
+    ? data.content
+    : [];
+  const text = blocks
+    .filter((b) => b?.type === "text" && typeof b.text === "string")
+    .map((b) => b.text as string)
+    .join("")
+    .trim();
+  return text;
+}
+
+// Ventana para agrupar mensajes seguidos del cliente antes de responder.
+const COALESCE_INBOUND_MS = Number(process.env.CHATBOT_COALESCE_MS) || 4000;
+
+async function latestInboundMessageId(
+  admin: ReturnType<typeof createAdminClient>,
+  conversationId: string
+): Promise<string | null> {
+  const { data } = await admin
+    .from("messages")
+    .select("id")
+    .eq("conversation_id", conversationId)
+    .eq("direction", "inbound")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data?.id as string | undefined) || null;
+}
+
+/**
+ * metadata de la conversación con un parche aplicado. Antes se escribía
+ * `{ ai_turn_count, ai_agent_id }` a secas y se perdía todo lo demás:
+ * assigned_team_id (handoff), booking (Cal.com), source/channel…
+ */
+async function mergedMetadata(
+  admin: ReturnType<typeof createAdminClient>,
+  conversationId: string,
+  patch: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const { data } = await admin
+    .from("conversations")
+    .select("metadata")
+    .eq("id", conversationId)
+    .maybeSingle();
+  return { ...((data?.metadata as Record<string, unknown> | null) || {}), ...patch };
+}
+
+/**
+ * Enlace de agenda personalizado para un contacto. Cal.com acepta en la URL
+ * `name`, `email` (prellenan el formulario) y `metadata[clave]=valor`, que
+ * devuelve tal cual en el webhook de la reserva: con eso /api/webhook/calcom
+ * identifica al contacto aunque el cliente escriba otros datos al agendar.
+ */
+async function buildBookingLink(
+  admin: ReturnType<typeof createAdminClient>,
+  baseUrl: string,
+  ids: { conversationId: string; contactId: string | null }
+): Promise<string> {
+  try {
+    const url = new URL(baseUrl);
+    url.searchParams.set("metadata[conversation_id]", ids.conversationId);
+    if (ids.contactId) {
+      url.searchParams.set("metadata[contact_id]", ids.contactId);
+      const { data: contact } = await admin
+        .from("contacts")
+        .select("name, custom_fields")
+        .eq("id", ids.contactId)
+        .maybeSingle();
+      const cf = (contact?.custom_fields as Record<string, unknown> | null) || {};
+      const name = (typeof cf.nombre === "string" && cf.nombre) || (contact?.name as string | null) || "";
+      const email =
+        (typeof cf.correo === "string" && cf.correo) || (typeof cf.email === "string" && cf.email) || "";
+      if (name && !/^[\d+\s-]+$/.test(name)) url.searchParams.set("name", name);
+      if (email.includes("@")) url.searchParams.set("email", email);
+    }
+    return url.toString();
+  } catch {
+    return baseUrl;
+  }
 }
 
 interface AIContext {
@@ -72,7 +159,7 @@ export async function processWithAIAgent(
       if (lowerMsg.includes(keyword.toLowerCase())) {
         await admin
           .from("conversations")
-          .update({ metadata: { ai_turn_count: 0 } })
+          .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
           .eq("id", context.conversationId);
         return false;
       }
@@ -84,7 +171,7 @@ export async function processWithAIAgent(
   if (turnCount >= maxTurns) {
     await admin
       .from("conversations")
-      .update({ metadata: { ai_turn_count: 0 } })
+      .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
       .eq("id", context.conversationId);
     return false;
   }
@@ -99,10 +186,9 @@ export async function processWithAIAgent(
 
   const chatHistory = (recentMessages || []).reverse().map((m) => ({
     role: m.direction === "inbound" ? ("user" as const) : ("assistant" as const),
-    content:
-      m.content && typeof m.content === "object" && "text" in m.content
-        ? (m.content as { text: string }).text
-        : "[media]",
+    // Adjuntos: usa la transcripción/descripción guardada en content.ai_text
+    // (ver media-understanding.ts) en vez de un "[media]" opaco.
+    content: inboundContentToText(m.content),
   }));
 
   // Build knowledge base from agent's sources
@@ -163,10 +249,109 @@ export async function processWithAIAgent(
     }
   }
 
+  // Contexto por empresa/marca: instrucciones que el administrador definió
+  // para ESTA marca (qué información del proyecto recolectar, tono, objetivo)
+  // y el enlace de agenda al que hay que llevar al cliente.
+  let brandContext = "";
+  let brochure: { url: string; filename: string; mode: string } | null = null;
+  let responseDelaySeconds = 0;
+  try {
+    const { data: convRow } = await admin
+      .from("conversations")
+      .select("brand_id, metadata, contact_id")
+      .eq("id", context.conversationId)
+      .maybeSingle();
+    if (convRow?.brand_id) {
+      const { createAdminClient: createPublicAdmin } = await import("@/lib/supabase/admin");
+      const pub = createPublicAdmin("public");
+      const { data: settings } = await pub
+        .from("cm_lead_agent_settings")
+        .select("agent_context, booking_url, agent_role, agent_tone, agent_goal, brochure_url, brochure_filename, brochure_mode, response_delay_seconds")
+        .eq("client_id", convRow.brand_id)
+        .maybeSingle();
+      if (settings?.response_delay_seconds) {
+        responseDelaySeconds = Math.max(0, Math.min(300, Number(settings.response_delay_seconds) || 0));
+      }
+      if (settings?.brochure_url && settings.brochure_mode && settings.brochure_mode !== "off") {
+        brochure = {
+          url: settings.brochure_url as string,
+          filename: (settings.brochure_filename as string) || "catalogo.pdf",
+          mode: settings.brochure_mode as string,
+        };
+      }
+      if (settings) {
+        const { AGENT_ROLES, AGENT_TONES, AGENT_GOALS, presetPrompt } = await import(
+          "@/lib/whatsapp/cloud/agent-presets"
+        );
+        const parts: string[] = [];
+        const rolePrompt = presetPrompt(AGENT_ROLES, settings.agent_role);
+        const tonePrompt = presetPrompt(AGENT_TONES, settings.agent_tone);
+        const goalPrompt = presetPrompt(AGENT_GOALS, settings.agent_goal);
+        if (rolePrompt) parts.push(rolePrompt);
+        if (tonePrompt) parts.push(tonePrompt);
+        if (goalPrompt) parts.push(goalPrompt);
+        if (settings.agent_context) {
+          parts.push("Instrucciones adicionales del administrador:\n" + settings.agent_context);
+        }
+        // Reserva hecha en Cal.com (la escribe /api/webhook/calcom): el agente
+        // debe confirmarla y dejar de insistir con el enlace.
+        const booking = (convRow.metadata as { booking?: { status?: string; when_text?: string; title?: string } } | null)?.booking;
+        if (booking?.status === "agendada" || booking?.status === "reprogramada") {
+          parts.push(
+            `IMPORTANTE: el cliente YA agendó la reunión "${booking.title || "Reunión"}" para ${booking.when_text}. ` +
+              `NO vuelvas a enviar el enlace de agenda ni pidas agendar. Si escribe, confírmale la cita, ` +
+              `resuelve dudas puntuales y dile que el equipo lo contactará a esa hora.`
+          );
+        } else if (booking?.status === "cancelada") {
+          parts.push(
+            `El cliente canceló la reunión que tenía agendada. Si retoma la charla, pregunta con tacto si quiere ` +
+              `reprogramar y, sólo si acepta, comparte de nuevo el enlace de agenda.`
+          );
+        } else if (settings.booking_url) {
+          // Enlace personalizado: lleva el id del contacto y la conversación
+          // en metadata (Cal.com lo devuelve en el webhook) y prellena nombre
+          // y correo. Así la reserva se cruza con el contacto aunque el
+          // cliente escriba otro correo o teléfono al agendar.
+          const link = await buildBookingLink(admin, settings.booking_url as string, {
+            conversationId: context.conversationId,
+            contactId: (convRow.contact_id as string | null) || context.contactId || null,
+          });
+          parts.push(
+            `Para agendar la cita comparte EXACTAMENTE este enlace de agenda (cópialo completo, ` +
+              `sin acortarlo ni quitarle nada): ${link}\n` +
+              `No compartas el enlace en el primer mensaje; primero entiende la necesidad del cliente.`
+          );
+        }
+        if (parts.length > 0) {
+          brandContext =
+            "\n\n## Perfil y misión para ESTA empresa (definido por el administrador)\n" +
+            parts.join("\n\n");
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[chatbot] brand context lookup failed:", e);
+  }
+
+  // Intervalo de respuesta configurable por empresa: espera antes de contestar
+  // para una sensación más humana (0 = inmediato; tope 300s por serverless).
+  // Además, un mínimo de espera para agrupar mensajes seguidos del cliente
+  // ("No tengo nada" + "No"): si durante la espera llegó otro mensaje, esta
+  // ejecución se retira y responde la que disparó el mensaje más reciente,
+  // que ya tiene todo el contexto. Antes el agente contestaba dos veces.
+  const latestInboundBefore = await latestInboundMessageId(admin, context.conversationId);
+  await new Promise((resolve) =>
+    setTimeout(resolve, Math.max(responseDelaySeconds * 1000, COALESCE_INBOUND_MS))
+  );
+  const latestInboundAfter = await latestInboundMessageId(admin, context.conversationId);
+  if (latestInboundAfter && latestInboundAfter !== latestInboundBefore) {
+    return true; // llegó un mensaje más nuevo: responde su ejecución
+  }
+
   let rawResponse: string;
   try {
     rawResponse = await generateAIResponse({
-      systemPrompt: agentConfig.system_prompt + actionInstructions,
+      systemPrompt: agentConfig.system_prompt + brandContext + actionInstructions,
       conversationHistory: chatHistory,
       knowledgeBase: knowledgeParts.length > 0 ? knowledgeParts.join("\n\n") : undefined,
       maxTokens: agentConfig.max_tokens,
@@ -176,13 +361,19 @@ export async function processWithAIAgent(
     return false;
   }
 
+  // Sin texto de la IA no hay nada que enviar (evita crash y mensajes vacíos).
+  if (!rawResponse || !rawResponse.trim()) {
+    console.warn("[chatbot] respuesta de IA vacía; no se envía nada");
+    return false;
+  }
+
   // Process actions
   const { cleanText, actions } = processAIActions(rawResponse);
 
   if (cleanText.includes("[ESCALATE]")) {
     await admin
       .from("conversations")
-      .update({ metadata: { ai_turn_count: 0 } })
+      .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
       .eq("id", context.conversationId);
     return false;
   }
@@ -197,32 +388,78 @@ export async function processWithAIAgent(
     });
   }
 
-  // Send the cleaned response via WhatsApp
-  const { phoneNumberId, accessToken } = await getOrgWhatsAppCredentials(
-    context.organizationId,
-    context.channelId
-  );
-  const result = await sendText({
-    to: context.contactWaId,
-    text: cleanText,
-    phoneNumberId,
-    accessToken,
-  });
+  // Enviar la respuesta por el canal correcto (WhatsApp/Messenger/Instagram).
+  const { getOutboundSender } = await import("@/lib/chatbot/outbound");
+  const sender = context.channelId ? await getOutboundSender(context.channelId) : null;
+  if (!sender) {
+    console.error("[chatbot] sin emisor para el canal", context.channelId);
+    return false;
+  }
+  const result = (await sender.sendText(context.contactWaId, cleanText)) as {
+    messages?: Array<{ id?: string }>;
+  };
 
   await admin.from("messages").insert({
     conversation_id: context.conversationId,
     direction: "outbound",
     type: "text",
     content: { type: "text", text: cleanText },
-    wa_message_id: result.messages[0]?.id,
+    wa_message_id: result?.messages?.[0]?.id,
     status: "sent",
     is_bot: true,
   });
 
+  // Catálogo / brochure: se envía una sola vez por conversación, según el modo
+  // configurado por la empresa. 'after_greeting' en la primera respuesta;
+  // 'on_request' cuando el cliente lo pide (catálogo, brochure, precios, info).
+  let brochureSent = false;
+  if (brochure) {
+    const asked = /cat[aá]logo|brochure|folleto|portafolio|precios?|informaci[oó]n|servicios?/i.test(
+      context.messageText
+    );
+    const shouldSend =
+      (brochure.mode === "after_greeting" && turnCount === 0) ||
+      (brochure.mode === "on_request" && asked);
+    if (shouldSend) {
+      const { data: convFlag } = await admin
+        .from("conversations")
+        .select("metadata")
+        .eq("id", context.conversationId)
+        .maybeSingle();
+      const already = (convFlag?.metadata as { brochure_sent?: boolean })?.brochure_sent === true;
+      if (!already) {
+        try {
+          const isPdf = /\.pdf($|\?)/i.test(brochure.url) || /pdf/i.test(brochure.filename);
+          await sender.sendMedia(
+            context.contactWaId,
+            isPdf ? "document" : "image",
+            brochure.url,
+            brochure.filename
+          );
+          await admin.from("messages").insert({
+            conversation_id: context.conversationId,
+            direction: "outbound",
+            type: isPdf ? "document" : "image",
+            content: { type: isPdf ? "document" : "image", url: brochure.url, filename: brochure.filename },
+            status: "sent",
+            is_bot: true,
+          });
+          brochureSent = true;
+        } catch (e) {
+          console.error("[chatbot] brochure send failed:", e);
+        }
+      }
+    }
+  }
+
   await admin
     .from("conversations")
     .update({
-      metadata: { ai_turn_count: turnCount + 1, ai_agent_id: agentConfig.id },
+      metadata: await mergedMetadata(admin, context.conversationId, {
+        ai_turn_count: turnCount + 1,
+        ai_agent_id: agentConfig.id,
+        ...(brochureSent ? { brochure_sent: true } : {}),
+      }),
       last_message_preview: cleanText.slice(0, 100),
       updated_at: new Date().toISOString(),
     })
@@ -250,7 +487,7 @@ export async function processWithAI(
     if (lowerMsg.includes(keyword.toLowerCase())) {
       await admin
         .from("conversations")
-        .update({ metadata: { ai_turn_count: 0 } })
+        .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
         .eq("id", context.conversationId);
       return false;
     }
@@ -259,7 +496,7 @@ export async function processWithAI(
   if (turnCount >= config.max_turns) {
     await admin
       .from("conversations")
-      .update({ metadata: { ai_turn_count: 0 } })
+      .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
       .eq("id", context.conversationId);
     return false;
   }
@@ -273,16 +510,21 @@ export async function processWithAI(
 
   const chatHistory = (recentMessages || []).reverse().map((m) => ({
     role: m.direction === "inbound" ? ("user" as const) : ("assistant" as const),
-    content:
-      m.content && typeof m.content === "object" && "text" in m.content
-        ? (m.content as { text: string }).text
-        : "[media]",
+    // Adjuntos: usa la transcripción/descripción guardada en content.ai_text
+    // (ver media-understanding.ts) en vez de un "[media]" opaco.
+    content: inboundContentToText(m.content),
   }));
 
   const knowledgeContext =
     config.knowledge_base.length > 0
       ? config.knowledge_base.join("\n\n")
       : undefined;
+
+  // Agrupar mensajes seguidos del cliente (ver processWithAIAgent).
+  const latestInboundBefore = await latestInboundMessageId(admin, context.conversationId);
+  await new Promise((resolve) => setTimeout(resolve, COALESCE_INBOUND_MS));
+  const latestInboundAfter = await latestInboundMessageId(admin, context.conversationId);
+  if (latestInboundAfter && latestInboundAfter !== latestInboundBefore) return true;
 
   let aiResponse: string;
   try {
@@ -299,7 +541,7 @@ export async function processWithAI(
   if (aiResponse.includes("[ESCALATE]")) {
     await admin
       .from("conversations")
-      .update({ metadata: { ai_turn_count: 0 } })
+      .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
       .eq("id", context.conversationId);
     return false;
   }
@@ -328,7 +570,7 @@ export async function processWithAI(
   await admin
     .from("conversations")
     .update({
-      metadata: { ai_turn_count: turnCount + 1 },
+      metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: turnCount + 1 }),
       last_message_preview: aiResponse.slice(0, 100),
     })
     .eq("id", context.conversationId);

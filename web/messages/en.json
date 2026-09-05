@@ -1,0 +1,134 @@
+{
+  "os": {
+    "console": {
+      "title": "Console",
+      "subtitle": "Live OS view · channels, agents, activity and goals for {brand}",
+      "pulse": {
+        "channelsActive": "Active channels",
+        "messagesToday": "Messages today",
+        "agentsActive": "Active agents",
+        "standingGoals": "Standing goals"
+      }
+    },
+    "sidebar": {
+      "communityOs": "Community OS",
+      "new": "NEW"
+    },
+    "agents": {
+      "title": "Agents"
+    },
+    "goals": {
+      "title": "Standing goals"
+    },
+    "skills": {
+      "title": "Skills",
+      "subtitle": "Active capabilities of Community OS agents",
+      "status": {
+        "live": "Live",
+        "learning": "Learning",
+        "planned": "Planned"
+      },
+      "emptyState": "No skills registered yet."
+    },
+    "funnel": {
+      "title": "Funnel",
+      "subtitle": "Neural pipeline view · leads orbiting their stages",
+      "stages": {
+        "new": "New",
+        "qualified": "Qualified",
+        "hot": "Hot",
+        "closed": "Closed"
+      }
+    },
+    "content": {
+      "title": "Content",
+      "subtitle": "Draft, schedule and review posts across all your accounts",
+      "emptyState": "No drafts yet — use the composer to create your first post",
+      "compose": "Compose"
+    },
+    "social": {
+      "title": "Social",
+      "subtitle": "Audience metrics and posting consistency",
+      "followers": "Followers",
+      "audience": "Audience",
+      "pillars": "Content pillars"
+    },
+    "integrations": {
+      "title": "Integrations"
+    },
+    "command": {
+      "title": "Command palette"
+    },
+    "workflows": {
+      "title": "Workflows",
+      "subtitle": "Multi-step automations",
+      "emptyState": "No workflows. Sprint 3 will bring the visual editor — for now, insert manually via SQL or POST /api/os/workflows.",
+      "newWorkflow": "New workflow"
+    },
+    "brain": {
+      "title": "Brain",
+      "subtitle": "Live knowledge graph",
+      "emptyState": "Brain is empty. Run the ingestor to populate from CM.",
+      "nodeCount": "{count} nodes",
+      "kinds": {
+        "title": "Knowledge Kinds",
+        "subtitle": "Manage node kinds — colors, icons and labels per org.",
+        "manageKinds": "Manage kinds",
+        "newKind": "New custom kind",
+        "system": "system",
+        "custom": "custom"
+      }
+    },
+    "observability": {
+      "title": "Observability",
+      "subtitle": "Agent runs, cost, cron executions and connector health",
+      "cards": {
+        "agentRuns": "Agent runs (24h)",
+        "successRate": "Success rate",
+        "costToday": "Cost today",
+        "sinceMidnight": "Since midnight",
+        "cost7d": "Cost (7d)",
+        "rollingWeek": "Rolling week",
+        "activity24h": "Activity events (24h)",
+        "events": "Events",
+        "goalsBreach": "Goals breach",
+        "goalsBreachAlert": "Attention required",
+        "connectors": "Connectors",
+        "connectorsHint": "live / error"
+      },
+      "cronTable": {
+        "title": "Last cron executions",
+        "empty": "No cron runs recorded yet.",
+        "endpoint": "Endpoint",
+        "at": "Time",
+        "status": "Status",
+        "ok": "OK",
+        "err": "ERROR"
+      }
+    },
+    "analytics": {
+      "title": "Analytics",
+      "subtitle": "OS KPIs · last {days} days",
+      "emptyState": "No data yet — configure an org to see metrics.",
+      "goalsHealth": "Goals health (daily)",
+      "topAgents": "Top agents",
+      "cronReliability": "Cron reliability",
+      "noAgentRuns": "No agent runs in this period.",
+      "noCronData": "No cron data in this period.",
+      "kpi": {
+        "runs": "Agent runs",
+        "cost": "Total cost (USD)",
+        "successRate": "Success rate",
+        "costPerMsg": "Cost per message"
+      },
+      "col": {
+        "agent": "Agent",
+        "runs": "Runs",
+        "successRate": "Success",
+        "endpoint": "Endpoint",
+        "failures": "Failures",
+        "failRate": "Fail rate"
+      }
+    }
+  }
+}

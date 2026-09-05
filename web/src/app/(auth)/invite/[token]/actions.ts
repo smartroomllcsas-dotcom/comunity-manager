@@ -3,9 +3,32 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
-import { redirect } from "next/navigation";
+import { hashPassword } from "@/lib/auth/password";
 
-export async function getInvitation(token: string) {
+/**
+ * Single dispatcher entry point. Works around @vercel/next@4.21.x lambda-grouping
+ * defect that mis-attributes NEXT_MISSING_LAMBDA when 2+ Server Actions from the
+ * same file are imported into a single Client Component.
+ */
+export async function invitationAction(
+  type: "get",
+  token: string,
+): Promise<Awaited<ReturnType<typeof getInvitation>>>;
+export async function invitationAction(
+  type: "accept",
+  token: string,
+  formData: FormData,
+): Promise<Awaited<ReturnType<typeof acceptInvitation>>>;
+export async function invitationAction(
+  type: "get" | "accept",
+  token: string,
+  formData?: FormData,
+) {
+  if (type === "get") return getInvitation(token);
+  return acceptInvitation(token, formData!);
+}
+
+async function getInvitation(token: string) {
   const admin = createAdminClient();
 
   const { data: invitation, error } = await admin
@@ -44,7 +67,7 @@ export async function getInvitation(token: string) {
   };
 }
 
-export async function acceptInvitation(token: string, formData: FormData) {
+async function acceptInvitation(token: string, formData: FormData) {
   const supabase = await createClient();
   const admin = createAdminClient();
   const name = formData.get("name") as string;
@@ -112,19 +135,70 @@ export async function acceptInvitation(token: string, formData: FormData) {
     }
   }
 
-  // Create the auth user
-  const { data: authData, error: authError } = await supabase.auth.signUp({
+  // Create the auth user pre-confirmed (signUp depends on the project's
+  // email-confirmation setting: with it enabled the invitee gets no session
+  // and the login fails with "Email not confirmed" — bad first experience).
+  let userId: string;
+  let isNewAuthUser = false;
+  const { data: created, error: createError } = await admin.auth.admin.createUser({
     email: invitation.email,
     password,
+    email_confirm: true,
+    user_metadata: { name },
   });
 
-  if (authError || !authData.user) {
-    return { error: authError?.message || "Error al crear usuario" };
+  if (created?.user) {
+    userId = created.user.id;
+    isNewAuthUser = true;
+  } else {
+    // The email may already have an account (e.g. a previous half-finished
+    // accept). Let them through if the password matches that account.
+    const { data: signin, error: signinError } = await supabase.auth.signInWithPassword({
+      email: invitation.email,
+      password,
+    });
+    if (signin?.user) {
+      userId = signin.user.id;
+    } else {
+      // Orphan recovery: an auth user without an agent row nor a cm_users
+      // row is leftover from a broken accept — safe to reset its password
+      // (the invitee proved control of the email by opening the link).
+      const pub = createAdminClient("public");
+      const [{ data: existingAgent }, { data: existingCmUser }, { data: authList }] =
+        await Promise.all([
+          admin.from("agents").select("id").eq("email", invitation.email).maybeSingle(),
+          pub.from("cm_users").select("id").eq("email", invitation.email).maybeSingle(),
+          admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+        ]);
+      const orphan = authList?.users?.find(
+        (u) => u.email?.toLowerCase() === invitation.email.toLowerCase()
+      );
+      if (orphan && !existingAgent && !existingCmUser) {
+        await admin.auth.admin.updateUserById(orphan.id, {
+          password,
+          email_confirm: true,
+        });
+        const retry = await supabase.auth.signInWithPassword({
+          email: invitation.email,
+          password,
+        });
+        if (retry.error || !retry.data.user) {
+          return { error: "No se pudo activar la cuenta. Intenta de nuevo." };
+        }
+        userId = retry.data.user.id;
+      } else {
+        return {
+          error:
+            "Este correo ya tiene una cuenta y la contraseña no coincide. Inicia sesión con tu contraseña habitual o recupérala. Detalle: " +
+            (createError?.message || signinError?.message || "desconocido"),
+        };
+      }
+    }
   }
 
   // Create agent linked to the invitation's organization
   const { error: agentError } = await admin.from("agents").insert({
-    id: authData.user.id,
+    id: userId,
     organization_id: invitation.organization_id,
     name,
     email: invitation.email,
@@ -134,7 +208,7 @@ export async function acceptInvitation(token: string, formData: FormData) {
   });
 
   if (agentError) {
-    await admin.auth.admin.deleteUser(authData.user.id);
+    if (isNewAuthUser) await admin.auth.admin.deleteUser(userId);
     return { error: "Error al crear agente" };
   }
 
@@ -144,15 +218,39 @@ export async function acceptInvitation(token: string, formData: FormData) {
       .insert(
         (brandAssignments || []).map((assignment) => ({
           organization_id: invitation.organization_id,
-          agent_id: authData.user!.id,
+          agent_id: userId,
           brand_id: assignment.brand_id,
           created_by: invitation.invited_by,
         }))
       );
     if (assignmentError) {
-      await admin.from("agents").delete().eq("id", authData.user.id);
-      await admin.auth.admin.deleteUser(authData.user.id);
+      await admin.from("agents").delete().eq("id", userId);
+      if (isNewAuthUser) await admin.auth.admin.deleteUser(userId);
       return { error: "Error asignando las marcas al miembro" };
+    }
+  }
+
+  // The unified /login validates against legacy public.cm_users first —
+  // without this row the member can never log in ("Email o contraseña
+  // inválidos"), even though the auth user and agent exist.
+  {
+    const pub = createAdminClient("public");
+    const { data: existingCmUser } = await pub
+      .from("cm_users")
+      .select("id")
+      .eq("email", invitation.email)
+      .maybeSingle();
+    if (!existingCmUser) {
+      const { error: cmError } = await pub.from("cm_users").insert({
+        email: invitation.email,
+        password_hash: await hashPassword(password),
+        name,
+        role: "user",
+        plan: "free",
+      });
+      if (cmError) {
+        console.error("[invite/accept] cm_users insert failed:", cmError.message);
+      }
     }
   }
 
@@ -162,5 +260,17 @@ export async function acceptInvitation(token: string, formData: FormData) {
     .update({ status: "accepted" })
     .eq("id", token);
 
-  redirect("/inbox");
+  // Establish the session on this response's cookies so the redirect lands
+  // authenticated. If it fails, the account still exists — send to /login.
+  if (isNewAuthUser) {
+    const { error: signinError } = await supabase.auth.signInWithPassword({
+      email: invitation.email,
+      password,
+    });
+    if (signinError) {
+      return { success: true as const, redirectTo: "/login?invited=1" };
+    }
+  }
+
+  return { success: true as const, redirectTo: "/inbox" };
 }

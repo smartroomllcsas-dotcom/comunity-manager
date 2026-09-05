@@ -10,6 +10,8 @@ import { clientIp, rateLimitWithWhitelist } from "@/lib/rate-limit";
 import { evaluateWhatsAppIntake } from "@/lib/smarttalk/intake-guard";
 import { INACTIVE_BRAND_INTAKE_RESPONSE } from "@/lib/smarttalk/brand-status";
 
+export const maxDuration = 300;
+
 // Sprint 22 hardening: 200 req/min por IP para webhooks externos.
 const WEBHOOK_RATE_LIMIT = 200;
 const WEBHOOK_RATE_WINDOW_MS = 60 * 1000;

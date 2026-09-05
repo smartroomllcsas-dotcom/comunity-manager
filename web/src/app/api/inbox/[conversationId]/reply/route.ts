@@ -293,6 +293,36 @@ export async function POST(
         });
         sendResult = { ok: true, provider: "whatsapp" };
       }
+    } else if (p === "waha") {
+      const admin = createAdminClient("smarttalk");
+      let channelQuery = admin.from("channels").select("id");
+      channelQuery = channelId
+        ? channelQuery.eq("id", channelId)
+        : channelQuery.eq("brand_id", clientId);
+      const { data: channel } = await channelQuery
+        .eq("type", "waha")
+        .eq("status", "active")
+        .limit(1)
+        .maybeSingle();
+      const wahaChannelId = (channel as { id?: string } | null)?.id;
+      if (!wahaChannelId || !recipientHandle) {
+        sendResult = {
+          ok: false,
+          provider: "waha",
+          detail: "missing_channel_or_recipient",
+        };
+      } else {
+        const { sendWahaText } = await import("@/lib/waha/sender");
+        const { wahaFromEnv } = await import("@/lib/waha/client");
+        await sendWahaText({
+          admin,
+          channelId: wahaChannelId,
+          toPhone: recipientHandle,
+          text: content,
+          client: wahaFromEnv(),
+        });
+        sendResult = { ok: true, provider: "waha" };
+      }
     } else if (["twitter", "linkedin", "tiktok"].includes(p)) {
       // TODO Sprint 27+: integrar API oficial por canal
       console.warn(

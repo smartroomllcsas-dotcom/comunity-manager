@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { receiveMetaWebhook, verifyMetaWebhook } from '@/lib/smarttalk/meta-webhook'
 import { clientIp, rateLimitWithWhitelist } from '@/lib/rate-limit'
 
+export const maxDuration = 300;
+
 // Sprint 22 hardening: 200 req/min por IP para webhooks externos.
 const WEBHOOK_RATE_LIMIT = 200
 const WEBHOOK_RATE_WINDOW_MS = 60 * 1000

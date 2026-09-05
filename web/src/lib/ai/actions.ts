@@ -1,5 +1,69 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { AIActionConfig } from "@/types/database";
+import { notify } from "@/lib/notify/dispatcher";
+import { addSystemNote } from "@/lib/smarttalk/internal-notes";
+import { brandAdvisorEmails, brandName } from "@/lib/smarttalk/lead-alerts";
+
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || "https://www.comunitymanager.io").replace(/\/$/, "");
+
+/**
+ * Avisa a los asesores (por email) que el agente IA les pasó un lead.
+ * Best-effort: nunca lanza — un fallo de notificación no debe romper el handoff.
+ */
+async function notifyAdvisorsOfAssignment(
+  admin: ReturnType<typeof createAdminClient>,
+  opts: { organizationId: string; conversationId: string; contactId: string; emails: string[]; assigneeLabel: string }
+): Promise<void> {
+  try {
+    // Además del asesor/equipo asignado, TODOS los asesores de la empresa del
+    // lead reciben el aviso (regla de la casa: asesor asignado a una empresa
+    // = recibe los correos de sus leads).
+    const { data: conv } = await admin
+      .from("conversations")
+      .select("brand_id")
+      .eq("id", opts.conversationId)
+      .maybeSingle();
+    const brandEmails = await brandAdvisorEmails(admin, (conv?.brand_id as string | null) || null);
+    const emails = [
+      ...new Set(
+        [...opts.emails, ...brandEmails].filter((e) => typeof e === "string" && e.includes("@"))
+      ),
+    ];
+    if (emails.length === 0) return;
+
+    let contactName = "Un lead";
+    try {
+      const { data: c } = await admin
+        .from("contacts")
+        .select("name")
+        .eq("id", opts.contactId)
+        .maybeSingle();
+      if (c?.name) contactName = c.name as string;
+    } catch {}
+
+    const brand = (await brandName((conv?.brand_id as string | null) || null)) || "tu empresa";
+    const link = `${APP_URL}/inbox?conversation=${opts.conversationId}`;
+    const subject = `🔔 [${brand}] Nuevo lead para atender: ${contactName}`;
+    const text =
+      `Empresa: ${brand}\n` +
+      `El agente de IA calificó a ${contactName} y lo asignó a ${opts.assigneeLabel}. ` +
+      `Continúa la conversación aquí: ${link}`;
+    const html =
+      `<p style="color:#555">Empresa: <b>${brand}</b></p>` +
+      `<p>El agente de IA calificó a <b>${contactName}</b> y lo asignó a <b>${opts.assigneeLabel}</b>.</p>` +
+      `<p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px">Abrir conversación</a></p>`;
+
+    await notify({
+      organizationId: opts.organizationId,
+      channels: ["email"],
+      recipients: { email: emails },
+      template: "custom",
+      variables: { subject, text, html },
+    });
+  } catch (e) {
+    console.warn("[ai-actions] notificación de handoff falló (no crítico):", e);
+  }
+}
 
 export type AIAction =
   | "close_conversation"
@@ -86,13 +150,19 @@ export async function executeAIActions(
           if (action.params[0]) {
             const { data: targetAgent } = await admin
               .from("agents")
-              .select("id")
+              .select("id, name, email")
               .eq("organization_id", context.organizationId)
               .ilike("name", `%${action.params[0]}%`)
               .limit(1)
               .single();
 
             if (targetAgent) {
+              const { data: current } = await admin
+                .from("conversations")
+                .select("assigned_agent_id")
+                .eq("id", context.conversationId)
+                .maybeSingle();
+              const alreadyAssigned = current?.assigned_agent_id === targetAgent.id;
               await admin
                 .from("conversations")
                 .update({
@@ -101,6 +171,15 @@ export async function executeAIActions(
                 })
                 .eq("id", context.conversationId);
               executed.push(`assign_agent:${action.params[0]}`);
+              // Notifica al asesor asignado (una vez: si el agente repite la
+              // acción en otro turno, no se vuelve a enviar el correo).
+              if (!alreadyAssigned) await notifyAdvisorsOfAssignment(admin, {
+                organizationId: context.organizationId,
+                conversationId: context.conversationId,
+                contactId: context.contactId,
+                emails: targetAgent.email ? [targetAgent.email as string] : [],
+                assigneeLabel: (targetAgent.name as string) || "ti",
+              });
             }
           }
           break;
@@ -110,21 +189,51 @@ export async function executeAIActions(
           if (action.params[0]) {
             const { data: team } = await admin
               .from("teams")
-              .select("id")
+              .select("id, name")
               .eq("organization_id", context.organizationId)
               .ilike("name", `%${action.params[0]}%`)
               .limit(1)
               .single();
 
             if (team) {
+              // Merge del metadata: no sobrescribir (preserva ai_turn_count, etc.)
+              const { data: conv } = await admin
+                .from("conversations")
+                .select("metadata")
+                .eq("id", context.conversationId)
+                .maybeSingle();
+              const previousMeta = (conv?.metadata as Record<string, unknown>) || {};
+              const alreadyAssigned = previousMeta.assigned_team_id === team.id;
+              const mergedMeta = { ...previousMeta, assigned_team_id: team.id };
               await admin
                 .from("conversations")
                 .update({
-                  metadata: { assigned_team_id: team.id },
+                  metadata: mergedMeta,
                   updated_at: new Date().toISOString(),
                 })
                 .eq("id", context.conversationId);
               executed.push(`assign_team:${action.params[0]}`);
+
+              // Si el agente repite la acción en otro turno, no se reenvía el
+              // correo (antes llegaba duplicado).
+              if (alreadyAssigned) break;
+
+              // Notifica a los miembros del equipo (agent_teams → agents.email)
+              // y, dentro de notifyAdvisorsOfAssignment, a los asesores de la marca.
+              const { data: links } = await admin
+                .from("agent_teams")
+                .select("agent:agents(email)")
+                .eq("team_id", team.id);
+              const emails = (links || [])
+                .map((l) => (l as { agent?: { email?: string } }).agent?.email)
+                .filter((e): e is string => typeof e === "string");
+              await notifyAdvisorsOfAssignment(admin, {
+                organizationId: context.organizationId,
+                conversationId: context.conversationId,
+                contactId: context.contactId,
+                emails,
+                assigneeLabel: `el equipo ${(team.name as string) || action.params[0]}`,
+              });
             }
           }
           break;
@@ -200,12 +309,15 @@ export async function executeAIActions(
 
         case "add_comment": {
           if (action.params[0]) {
-            await admin.from("internal_notes").insert({
-              conversation_id: context.conversationId,
-              agent_id: null,
-              content: `[IA] ${action.params.join(":")}`,
+            // agent_id es NOT NULL: la nota se atribuye a un asesor real
+            // (ver lib/smarttalk/internal-notes.ts); antes fallaba en silencio.
+            const noteId = await addSystemNote({
+              conversationId: context.conversationId,
+              organizationId: context.organizationId,
+              content: action.params.join(":"),
+              prefix: "[IA]",
             });
-            executed.push("add_comment");
+            if (noteId) executed.push("add_comment");
           }
           break;
         }

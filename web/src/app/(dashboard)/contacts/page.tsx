@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useContacts } from "@/hooks/useContacts";
 import { useSegments } from "@/hooks/useSegments";
+import { useActiveBrand } from "@/hooks/useActiveBrand";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,13 +18,6 @@ import Link from "next/link";
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 25;
-
-const lifecycleColors: Record<string, string> = {
-  lead: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-  customer: "bg-green-500/20 text-green-400 border-green-500/30",
-  opportunity: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-  churned: "bg-red-500/20 text-red-400 border-red-500/30",
-};
 
 const tagColors = [
   "bg-purple-500/20 text-purple-400 border-purple-500/30",
@@ -49,10 +43,18 @@ function getTagColor(index: number) {
 }
 
 export default function ContactsPage() {
-  const [brands, setBrands] = useState<Array<{ id: string; name: string }>>([]);
-  const [brandId, setBrandId] = useState("");
-  const [brandsLoading, setBrandsLoading] = useState(true);
-  const [brandLoadError, setBrandLoadError] = useState("");
+  // Fuente de marcas: provider global (ActiveBrandProvider) — reemplaza el
+  // fetch manual antiguo a /api/cm/clients + useEffect propio. Ahora esta
+  // página responde al BrandSwitcher del sidebar y viceversa.
+  const { clients, activeClientId, setActiveClientId, loading: brandsLoading, error: brandError } = useActiveBrand();
+  const brands = clients.map((c) => ({ id: c.id, name: c.name }));
+  const brandId = activeClientId ?? "";
+  const setBrandId = (id: string) => setActiveClientId(id || null);
+  const brandLoadError =
+    brandError ??
+    (!brandsLoading && brands.length === 0
+      ? "No hay una marca disponible para crear contactos."
+      : "");
   const [search, setSearch] = useState("");
   const [activeSegment, setActiveSegment] = useState("all");
   const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set());
@@ -62,69 +64,34 @@ export default function ContactsPage() {
   const [addContactDialogOpen, setAddContactDialogOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
 
+  // Etapas del ciclo de vida (estado del cliente): id → { name, color }.
+  const [stages, setStages] = useState<{ id: string; name: string; color: string }[]>([]);
+  const [lifecycleFilter, setLifecycleFilter] = useState<string>("");
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/lifecycle", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => {
+        const arr = Array.isArray(d) ? d : d.stages || d.data || d.lifecycle_stages || [];
+        if (alive) setStages(arr.map((s: { id: string; name: string; color?: string }) => ({ id: s.id, name: s.name, color: s.color || "#6b7280" })));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const stageById = new Map(stages.map((s) => [s.id, s]));
+
   const { data: segments } = useSegments();
   const { data: restrictedLeads } = useRestrictedLeads(brandId || undefined);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadBrands() {
-      setBrandsLoading(true);
-      setBrandLoadError("");
-
-      try {
-        const response = await fetch("/api/cm/clients", { cache: "no-store" });
-        const payload = (await response.json().catch(() => null)) as {
-          clients?: unknown;
-          error?: string;
-        } | null;
-
-        if (!response.ok) {
-          throw new Error(payload?.error || "No fue posible cargar las marcas.");
-        }
-
-        const rows = Array.isArray(payload?.clients)
-          ? payload.clients.filter(
-              (client): client is { id: string; name: string } =>
-                Boolean(client) &&
-                typeof client === "object" &&
-                typeof (client as { id?: unknown }).id === "string" &&
-                typeof (client as { name?: unknown }).name === "string"
-            )
-          : [];
-
-        if (!cancelled) {
-          setBrands(rows);
-          setBrandId((current) => current || rows[0]?.id || "");
-          if (rows.length === 0) {
-            setBrandLoadError("No hay una marca disponible para crear contactos.");
-          }
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setBrands([]);
-          setBrandId("");
-          setBrandLoadError(
-            error instanceof Error
-              ? error.message
-              : "No fue posible cargar las marcas."
-          );
-        }
-      } finally {
-        if (!cancelled) setBrandsLoading(false);
-      }
-    }
-
-    void loadBrands();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Fetch de marcas eliminado: ahora vive en ActiveBrandProvider (context global).
+  // Este componente responde al switcher del sidebar automáticamente.
 
   // Reset to page 0 when search changes
   useEffect(() => {
     setPage(0);
-  }, [search, activeSegment]);
+  }, [search, activeSegment, lifecycleFilter]);
 
   const { data: contactsData, isLoading } = useContacts({
     brandId,
@@ -132,6 +99,7 @@ export default function ContactsPage() {
     page,
     pageSize: PAGE_SIZE,
     visibilityStatus: activeSegment === "blocked" ? "restricted" : undefined,
+    lifecycleStageId: lifecycleFilter || undefined,
   });
 
   const contacts = contactsData?.contacts;
@@ -290,10 +258,20 @@ export default function ContactsPage() {
               className="pl-9 bg-[#0d1117] border-[#2d333b] text-white placeholder:text-[#8b949e] focus:border-blue-500 h-9"
             />
           </div>
-          <Button variant="outline" size="sm" className="bg-transparent border-[#2d333b] text-[#8b949e] hover:bg-[#1a1f2e] hover:text-white">
-            <Filter className="h-4 w-4 mr-1.5" />
-            Filtros
-          </Button>
+          <div className="relative flex items-center">
+            <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#8b949e] pointer-events-none" />
+            <select
+              aria-label="Filtrar por estado"
+              value={lifecycleFilter}
+              onChange={(e) => setLifecycleFilter(e.target.value)}
+              className="h-9 rounded-md border border-[#2d333b] bg-[#0d1117] pl-8 pr-3 text-sm text-white"
+            >
+              <option value="">Todos los estados</option>
+              {stages.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
           <div className="flex-1" />
           <Button
             variant="outline"
@@ -377,7 +355,9 @@ export default function ContactsPage() {
                   const displayName = contact.name || "Sin nombre";
                   const initials = displayName.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
                   const restricted = contact.visibility_status === "restricted";
-                  const lifecycle = restricted ? null : contact.custom_fields?.lifecycle;
+                  // Estado real del cliente: contacts.lifecycle_stage_id → etapa.
+                  const stageId = (contact as { lifecycle_stage_id?: string }).lifecycle_stage_id;
+                  const stage = restricted || !stageId ? null : stageById.get(stageId);
                   const email = restricted ? null : contact.custom_fields?.email;
                   const assignedTo = restricted ? null : contact.custom_fields?.assigned_to;
 
@@ -402,15 +382,24 @@ export default function ContactsPage() {
                           <span className="text-sm font-medium text-white group-hover/name:text-blue-400 transition-colors">
                             {displayName}
                           </span>
+                          {!restricted && contact.custom_fields?.source === "facebook_lead_form" && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 shrink-0">
+                              FB Lead
+                            </span>
+                          )}
                         </Link>
                       </td>
                       <td className="px-3 py-2.5 text-sm text-[#8b949e]">
                         {restricted ? <span className="text-amber-300">Oculto por límite del plan</span> : contact.wa_id || "---"}
                       </td>
                       <td className="px-3 py-2.5">
-                        {lifecycle ? (
-                          <span className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full border ${lifecycleColors[lifecycle] || "bg-gray-500/20 text-gray-400 border-gray-500/30"}`}>
-                            {lifecycle}
+                        {stage ? (
+                          <span
+                            className="inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium rounded-full border"
+                            style={{ color: stage.color, borderColor: `${stage.color}55`, backgroundColor: `${stage.color}22` }}
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: stage.color }} />
+                            {stage.name}
                           </span>
                         ) : (
                           <span className="text-[#8b949e] text-sm">---</span>

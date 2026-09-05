@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -18,7 +18,34 @@ import {
   Shield,
   UserRoundCog,
   PanelLeftClose,
+  PanelLeftOpen,
   LogOut,
+  Home,
+  Target,
+  Sparkles,
+  FileText,
+  Share2,
+  Workflow,
+  CheckSquare,
+  Users2,
+  Brain,
+  Plug,
+  Activity,
+  TrendingUp,
+  Star,
+  DollarSign,
+  Building2,
+  Radio,
+  PenTool,
+  Wand2,
+  CreditCard,
+  Tag,
+  Reply,
+  Lock,
+  Key,
+  ClipboardList,
+  Cpu,
+  ServerCog,
 } from "lucide-react";
 import {
   Tooltip,
@@ -34,64 +61,239 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-const mainNav = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/inbox", label: "Bandeja de Entrada", icon: MessageSquare, badge: true },
-  { href: "/contacts", label: "Contactos", icon: Users },
-  { href: "/settings/agents", label: "Equipo", icon: UserRoundCog },
-  { href: "/broadcasts", label: "Difusiones", icon: Send },
-  { href: "/chatbot", label: "Chatbot", icon: Bot },
-  { href: "/chatbot/ai", label: "Agentes IA", icon: BrainCircuit },
-  { href: "/reports", label: "Reportes", icon: BarChart3 },
+type NavItem = {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  badge?: boolean;
+};
+
+type NavSection = {
+  label: string;
+  items: NavItem[];
+  accent?: boolean;
+};
+
+const CM_SECTIONS: NavSection[] = [
+  {
+    label: "Bandeja",
+    items: [
+      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/inbox", label: "Bandeja de Entrada", icon: MessageSquare, badge: true },
+      { href: "/broadcasts", label: "Difusiones", icon: Send },
+      { href: "/chatbot", label: "Chatbot", icon: Bot },
+      { href: "/composer", label: "Composer", icon: PenTool },
+      { href: "/listening", label: "Escucha social", icon: Radio },
+    ],
+  },
+  {
+    label: "Datos",
+    items: [
+      { href: "/contacts", label: "Contactos", icon: Users },
+      { href: "/settings/agents", label: "Equipo", icon: UserRoundCog },
+      { href: "/settings/tags", label: "Etiquetas", icon: Tag },
+      { href: "/settings/contact-fields", label: "Campos custom", icon: ClipboardList },
+    ],
+  },
+  {
+    label: "Inteligencia",
+    items: [
+      { href: "/chatbot/ai", label: "Agentes IA", icon: BrainCircuit },
+      { href: "/ai-tools", label: "AI Tools", icon: Wand2 },
+      { href: "/analytics", label: "Analytics", icon: TrendingUp },
+      { href: "/reports", label: "Reportes", icon: BarChart3 },
+      { href: "/reports-cm", label: "Reportes CM", icon: BarChart3 },
+    ],
+  },
+  {
+    label: "Ajustes",
+    items: [
+      { href: "/settings/channels", label: "Canales", icon: Plug },
+      { href: "/settings/whatsapp", label: "WhatsApp", icon: MessageSquare },
+      { href: "/whatsapp/templates", label: "Plantillas WhatsApp", icon: FileText },
+      { href: "/automatizacion-leads", label: "Automatización de Leads", icon: Bot },
+      { href: "/settings/quick-replies", label: "Respuestas rápidas", icon: Reply },
+      { href: "/settings/lifecycle", label: "Lifecycle", icon: Activity },
+      { href: "/settings/closing-notes", label: "Notas de cierre", icon: FileText },
+      { href: "/settings/teams", label: "Equipos", icon: Users2 },
+      { href: "/settings/organization", label: "Organización", icon: Building2 },
+      { href: "/settings/billing", label: "Facturación", icon: CreditCard },
+      { href: "/settings/api", label: "API Keys", icon: Key },
+      { href: "/settings/security", label: "Seguridad", icon: Lock },
+    ],
+  },
 ];
 
-const bottomNav = [
+// ---------------------------------------------------------------------------
+// Menú UNIFICADO (cuando Community OS está activo).
+//
+// Antes se mostraban CM_SECTIONS + las 5 secciones de OS a la vez, lo que
+// duplicaba cada trabajo (Comms↔Bandeja, Content↔Composer, Social↔Analytics,
+// Agents↔Agentes IA, Connections↔Canales). Ahora hay UNA sola puerta por
+// trabajo: se elige la página madura para operar y las páginas nativas de OS
+// solo para lo que el CM no tenía (Goals, Tasks, Finances, Brain, Workflows,
+// Skills, Observability, System, Conectores).
+//
+// Páginas de OS que quedan fuera del menú por duplicar una madura (siguen
+// accesibles por URL): /os/comms → /inbox · /os/content → /composer ·
+// /os/social + /os/analytics → /analytics · /os/agents → /chatbot/ai.
+// Páginas aún en construcción también fuera del menú: /os/funnel, /os/variants,
+// /os/personas, /os/org, /os/roadmap, /os/reference, /os/intelligence.
+// ---------------------------------------------------------------------------
+const UNIFIED_SECTIONS: NavSection[] = [
+  {
+    label: "Principal",
+    items: [
+      { href: "/es/os", label: "Home", icon: Home },
+      { href: "/inbox", label: "Bandeja de Entrada", icon: MessageSquare, badge: true },
+      { href: "/broadcasts", label: "Difusiones", icon: Send },
+      { href: "/contacts", label: "Contactos", icon: Users },
+    ],
+  },
+  {
+    label: "Contenido",
+    items: [
+      { href: "/composer", label: "Composer", icon: PenTool },
+      { href: "/whatsapp/templates", label: "Plantillas WhatsApp", icon: FileText },
+      { href: "/listening", label: "Escucha social", icon: Radio },
+    ],
+  },
+  {
+    label: "Automatización & IA",
+    items: [
+      { href: "/chatbot", label: "Chatbot", icon: Bot },
+      { href: "/chatbot/ai", label: "Agentes IA", icon: BrainCircuit },
+      { href: "/automatizacion-leads", label: "Automatización de Leads", icon: Wand2 },
+      { href: "/ai-tools", label: "AI Tools", icon: Cpu },
+      { href: "/es/os/workflows", label: "Workflows", icon: Workflow },
+      { href: "/es/os/skills", label: "Skills", icon: Sparkles },
+    ],
+  },
+  {
+    label: "Gestión OS",
+    accent: true,
+    items: [
+      { href: "/es/os/goals", label: "Goals", icon: Target },
+      { href: "/es/os/tasks", label: "Tasks", icon: CheckSquare },
+      { href: "/es/os/finances", label: "Finances", icon: DollarSign },
+      { href: "/es/os/brain", label: "Brain", icon: Brain },
+    ],
+  },
+  {
+    label: "Analítica",
+    items: [
+      { href: "/analytics", label: "Analytics", icon: TrendingUp },
+      { href: "/reports-cm", label: "Reportes CM", icon: BarChart3 },
+      { href: "/es/os/observability", label: "Observability", icon: Activity },
+    ],
+  },
+  {
+    label: "Sistema & Conexiones",
+    items: [
+      { href: "/settings/channels", label: "Canales", icon: Plug },
+      { href: "/es/os/integrations", label: "Conectores", icon: Share2 },
+      { href: "/es/os/system", label: "System", icon: ServerCog },
+    ],
+  },
+  {
+    label: "Ajustes",
+    items: [
+      { href: "/settings/agents", label: "Equipo", icon: UserRoundCog },
+      { href: "/settings/tags", label: "Etiquetas", icon: Tag },
+      { href: "/settings/contact-fields", label: "Campos custom", icon: ClipboardList },
+      { href: "/settings/whatsapp", label: "WhatsApp", icon: MessageSquare },
+      { href: "/settings/quick-replies", label: "Respuestas rápidas", icon: Reply },
+      { href: "/settings/lifecycle", label: "Lifecycle", icon: Activity },
+      { href: "/settings/closing-notes", label: "Notas de cierre", icon: FileText },
+      { href: "/settings/teams", label: "Equipos", icon: Users2 },
+      { href: "/settings/organization", label: "Organización", icon: Building2 },
+      { href: "/settings/billing", label: "Facturación", icon: CreditCard },
+      { href: "/settings/api", label: "API Keys", icon: Key },
+      { href: "/settings/security", label: "Seguridad", icon: Lock },
+    ],
+  },
+];
+
+const BOTTOM_ITEMS: NavItem[] = [
   { href: "/settings", label: "Configuración", icon: Settings },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  showCommunityOs?: boolean;
+}
+
+export function Sidebar({ showCommunityOs = false }: SidebarProps) {
   const pathname = usePathname();
   const { data: currentAgent } = useCurrentAgent();
-  // El cierre de sesión pasa por AuthProvider: además de `signOut()` limpia la
-  // cookie `cm_user_id` del Community Manager legacy y redirige. Llamar sólo a
-  // `signOut()` dejaría esa cookie viva y el usuario seguiría autenticado en la
-  // mitad legacy de la aplicación.
   const { logout } = useAuth();
   const router = useRouter();
+
+  const sections = useMemo<NavSection[]>(
+    () => (showCommunityOs ? UNIFIED_SECTIONS : CM_SECTIONS),
+    [showCommunityOs]
+  );
 
   const agentName = (currentAgent?.name || "").trim();
   const initials = agentName
     ? agentName
         .split(/\s+/)
-        .map((word) => word[0])
+        .map((w) => w[0])
         .join("")
         .toUpperCase()
         .slice(0, 2)
     : "";
   const isSuperAdmin = currentAgent?.is_super_admin === true;
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const apply = () => {
+      setIsMobile(mq.matches);
+      if (mq.matches) setExpanded(false);
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
+  useEffect(() => {
+    if (isMobile) setExpanded(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
+
+  const isActive = (href: string) => {
+    if (href === "/es/os") return pathname === "/es/os" || pathname === "/en/os";
+    return pathname === href || pathname.startsWith(href + "/");
+  };
 
   return (
     <TooltipProvider>
+      {isMobile && expanded && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50"
+          onClick={() => setExpanded(false)}
+          aria-hidden="true"
+        />
+      )}
       <aside
         className={cn(
           "bg-[var(--surface-base)] flex flex-col h-screen shrink-0 border-r border-border overflow-hidden transition-[width] duration-200",
-          expanded ? "w-[224px]" : "w-[56px]"
+          expanded ? "w-[240px]" : "w-[56px]",
+          // En móvil el sidebar expandido flota sobre el contenido en vez de empujarlo.
+          isMobile && expanded && "fixed inset-y-0 left-0 z-40 shadow-2xl"
         )}
       >
-        {/* Logo */}
+        {/* Logo + collapse toggle */}
         <div
           className={cn(
-            "flex items-center h-[56px] border-b border-border",
+            "flex items-center h-[56px] border-b border-border shrink-0",
             expanded ? "justify-between px-3" : "justify-center"
           )}
         >
           {expanded ? (
             <>
-              <Link
-                href="/clients"
-                className="flex min-w-0 items-center gap-2 rounded-lg text-foreground"
-              >
+              <Link href="/clients" className="flex min-w-0 items-center gap-2 rounded-lg text-foreground">
                 <img
                   src="/community-manager-logo.png"
                   alt="CommunityAgent"
@@ -105,7 +307,7 @@ export function Sidebar() {
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--surface-interactive)] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
                 aria-label="Contraer menú"
               >
-                <PanelLeftClose className="icon-md" />
+                <PanelLeftClose className="h-4 w-4" />
               </button>
             </>
           ) : (
@@ -115,73 +317,102 @@ export function Sidebar() {
               className="flex h-9 w-9 items-center justify-center rounded-lg overflow-hidden border border-border bg-[var(--surface-interactive)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
               aria-label="Expandir menú"
             >
-              <img
-                src="/community-manager-logo.png"
-                alt=""
-                className="h-full w-full object-cover"
-              />
+              <img src="/community-manager-logo.png" alt="" className="h-full w-full object-cover" />
               <span className="sr-only">Abrir menú</span>
             </button>
           )}
         </div>
 
-        {/* Main navigation */}
+        {/* Scrollable nav */}
         <nav
           className={cn(
-            "flex-1 flex flex-col py-3 gap-1",
-            expanded ? "items-stretch px-2" : "items-center"
+            "flex-1 overflow-y-auto py-3",
+            expanded ? "px-2" : "px-0",
+            "scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent"
           )}
         >
-          {mainNav.map((item) => {
-            const isActive =
-              pathname === item.href || pathname.startsWith(item.href + "/");
-            return (
-              <Tooltip key={item.href}>
-                <TooltipTrigger
-                  render={
-                    <Link
-                      href={item.href}
-                      aria-label={item.label}
-                      aria-current={isActive ? "page" : undefined}
-                      className={cn(
-                        "relative flex h-10 items-center rounded-lg transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                        expanded ? "w-full justify-start gap-3 px-3" : "w-10 justify-center",
-                        isActive
-                          ? "bg-[var(--surface-interactive)] text-primary"
-                          : "text-muted-foreground hover:text-foreground hover:bg-[var(--surface-interactive)]/60"
-                      )}
-                    />
-                  }
+          {sections.map((section, sIdx) => (
+            <div key={section.label} className={cn(sIdx > 0 && "mt-2.5")}>
+              {expanded && (
+                <div
+                  className={cn(
+                    "px-2 mb-1 text-[9.5px] font-semibold uppercase tracking-wider",
+                    section.accent
+                      ? "text-[oklch(70%_0.14_250)] flex items-center gap-1.5"
+                      : "text-muted-foreground/70"
+                  )}
                 >
-                  {isActive && (
-                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-primary rounded-r-full" />
+                  {section.accent && <Star className="h-3 w-3 fill-current" />}
+                  {section.label}
+                  {section.accent && (
+                    <span className="ml-auto rounded-full bg-[oklch(70%_0.14_250)]/20 px-1.5 py-0.5 text-[9px] font-bold text-[oklch(80%_0.14_250)] leading-none">
+                      NEW
+                    </span>
                   )}
-                  <item.icon className="icon-lg" aria-hidden="true" />
-                  {expanded && (
-                    <span className="truncate text-sm font-medium">{item.label}</span>
-                  )}
-                  {item.badge && (
-                    <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-primary" />
-                  )}
-                </TooltipTrigger>
-                <TooltipContent side="right" sideOffset={8}>
-                  {item.label}
-                </TooltipContent>
-              </Tooltip>
-            );
-          })}
+                </div>
+              )}
+              <div className={cn("flex flex-col gap-0.5", expanded ? "" : "items-center")}>
+                {section.items.map((item) => {
+                  const active = isActive(item.href);
+                  return (
+                    <Tooltip key={item.href}>
+                      <TooltipTrigger
+                        render={
+                          <Link
+                            href={item.href}
+                            aria-label={item.label}
+                            aria-current={active ? "page" : undefined}
+                            className={cn(
+                              "relative flex h-[30px] items-center rounded-md text-[13px] transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]",
+                              expanded ? "w-full justify-start gap-2.5 px-2" : "w-9 justify-center",
+                              active
+                                ? section.accent
+                                  ? "bg-[oklch(70%_0.14_250)]/15 text-[oklch(80%_0.14_250)]"
+                                  : "bg-[var(--surface-interactive)] text-primary"
+                                : "text-muted-foreground hover:text-foreground hover:bg-[var(--surface-interactive)]/60"
+                            )}
+                          />
+                        }
+                      >
+                        {active && (
+                          <span
+                            className={cn(
+                              "absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full",
+                              section.accent ? "bg-[oklch(70%_0.14_250)]" : "bg-primary"
+                            )}
+                          />
+                        )}
+                        <item.icon className="h-[16px] w-[16px] shrink-0" aria-hidden="true" />
+                        {expanded && <span className="truncate">{item.label}</span>}
+                        {item.badge && (
+                          <span
+                            className={cn(
+                              "absolute h-1.5 w-1.5 rounded-full bg-primary",
+                              expanded ? "right-2 top-1/2 -translate-y-1/2" : "right-1 top-1"
+                            )}
+                          />
+                        )}
+                      </TooltipTrigger>
+                      <TooltipContent side="right" sideOffset={8}>
+                        {item.label}
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
-        {/* Bottom navigation */}
+        {/* Bottom: settings, admin, user */}
         <div
           className={cn(
-            "flex flex-col py-3 gap-1 border-t border-border",
-            expanded ? "items-stretch px-2" : "items-center"
+            "flex flex-col py-2 gap-0.5 border-t border-border shrink-0",
+            expanded ? "px-2" : "items-center"
           )}
         >
-          {bottomNav.map((item) => {
-            const isActive =
-              pathname === item.href || pathname.startsWith(item.href + "/");
+          {BOTTOM_ITEMS.map((item) => {
+            const active = isActive(item.href);
             return (
               <Tooltip key={item.href}>
                 <TooltipTrigger
@@ -189,21 +420,19 @@ export function Sidebar() {
                     <Link
                       href={item.href}
                       aria-label={item.label}
-                      aria-current={isActive ? "page" : undefined}
+                      aria-current={active ? "page" : undefined}
                       className={cn(
-                        "relative flex h-10 items-center rounded-lg transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                        expanded ? "w-full justify-start gap-3 px-3" : "w-10 justify-center",
-                        isActive
+                        "relative flex h-[30px] items-center rounded-md text-[13px] transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]",
+                        expanded ? "w-full justify-start gap-2.5 px-2" : "w-9 justify-center",
+                        active
                           ? "bg-[var(--surface-interactive)] text-primary"
                           : "text-muted-foreground hover:text-foreground hover:bg-[var(--surface-interactive)]/60"
                       )}
                     />
                   }
                 >
-                  <item.icon className="icon-lg" aria-hidden="true" />
-                  {expanded && (
-                    <span className="truncate text-sm font-medium">{item.label}</span>
-                  )}
+                  <item.icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                  {expanded && <span className="truncate">{item.label}</span>}
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
                   {item.label}
@@ -212,7 +441,6 @@ export function Sidebar() {
             );
           })}
 
-          {/* Super Admin link */}
           {isSuperAdmin && (
             <Tooltip>
               <TooltipTrigger
@@ -220,17 +448,17 @@ export function Sidebar() {
                   <Link
                     href="/admin"
                     className={cn(
-                      "relative flex h-10 items-center rounded-lg transition-all duration-150",
-                      expanded ? "w-full justify-start gap-3 px-3" : "w-10 justify-center",
+                      "flex h-9 items-center rounded-md text-sm transition-colors",
+                      expanded ? "w-full justify-start gap-2.5 px-2" : "w-9 justify-center",
                       pathname.startsWith("/admin")
                         ? "bg-red-500/20 text-red-400"
-                        : "text-[#7d8590] hover:text-red-400 hover:bg-red-500/10"
+                        : "text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
                     )}
                   />
                 }
               >
-                <Shield className="h-[20px] w-[20px]" />
-                {expanded && <span className="text-sm font-medium">Administración</span>}
+                <Shield className="h-[18px] w-[18px] shrink-0" />
+                {expanded && <span className="truncate">Administración</span>}
               </TooltipTrigger>
               <TooltipContent side="right" sideOffset={8}>
                 Admin
@@ -238,59 +466,40 @@ export function Sidebar() {
             </Tooltip>
           )}
 
-          {/* Menú de usuario.
-              Era un <div> sin onClick: se veía como un botón y no hacía nada.
-              Ahora es un <button> real, así que entra en el orden de tabulación
-              y responde a Enter y Espacio sin manejadores de teclado propios.
-              El menú funciona igual con la barra expandida y contraída; sólo
-              cambia el ancho y si se muestra la etiqueta. */}
           <DropdownMenu>
             <DropdownMenuTrigger
               data-testid="sidebar-user-menu"
-              aria-label={
-                agentName
-                  ? `Menú de usuario: ${agentName}`
-                  : "Menú de usuario"
-              }
+              aria-label={agentName ? `Menú de usuario: ${agentName}` : "Menú de usuario"}
               className={cn(
-                "flex h-10 items-center rounded-lg text-[#7d8590] transition-colors",
-                "hover:text-[#e6edf3] hover:bg-[#21262d]",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#388bfd] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1117]",
-                expanded ? "w-full justify-start px-3" : "w-10 justify-center"
+                "flex h-10 items-center rounded-md text-muted-foreground transition-colors mt-1",
+                "hover:text-foreground hover:bg-[var(--surface-interactive)]",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]",
+                expanded ? "w-full justify-start px-2" : "w-9 justify-center"
               )}
             >
               <div className="w-7 h-7 rounded-full bg-secondary border border-border flex items-center justify-center shrink-0">
                 {initials ? (
-                  <span className="text-[11px] font-semibold text-[#e6edf3]">{initials}</span>
+                  <span className="text-[11px] font-semibold text-foreground">{initials}</span>
                 ) : (
                   <User className="h-3.5 w-3.5" />
                 )}
               </div>
-              {expanded && (
-                <span className="ml-2 truncate text-sm font-medium">
-                  {agentName || "Perfil"}
-                </span>
-              )}
+              {expanded && <span className="ml-2 truncate text-sm font-medium">{agentName || "Perfil"}</span>}
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-              side="right"
-              align="end"
-              sideOffset={8}
-              className="w-52 bg-[#1a1f2e] border-[#2d333b]"
-            >
+            <DropdownMenuContent side="right" align="end" sideOffset={8} className="w-52 bg-[#1a1f2e] border-[#2d333b]">
               <DropdownMenuItem
                 data-testid="sidebar-view-profile"
                 onClick={() => router.push("/settings/profile")}
-                className="text-[#e6edf3] focus:bg-[#21262d] focus:text-white"
+                className="text-foreground focus:bg-[var(--surface-interactive)] focus:text-foreground"
               >
                 <User className="h-4 w-4 mr-2" />
                 Ver perfil
               </DropdownMenuItem>
-              <DropdownMenuSeparator className="bg-[#2d333b]" />
+              <DropdownMenuSeparator className="bg-border" />
               <DropdownMenuItem
                 data-testid="sidebar-logout"
                 onClick={() => void logout()}
-                className="text-[#e6edf3] focus:bg-[#21262d] focus:text-white"
+                className="text-foreground focus:bg-[var(--surface-interactive)] focus:text-foreground"
               >
                 <LogOut className="h-4 w-4 mr-2" />
                 Cerrar sesión

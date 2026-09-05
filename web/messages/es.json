@@ -1,0 +1,134 @@
+{
+  "os": {
+    "console": {
+      "title": "Consola",
+      "subtitle": "Vista viva del OS · canales, agentes, actividad y metas de {brand}",
+      "pulse": {
+        "channelsActive": "Canales activos",
+        "messagesToday": "Mensajes hoy",
+        "agentsActive": "Agentes activos",
+        "standingGoals": "Standing goals"
+      }
+    },
+    "sidebar": {
+      "communityOs": "Community OS",
+      "new": "NEW"
+    },
+    "agents": {
+      "title": "Agentes"
+    },
+    "goals": {
+      "title": "Standing goals"
+    },
+    "skills": {
+      "title": "Skills",
+      "subtitle": "Capacidades activas de los agentes del Community OS",
+      "status": {
+        "live": "Activo",
+        "learning": "Aprendiendo",
+        "planned": "Planificado"
+      },
+      "emptyState": "No hay skills registradas todavía."
+    },
+    "funnel": {
+      "title": "Funnel",
+      "subtitle": "Vista neural del pipeline · leads orbitando sus etapas",
+      "stages": {
+        "new": "Nuevos",
+        "qualified": "Calificados",
+        "hot": "Calientes",
+        "closed": "Cerrados"
+      }
+    },
+    "content": {
+      "title": "Contenido",
+      "subtitle": "Redacta, programa y revisa publicaciones para todas tus cuentas",
+      "emptyState": "No hay borradores todavía — usa el compositor para crear el primero",
+      "compose": "Componer"
+    },
+    "social": {
+      "title": "Social",
+      "subtitle": "Métricas de audiencia y consistencia de publicación",
+      "followers": "Seguidores",
+      "audience": "Audiencia",
+      "pillars": "Pilares de contenido"
+    },
+    "integrations": {
+      "title": "Integraciones"
+    },
+    "command": {
+      "title": "Command palette"
+    },
+    "workflows": {
+      "title": "Workflows",
+      "subtitle": "Automatizaciones multi-paso",
+      "emptyState": "Sin workflows. Sprint 3 traerá el editor visual — por ahora, insertar manualmente vía SQL o POST /api/os/workflows.",
+      "newWorkflow": "Nuevo workflow"
+    },
+    "brain": {
+      "title": "Brain",
+      "subtitle": "Grafo de conocimiento vivo",
+      "emptyState": "Brain vacío. Corre el ingestor para popular desde CM.",
+      "nodeCount": "{count} nodos",
+      "kinds": {
+        "title": "Tipos de nodo",
+        "subtitle": "Gestiona los tipos de nodo — colores, íconos y etiquetas por org.",
+        "manageKinds": "Gestionar tipos",
+        "newKind": "Nuevo tipo personalizado",
+        "system": "sistema",
+        "custom": "personalizado"
+      }
+    },
+    "observability": {
+      "title": "Observabilidad",
+      "subtitle": "Ejecuciones de agentes, costos, crons y salud de conectores",
+      "cards": {
+        "agentRuns": "Ejecuciones agentes (24h)",
+        "successRate": "Tasa de éxito",
+        "costToday": "Costo hoy",
+        "sinceMidnight": "Desde medianoche",
+        "cost7d": "Costo (7d)",
+        "rollingWeek": "Últimos 7 días",
+        "activity24h": "Eventos de actividad (24h)",
+        "events": "Eventos",
+        "goalsBreach": "Goals en breach",
+        "goalsBreachAlert": "Requiere atención",
+        "connectors": "Conectores",
+        "connectorsHint": "live / error"
+      },
+      "cronTable": {
+        "title": "Últimas ejecuciones cron",
+        "empty": "No hay ejecuciones cron registradas.",
+        "endpoint": "Endpoint",
+        "at": "Fecha/hora",
+        "status": "Estado",
+        "ok": "OK",
+        "err": "ERROR"
+      }
+    },
+    "analytics": {
+      "title": "Analytics",
+      "subtitle": "KPIs del OS · últimos {days} días",
+      "emptyState": "Sin datos aún — configura un org para ver métricas.",
+      "goalsHealth": "Salud de goals (diario)",
+      "topAgents": "Top agentes",
+      "cronReliability": "Confiabilidad de crons",
+      "noAgentRuns": "Sin ejecuciones de agentes en el período.",
+      "noCronData": "Sin datos de crons en el período.",
+      "kpi": {
+        "runs": "Ejecuciones de agentes",
+        "cost": "Costo total (USD)",
+        "successRate": "Tasa de éxito",
+        "costPerMsg": "Costo por mensaje"
+      },
+      "col": {
+        "agent": "Agente",
+        "runs": "Runs",
+        "successRate": "Éxito",
+        "endpoint": "Endpoint",
+        "failures": "Fallos",
+        "failRate": "Tasa de fallo"
+      }
+    }
+  }
+}

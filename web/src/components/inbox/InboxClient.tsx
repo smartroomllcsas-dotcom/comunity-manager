@@ -7,7 +7,6 @@ import { ConversationList } from "@/components/inbox/ConversationList";
 import { ChatWindow } from "@/components/inbox/ChatWindow";
 import { ContactPanel } from "@/components/inbox/ContactPanel";
 import { InboxChannelsBar } from "@/components/inbox/InboxChannelsBar";
-import { cn } from "@/lib/utils";
 import { useInboxStore } from "@/stores/inbox";
 import { useConversations } from "@/hooks/useConversations";
 import { useChannels } from "@/hooks/useChannels";
@@ -60,95 +59,82 @@ export function InboxClient({ initialConversations, initialChannels, initialBran
     }
   }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
+  const actionButtonClass =
+    "inline-flex h-8 max-sm:min-h-[var(--touch-target)] items-center gap-1.5 rounded-md border border-white/[0.08] bg-transparent px-3 text-[13px] font-medium text-[var(--text-secondary)] transition-[background-color,border-color,color,transform] duration-[var(--duration-fast)] ease-[var(--easing-out)] hover:bg-[var(--inbox-hover)] hover:text-[var(--text-primary)] hover:border-white/10 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:pointer-events-none disabled:opacity-40";
+
   return (
-    <div className="relative flex flex-col h-[calc(100vh-48px)] overflow-hidden bg-[#0b1020]">
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -top-28 left-8 h-64 w-64 rounded-full bg-[#3b82f6]/12 blur-3xl" />
-        <div className="absolute top-24 right-12 h-72 w-72 rounded-full bg-[#8b5cf6]/10 blur-3xl" />
-        <div className="absolute bottom-0 left-1/3 h-56 w-56 rounded-full bg-[#14b8a6]/10 blur-3xl" />
-      </div>
-
-      <div className="relative border-b border-white/5 bg-gradient-to-b from-[#0b1020]/95 to-[#0b1020]/75 px-6 pb-4 pt-5 backdrop-blur-sm">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#2d333b] bg-[#11172a] px-3 py-1 text-[11px] font-medium text-[#8b949e]">
-              <Sparkles className="h-3.5 w-3.5 text-[#58a6ff]" />
-              Centro de mensajes multicanal
-            </div>
-            <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-white">Inbox de CommunityAgent</h1>
-              <p className="mt-1 max-w-2xl text-sm text-[#8b949e]">
-                Unifica WhatsApp, Facebook, Instagram y futuros canales en una sola operación, con filtros por canal y contexto del contacto.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowTopPanel((open) => !open)}
-              className="inline-flex items-center gap-2 rounded-xl border border-[#2d333b] bg-[#11172a] px-4 py-2 text-sm font-medium text-white transition-colors hover:border-[#3d444d] hover:bg-[#161d33]"
-            >
-              {showTopPanel ? <PanelTopClose className="h-4 w-4 text-[#8b949e]" /> : <PanelTopOpen className="h-4 w-4 text-[#58a6ff]" />}
-              {showTopPanel ? "Ocultar panel" : "Mostrar panel"}
-            </button>
-            <Link
-              href="/settings/channels"
-              className="inline-flex items-center gap-2 rounded-xl border border-[#2d333b] bg-[#11172a] px-4 py-2 text-sm font-medium text-white transition-colors hover:border-[#3d444d] hover:bg-[#161d33]"
-            >
-              <Radio className="h-4 w-4 text-[#58a6ff]" />
-              Ver canales
-            </Link>
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="inline-flex items-center gap-2 rounded-xl border border-[#2d333b] bg-[#11172a] px-4 py-2 text-sm font-medium text-white transition-colors hover:border-[#3d444d] hover:bg-[#161d33]"
-            >
-              <RefreshCw className="h-4 w-4 text-[#8b949e]" />
-              Refrescar
-            </button>
-          </div>
+    <div className="relative flex flex-col h-[calc(100vh-48px)] overflow-hidden bg-[var(--inbox-canvas)]">
+      <div className="flex items-center justify-between gap-4 border-b border-white/[0.06] px-5 py-2.5">
+        <div className="flex min-w-0 items-center gap-3">
+          <h1 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">Inbox</h1>
+          <span className="hidden items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)] md:inline-flex">
+            <Sparkles className="icon-xs text-[var(--accent-text)]" />
+            Multicanal
+          </span>
         </div>
 
-        {showTopPanel && (
-          <div className="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
-            <div className="rounded-2xl border border-white/6 bg-[#11172a]/90 p-4 shadow-lg shadow-black/10">
-              <div className="flex items-center justify-between">
-                <p className="text-xs uppercase tracking-[0.22em] text-[#8b949e]">Abiertas</p>
-                <GaugeCircle className="h-4 w-4 text-[#58a6ff]" />
-              </div>
-              <p className="mt-3 text-2xl font-semibold text-white">{openCount}</p>
-            </div>
-            <div className="rounded-2xl border border-white/6 bg-[#11172a]/90 p-4 shadow-lg shadow-black/10">
-              <div className="flex items-center justify-between">
-                <p className="text-xs uppercase tracking-[0.22em] text-[#8b949e]">Sin asignar</p>
-                <Users2 className="h-4 w-4 text-[#f59e0b]" />
-              </div>
-              <p className="mt-3 text-2xl font-semibold text-white">{unassignedCount}</p>
-            </div>
-            <div className="rounded-2xl border border-white/6 bg-[#11172a]/90 p-4 shadow-lg shadow-black/10">
-              <div className="flex items-center justify-between">
-                <p className="text-xs uppercase tracking-[0.22em] text-[#8b949e]">Pendientes</p>
-                <MessageSquare className="h-4 w-4 text-[#14b8a6]" />
-              </div>
-              <p className="mt-3 text-2xl font-semibold text-white">{pendingCount}</p>
-            </div>
-            <div className="rounded-2xl border border-white/6 bg-[#11172a]/90 p-4 shadow-lg shadow-black/10">
-              <div className="flex items-center justify-between">
-                <p className="text-xs uppercase tracking-[0.22em] text-[#8b949e]">Canales activos</p>
-                <Radio className="h-4 w-4 text-[#8b949e]" />
-              </div>
-              <p className="mt-3 text-2xl font-semibold text-white">{activeChannels}</p>
-            </div>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setShowTopPanel((open) => !open)}
+            className={actionButtonClass}
+          >
+            {showTopPanel ? <PanelTopClose className="icon-sm" /> : <PanelTopOpen className="icon-sm text-[var(--accent-text)]" />}
+            {showTopPanel ? "Ocultar panel" : "Mostrar panel"}
+          </button>
+          <Link href="/settings/channels" className={actionButtonClass}>
+            <Radio className="icon-sm text-[var(--accent-text)]" />
+            Ver canales
+          </Link>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className={actionButtonClass}
+          >
+            <RefreshCw className="icon-sm" />
+            Refrescar
+          </button>
+        </div>
       </div>
+
+      {showTopPanel && (
+        <div className="grid grid-cols-2 divide-x divide-white/[0.06] border-b border-white/[0.06] xl:grid-cols-4">
+          <div className="px-5 py-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">Abiertas</p>
+              <GaugeCircle className="icon-sm text-[var(--accent-text)]" />
+            </div>
+            <p className="mt-1 text-xl font-semibold tabular-nums text-[var(--text-primary)]">{openCount}</p>
+          </div>
+          <div className="px-5 py-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">Sin asignar</p>
+              <Users2 className="icon-sm text-warning" />
+            </div>
+            <p className="mt-1 text-xl font-semibold tabular-nums text-[var(--text-primary)]">{unassignedCount}</p>
+          </div>
+          <div className="px-5 py-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">Pendientes</p>
+              <MessageSquare className="icon-sm text-[var(--text-secondary)]" />
+            </div>
+            <p className="mt-1 text-xl font-semibold tabular-nums text-[var(--text-primary)]">{pendingCount}</p>
+          </div>
+          <div className="px-5 py-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">Canales activos</p>
+              <Radio className="icon-sm text-[var(--text-secondary)]" />
+            </div>
+            <p className="mt-1 text-xl font-semibold tabular-nums text-[var(--text-primary)]">{activeChannels}</p>
+          </div>
+        </div>
+      )}
 
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         {showTopPanel && <InboxChannelsBar channels={channels || []} />}
 
-        <div className={cn("flex min-h-0 flex-1 gap-4 overflow-hidden p-4", !showTopPanel && "pt-3")}>
-          <div className="flex min-h-0 w-[320px] min-w-[320px] flex-col overflow-hidden rounded-3xl border border-white/6 bg-[#11172a]/85 shadow-2xl shadow-black/20 backdrop-blur-sm">
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <div className="flex min-h-0 w-[320px] min-w-[320px] flex-col overflow-hidden border-r border-white/[0.06] bg-[var(--inbox-panel)]">
             <ConversationList
               conversations={conversations || []}
               isLoading={isLoading}
@@ -158,17 +144,17 @@ export function InboxClient({ initialConversations, initialChannels, initialBran
             />
           </div>
 
-          <div className="min-w-0 flex-1 overflow-hidden rounded-3xl border border-white/6 bg-[#0f1526]/90 shadow-2xl shadow-black/20 backdrop-blur-sm">
+          <div className="min-w-0 flex-1 overflow-hidden bg-[var(--inbox-canvas)]">
             {selectedConversation ? (
               <ChatWindow conversation={selectedConversation} />
             ) : (
-              <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-[#8b949e]">
-                <div className="flex h-20 w-20 items-center justify-center rounded-3xl border border-white/6 bg-[#11172a] shadow-lg shadow-black/20">
-                  <MessageSquare className="h-8 w-8 text-[#4b5563]" />
+              <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-white/[0.06] bg-[var(--inbox-raised)]">
+                  <MessageSquare className="icon-lg text-[var(--text-tertiary)]" />
                 </div>
                 <div className="space-y-1">
-                  <p className="text-sm font-medium text-white">Selecciona una conversación</p>
-                  <p className="mx-auto max-w-md text-xs text-[#8b949e]">
+                  <p className="text-[13px] font-medium text-[var(--text-primary)]">Selecciona una conversación</p>
+                  <p className="mx-auto max-w-md text-xs text-[var(--text-secondary)]">
                     Elige un chat para ver el contexto, responder y gestionar el canal desde esta misma pantalla.
                   </p>
                 </div>
@@ -177,7 +163,7 @@ export function InboxClient({ initialConversations, initialChannels, initialBran
           </div>
 
           {selectedConversation && contactPanelOpen && (
-            <div className="w-[320px] min-w-[320px] overflow-hidden rounded-3xl border border-white/6 bg-[#11172a]/85 shadow-2xl shadow-black/20 backdrop-blur-sm">
+            <div className="w-[300px] min-w-[300px] overflow-hidden border-l border-white/[0.06] bg-[var(--inbox-panel)]">
               <ContactPanel conversation={selectedConversation} />
             </div>
           )}

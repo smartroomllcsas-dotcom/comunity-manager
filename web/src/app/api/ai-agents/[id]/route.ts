@@ -27,7 +27,7 @@ export async function GET(
 
   const { data: aiAgent, error } = await admin
     .from("ai_agents")
-    .select("*, knowledge_sources(*)")
+    .select("*")
     .eq("id", id)
     .eq("organization_id", agent.organization_id)
     .single();
@@ -36,7 +36,13 @@ export async function GET(
     return Response.json({ error: "Agente IA no encontrado" }, { status: 404 });
   }
 
-  return Response.json({ agent: aiAgent });
+  // knowledge_sources en consulta aparte (la FK embebida no está en el schema cache)
+  const { data: sources } = await admin
+    .from("knowledge_sources")
+    .select("*")
+    .eq("ai_agent_id", id);
+
+  return Response.json({ agent: { ...aiAgent, knowledge_sources: sources || [] } });
 }
 
 export async function PATCH(
@@ -69,10 +75,10 @@ export async function PATCH(
     return Response.json({ error: "Solo los administradores pueden editar agentes IA" }, { status: 403 });
   }
 
-  // Verify ownership
+  // Verify ownership (y traemos brand_id para el ámbito del predeterminado)
   const { data: existing } = await admin
     .from("ai_agents")
-    .select("id")
+    .select("id, brand_id")
     .eq("id", id)
     .eq("organization_id", agent.organization_id)
     .single();
@@ -89,15 +95,22 @@ export async function PATCH(
   if (body.actions !== undefined) updates.actions = body.actions;
   if (body.max_tokens !== undefined) updates.max_tokens = body.max_tokens;
   if (body.is_active !== undefined) updates.is_active = body.is_active;
+  if (body.brand_id !== undefined) updates.brand_id = body.brand_id || null;
 
   if (body.is_default !== undefined) {
     updates.is_default = body.is_default;
     if (body.is_default) {
-      await admin
+      // El predeterminado es POR empresa: sólo se limpia dentro del mismo
+      // ámbito (misma marca, o los agentes sin marca entre sí).
+      const scopeBrand =
+        body.brand_id !== undefined ? body.brand_id || null : (existing as { brand_id?: string | null }).brand_id ?? null;
+      let unset = admin
         .from("ai_agents")
         .update({ is_default: false })
         .eq("organization_id", agent.organization_id)
         .neq("id", id);
+      unset = scopeBrand ? unset.eq("brand_id", scopeBrand) : unset.is("brand_id", null);
+      await unset;
     }
   }
 
@@ -105,7 +118,7 @@ export async function PATCH(
     .from("ai_agents")
     .update(updates)
     .eq("id", id)
-    .select("*, knowledge_sources(*)")
+    .select("*")
     .single();
 
   if (error) return Response.json({ error: error.message }, { status: 500 });

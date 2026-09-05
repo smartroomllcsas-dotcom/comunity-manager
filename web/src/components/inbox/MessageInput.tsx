@@ -247,7 +247,7 @@ export function MessageInput({
   const composerDisabled = disabled || sending || uploading || requiresTemplate;
 
   return (
-    <div className="border-t border-[#2d333b] bg-[#161b22]">
+    <div className="border-t border-white/[0.06] bg-[var(--inbox-panel)]">
       {aiVisible && (
         <AIAssistPreview
           suggestion={aiSuggestion}
@@ -296,10 +296,10 @@ export function MessageInput({
           <button
             onClick={toggleVoiceRecording}
             className={cn(
-              "inline-flex min-h-10 items-center gap-1.5 px-3 py-2 rounded-md border transition-colors shrink-0 mb-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-40 disabled:cursor-not-allowed",
+              "inline-flex min-h-10 max-sm:min-h-[var(--touch-target)] items-center gap-1.5 px-3 py-2 rounded-md border transition-[background-color,border-color,color,transform] duration-[var(--duration-fast)] ease-[var(--easing-out)] shrink-0 mb-0.5 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-40 disabled:cursor-not-allowed",
               recording
                 ? "border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/15"
-                : "border-[#1f6feb]/40 bg-[var(--surface-base)] text-[#7dd3fc] hover:text-white hover:bg-[var(--surface-interactive)] hover:border-primary"
+                : "border-white/[0.08] bg-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--inbox-hover)] hover:border-white/10"
             )}
             disabled={composerDisabled}
             title={recording ? "Detener grabación" : "Grabar audio"}
@@ -319,24 +319,24 @@ export function MessageInput({
 
           <div className="flex-1 relative">
             {attachment && (
-              <div className="mb-2 rounded-lg border border-[#2d333b] bg-[#0d1117] px-3 py-2 flex items-center justify-between gap-2">
+              <div className="mb-2 rounded-md border border-white/[0.06] bg-[var(--inbox-canvas)] px-3 py-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  {attachment.kind === "image" && <ImageIcon className="h-4 w-4 text-[#58a6ff]" />}
-                  {attachment.kind === "video" && <Video className="h-4 w-4 text-[#58a6ff]" />}
-                  {attachment.kind === "audio" && <Music2 className="h-4 w-4 text-[#58a6ff]" />}
-                  {attachment.kind === "document" && <FileText className="h-4 w-4 text-[#58a6ff]" />}
-                  {attachment.kind === "sticker" && <Sticker className="h-4 w-4 text-[#a371f7]" />}
+                  {attachment.kind === "image" && <ImageIcon className="icon-md text-[var(--accent-text)]" />}
+                  {attachment.kind === "video" && <Video className="icon-md text-[var(--accent-text)]" />}
+                  {attachment.kind === "audio" && <Music2 className="icon-md text-[var(--accent-text)]" />}
+                  {attachment.kind === "document" && <FileText className="icon-md text-[var(--accent-text)]" />}
+                  {attachment.kind === "sticker" && <Sticker className="icon-md text-[var(--chart-4)]" />}
                   <div className="min-w-0">
-                    <p className="text-xs text-[#c9d1d9] truncate">{attachment.filename}</p>
-                    <p className="text-[10px] text-[#484f58] truncate">{attachment.mimeType}</p>
+                    <p className="text-xs text-[var(--text-secondary)] truncate">{attachment.filename}</p>
+                    <p className="text-[10px] text-[var(--text-tertiary)] truncate">{attachment.mimeType}</p>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setAttachment(null)}
-                  className="p-1 rounded-md text-[#8b949e] hover:text-white hover:bg-[#1a1f2e]"
+                  className="p-1 max-sm:min-h-[var(--touch-target)] max-sm:min-w-[var(--touch-target)] rounded-md text-[var(--text-secondary)] transition-[background-color,color] duration-[var(--duration-fast)] hover:text-[var(--text-primary)] hover:bg-[var(--inbox-hover)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X className="icon-sm" />
                 </button>
               </div>
             )}
@@ -346,7 +346,7 @@ export function MessageInput({
               onChange={(e) => setText(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Escribe un mensaje..."
-              className="w-full min-h-[36px] max-h-[120px] resize-none rounded-lg bg-[#0d1117] border border-[#2d333b] text-sm text-white placeholder:text-[#484f58] px-3 py-2 focus:outline-none focus:border-[#388bfd] focus:ring-1 focus:ring-[#388bfd]/30 transition-colors scrollbar-thin"
+              className="w-full min-h-[36px] max-sm:min-h-[var(--touch-target)] max-h-[120px] resize-none rounded-md bg-[var(--inbox-canvas)] border border-white/[0.08] text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] px-3 py-2 transition-colors duration-[var(--duration-fast)] hover:border-white/10 focus:outline-none focus:border-[var(--accent-border)] focus:ring-1 focus:ring-[var(--accent-soft)] disabled:opacity-40 scrollbar-thin"
               rows={1}
               disabled={composerDisabled}
             />
@@ -356,7 +356,7 @@ export function MessageInput({
             onClick={handleSend}
             disabled={requiresTemplate || (!text.trim() && !attachment) || sending || uploading || disabled}
             aria-label="Enviar mensaje"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[#4f46e5] text-white hover:bg-[#6366f1] disabled:opacity-30 disabled:hover:bg-[#4f46e5] transition-colors shrink-0 mb-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="inline-flex h-10 w-10 max-sm:min-h-[var(--touch-target)] max-sm:min-w-[var(--touch-target)] items-center justify-center rounded-md bg-primary text-primary-foreground transition-[background-color,transform,opacity] duration-[var(--duration-fast)] ease-[var(--easing-out)] hover:bg-primary/90 active:scale-[0.96] disabled:opacity-30 disabled:hover:bg-primary shrink-0 mb-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <Send className="h-4 w-4" />
           </button>
@@ -368,7 +368,7 @@ export function MessageInput({
         {inputError && <p className="mt-2 text-xs text-red-400 pl-1">{inputError}</p>}
 
         {!disabled && (
-          <p className="text-[10px] text-[#30363d] mt-1.5 pl-1">
+          <p className="text-[10px] text-[var(--text-tertiary)] mt-1.5 pl-1">
             Escribe / para respuestas rapidas &middot; Enter para enviar &middot; Usa Grabar para voz
           </p>
         )}

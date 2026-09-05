@@ -28,14 +28,14 @@ export function BrandTag({ brandId, brandsById, compact = false, className }: Br
       data-brand-id={brandId || ""}
       title={`Marca: ${label}`}
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none",
+        "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium leading-none",
         fallback
-          ? "border-[#484f58]/30 bg-[#484f58]/10 text-[#8b949e]"
-          : "border-[#8b5cf6]/25 bg-[#8b5cf6]/15 text-[#c4b5fd]",
+          ? "border-white/[0.08] bg-white/[0.04] text-[var(--text-tertiary)]"
+          : "border-white/[0.08] bg-[var(--brand-tag-soft)] text-[var(--brand-tag)]",
         className,
       )}
     >
-      <Building2 className="h-3 w-3 shrink-0" />
+      <Building2 className="icon-xs" />
       {!compact && <span className="truncate max-w-[140px]">{label}</span>}
     </span>
   );

@@ -107,6 +107,7 @@ export function getOAuthUrl(
   options: {
     includeInstagramMessaging?: boolean
     includeAds?: boolean
+    includeWhatsAppCloud?: boolean
     configId?: string
   } = {}
 ): string {
@@ -114,10 +115,25 @@ export function getOAuthUrl(
     'pages_manage_metadata',
     'pages_show_list',
     'pages_messaging',
+    // Lead Ads: leer los envíos de formularios (Centro de clientes potenciales).
+    // pages_manage_ads es requisito de Meta para listar /leadgen_forms.
+    'leads_retrieval',
+    'pages_manage_ads',
+    'pages_read_engagement',
+    // NOTA (2026-08-29): 'pages_manage_posts' NO puede pedirse todavía — en
+    // esta app requiere App Review ("Agregar a revisión" en el caso de uso
+    // Administrar páginas). Incluirlo rompe el diálogo OAuth completo con
+    // "Invalid Scopes: pages_manage_posts" (regresión del Bug 3 fix del
+    // 2026-08-25). Reincorporarlo aquí SOLO cuando Meta apruebe el permiso.
   ]
 
   if (options.includeInstagramMessaging) {
-    scopes.push('instagram_basic', 'instagram_manage_messages')
+    scopes.push(
+      'instagram_basic',
+      'instagram_manage_messages',
+      // Bug 3 fix: publicar en IG requiere content_publish explicito.
+      'instagram_content_publish',
+    )
   }
 
   // Ads and business permissions require separate approval in production.
@@ -125,6 +141,13 @@ export function getOAuthUrl(
   // dedicated combined flow explicitly requests them.
   if (options.includeAds) {
     scopes.push('business_management', 'pages_read_engagement', 'ads_read', 'ads_management')
+  }
+
+  // WhatsApp Business Platform (Cloud API oficial) — templates + envio.
+  // Solo cuando el flujo de connect lo pida explicito (Embedded Signup),
+  // no meter en el flow FB/IG estandar para no ampliar el consent.
+  if (options.includeWhatsAppCloud) {
+    scopes.push('whatsapp_business_management', 'whatsapp_business_messaging')
   }
 
   const params = new URLSearchParams({
@@ -215,6 +238,7 @@ export async function subscribePageToApp(pageId: string, pageAccessToken: string
       'messaging_postbacks',
       'message_deliveries',
       'message_reads',
+      'leadgen',
     ].join(','),
   })
 

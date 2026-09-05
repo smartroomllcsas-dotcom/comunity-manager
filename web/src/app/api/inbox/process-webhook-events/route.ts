@@ -7,6 +7,10 @@ import { processWebhookEventRow } from "@/lib/smarttalk/meta-webhook";
 import { alertDeadLettersIfAny, alertQueueStallIfAny } from "@/lib/smarttalk/dead-letter-alert";
 import type { MetaWebhookPayload } from "@/lib/smarttalk/meta-parser";
 
+// Analizar adjuntos (descarga + transcripción/descripción) y responder con IA
+// puede tardar más que el límite por defecto de la función.
+export const maxDuration = 300;
+
 const MAX_ATTEMPTS = Math.min(
   Math.max(Number(process.env.WEBHOOK_MAX_ATTEMPTS) || 3, 1),
   10

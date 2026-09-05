@@ -332,6 +332,10 @@ export interface AttachmentMeta {
   size_bytes?: number;
   source?: "meta" | "whatsapp" | "respond_io";
   media_error?: string;
+  /** Texto derivado por IA (transcripción / descripción) para el agente. */
+  ai_text?: string;
+  ai_text_source?: string;
+  ai_text_error?: string;
 }
 
 export type MessageContent =
@@ -340,7 +344,7 @@ export type MessageContent =
   | ({ type: "video"; url: string; caption?: string } & AttachmentMeta)
   | ({ type: "audio"; url: string; caption?: string } & AttachmentMeta)
   | ({ type: "document"; url: string; filename: string; caption?: string } & AttachmentMeta)
-  | { type: "template"; template_name: string; language: string; components: unknown[] }
+  | { type: "template"; template_name: string; language: string; components: unknown[]; text?: string }
   | { type: "interactive"; interactive_type: "button" | "list"; body: string; buttons?: { id: string; title: string }[]; sections?: { title: string; rows: { id: string; title: string; description?: string }[] }[] }
   | { type: "location"; latitude: number; longitude: number; name?: string }
   | ({ type: "sticker"; url: string; caption?: string } & AttachmentMeta);
@@ -670,6 +674,8 @@ export interface AIActionConfig {
 export interface AIAgent {
   id: string;
   organization_id: string;
+  /** Empresa/marca dueña del agente (cm_clients.id). null = agente general. */
+  brand_id?: string | null;
   name: string;
   description: string | null;
   emoji: string;

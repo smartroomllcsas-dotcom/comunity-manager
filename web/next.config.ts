@@ -1,7 +1,15 @@
 import type { NextConfig } from 'next'
+import createNextIntlPlugin from 'next-intl/plugin'
+
+// `standalone` output is for Docker/self-hosted images (produces .next/standalone/).
+// On Vercel we need the default output so the Vercel builder can convert routes to lambdas.
+// The VERCEL env var is always set to "1" on Vercel builds.
+const isVercel = process.env.VERCEL === '1'
+
+const withNextIntl = createNextIntlPlugin('./i18n.ts')
 
 const nextConfig: NextConfig = {
-  output: 'standalone',
+  ...(isVercel ? {} : { output: 'standalone' as const }),
   outputFileTracingRoot: process.cwd(),
   serverExternalPackages: ['ffmpeg-static'],
   outputFileTracingIncludes: {
@@ -9,6 +17,18 @@ const nextConfig: NextConfig = {
     '/api/uploads/chat-media': ['./node_modules/ffmpeg-static/**/*'],
   },
   allowedDevOrigins: ['3c2a-38-191-41-53.ngrok-free.app'],
+  async redirects() {
+    return [
+      // La pantalla de automatización pasó de /whatsapp/automatizacion (nombre
+      // confuso, parecía solo WhatsApp) a /automatizacion-leads. Redirigimos la
+      // ruta vieja para no romper enlaces o marcadores guardados.
+      {
+        source: '/whatsapp/automatizacion',
+        destination: '/automatizacion-leads',
+        permanent: true,
+      },
+    ]
+  },
   async headers() {
     return [
       {
@@ -40,4 +60,4 @@ const nextConfig: NextConfig = {
   },
 }
 
-export default nextConfig
+export default withNextIntl(nextConfig)

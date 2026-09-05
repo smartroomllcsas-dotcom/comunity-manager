@@ -7,6 +7,7 @@ import {
 } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 import { getAgentBrandIds, isBrandScopedMember } from "@/lib/smarttalk/brand-scope";
+import { sendInvitationEmail } from "@/lib/notify/invitation-email";
 
 type MemberType = "agency_user" | "brand_admin" | "brand_advisor";
 
@@ -267,6 +268,23 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "There is already a pending invitation for this email" }, { status: 409 });
   }
 
+  // A used/cancelled invitation still occupies the unique
+  // (organization_id, email) slot — clear it so re-inviting works.
+  const { data: staleInvites } = await admin
+    .from("invitations")
+    .select("id")
+    .eq("organization_id", requester.organization_id)
+    .eq("email", email)
+    .neq("status", "pending");
+  const staleIds = (staleInvites || []).map((invite) => invite.id as string);
+  if (staleIds.length > 0) {
+    await admin
+      .from("invitation_brand_assignments")
+      .delete()
+      .in("invitation_id", staleIds);
+    await admin.from("invitations").delete().in("id", staleIds);
+  }
+
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + 7);
   const { data: invitation, error } = await admin
@@ -300,8 +318,36 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Send the invitation email (best-effort: the invitation is already
+  // created, so a mail failure must not fail the request — the UI can
+  // still share the link manually).
+  const appUrl =
+    process.env.NEXT_PUBLIC_APP_URL?.trim() || request.nextUrl.origin;
+  const inviteUrl = `${appUrl.replace(/\/$/, "")}/invite/${invitation.id}`;
+
+  const { data: org } = await admin
+    .from("organizations")
+    .select("name")
+    .eq("id", requester.organization_id)
+    .maybeSingle();
+  const orgName = org?.name || "Community Manager";
+
+  const emailResult = await sendInvitationEmail({
+    to: email,
+    orgName,
+    inviteUrl,
+    expiresAt,
+  });
+  if (!emailResult.ok) {
+    console.error("[invitations] email send failed:", emailResult.error);
+  }
+
   return Response.json(
-    { invitation: { ...invitation, brand_ids: brandIds } },
+    {
+      invitation: { ...invitation, brand_ids: brandIds },
+      email_sent: emailResult.ok,
+      ...(emailResult.ok ? {} : { email_error: emailResult.error }),
+    },
     { status: 201 }
   );
 }
