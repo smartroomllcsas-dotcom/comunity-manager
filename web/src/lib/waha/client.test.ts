@@ -8,6 +8,7 @@ function makeFetch(status: number, body: unknown) {
   return vi.fn().mockResolvedValue({
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers({ "content-type": "application/json" }),
     text: async () => JSON.stringify(body),
     json: async () => body,
   });

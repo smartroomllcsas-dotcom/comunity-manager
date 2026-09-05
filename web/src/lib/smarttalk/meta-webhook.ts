@@ -12,6 +12,8 @@ import { BILLING_FEATURES } from "@/lib/billing/features";
 import { upsertRestrictedContact } from "@/lib/smarttalk/contact-privacy";
 import { recordContactOverageEvent } from "@/lib/smarttalk/contact-overage";
 import { processLeadgenChange } from "@/lib/smarttalk/lead-forms";
+import { processWahaWebhookEvent } from "@/lib/waha/webhook-handler";
+import type { WahaMessageEvent } from "@/lib/waha/types";
 import {
   buildDisplayName,
   extractContactId,
@@ -968,6 +970,39 @@ export async function processWebhookEventRow(event: {
 }): Promise<{ ok: boolean; processed?: number; error?: string }> {
   const admin = createAdminClient("smarttalk");
   const channel = event.channel as MetaChannelKind;
+
+  // WAHA no usa el formato Meta (sin payload.entry): despachar a su handler
+  // propio. Sin este branch, persistMessengerLikeWebhook procesaba 0 entradas
+  // sin lanzar error y el evento quedaba "processed" sin crear mensajes.
+  if (event.channel === "waha") {
+    const result = await processWahaWebhookEvent({
+      id: event.id,
+      payload: event.payload as unknown as WahaMessageEvent,
+      admin,
+    });
+    if (result.ok) {
+      await admin
+        .from("webhook_events")
+        .update({ status: "processed", processed_at: new Date().toISOString() })
+        .eq("id", event.id);
+      return { ok: true, processed: 1 };
+    }
+    console.error(`[meta-webhook:waha] processing failed`, result.error);
+    const { data: current } = await admin
+      .from("webhook_events")
+      .select("attempts")
+      .eq("id", event.id)
+      .single();
+    await admin
+      .from("webhook_events")
+      .update({
+        status: "failed",
+        attempts: (current?.attempts ?? 0) + 1,
+        last_error: result.error.slice(0, 500),
+      })
+      .eq("id", event.id);
+    return { ok: false, error: result.error };
+  }
 
   try {
     const processed = await persistMessengerLikeWebhook(channel, event.payload);
