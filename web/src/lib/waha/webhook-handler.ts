@@ -124,11 +124,20 @@ export async function processWahaWebhookEvent(
       if (dup) return { ok: true };
     }
 
-    // Look up channel via session name
+    // Look up channel via waha_sessions (session_name lives there, not in channels)
+    const { data: session } = await admin
+      .from("waha_sessions")
+      .select("channel_id")
+      .eq("session_name", sessionName)
+      .maybeSingle();
+
+    const sessionChannelId = (session as { channel_id?: string } | null)?.channel_id;
+    if (!sessionChannelId) return { ok: false, error: `no waha session for name ${sessionName}` };
+
     const { data: channel } = await admin
       .from("channels")
       .select("id, organization_id, brand_id")
-      .eq("session_name", sessionName)
+      .eq("id", sessionChannelId)
       .maybeSingle();
 
     const orgId = (channel as { organization_id: string } | null)?.organization_id;
