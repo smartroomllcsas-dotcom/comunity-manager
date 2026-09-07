@@ -103,9 +103,12 @@ export async function ensureReminderTemplate(
   const components = [
     {
       type: "BODY",
+      // Pide una respuesta: así el cliente reabre la ventana de 24 h y el
+      // asesor o el agente pueden escribirle libremente aunque hayan pasado días.
       text:
         `Hola {{nombre}} 👋 Te recordamos tu reunión con ${brandName} {{cuando}}. ` +
-        `Te contactaremos al número que dejaste al agendar. Si necesitas reprogramar, respóndenos por aquí.`,
+        `Te contactaremos al número que dejaste al agendar. ` +
+        `¿Confirmas que estarás? Responde SÍ para confirmar, o cuéntanos si prefieres reprogramar.`,
       example: {
         body_text_named_params: [
           { param_name: "nombre", example: "Ana" },
