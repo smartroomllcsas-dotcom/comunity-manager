@@ -62,6 +62,10 @@
     {
       "path": "/api/cron/waha-watchdog",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/waha-media-retry",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

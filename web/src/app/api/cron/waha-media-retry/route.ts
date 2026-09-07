@@ -1,0 +1,128 @@
+/**
+ * Cron (cada 10 min): repara mensajes del canal WhatsApp por QR (WAHA).
+ *
+ * 1. Mensajes guardados como `{ text }` sin `type` (bug del 4–7 sep): se les
+ *    pone `type: "text"` para que el Inbox los muestre en vez de "[undefined]".
+ * 2. Adjuntos que quedaron sin descargar (media_note / media_error /
+ *    provider_url sin storage_path): se busca la URL en el evento de webhook
+ *    original y se descarga desde WAHA con la X-Api-Key del servidor.
+ *
+ * Idempotente y acotado por corrida.
+ */
+import { NextRequest, NextResponse } from "next/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { buildWahaAttachmentContent } from "@/lib/waha/media";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 120;
+
+const TEXT_FIX_LIMIT = 500;
+const MEDIA_FIX_LIMIT = 25;
+
+type MsgRow = {
+  id: string;
+  wa_message_id: string | null;
+  type: string;
+  content: Record<string, unknown> | null;
+  conversation: { channel_id: string; organization_id: string; brand_id: string; channel: { type: string } } | null;
+};
+
+export async function GET(request: NextRequest) {
+  const authHeader = request.headers.get("authorization");
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const admin = createAdminClient("smarttalk");
+
+  // 1) Texto sin type.
+  const { data: textRows } = await admin
+    .from("messages")
+    .select("id, content, conversation:conversations!inner(channel:channels!inner(type))")
+    .is("content->>type", null)
+    .eq("conversation.channel.type", "waha")
+    .limit(TEXT_FIX_LIMIT);
+  let textFixed = 0;
+  for (const row of (textRows || []) as Array<{ id: string; content: Record<string, unknown> | null }>) {
+    const c = row.content || {};
+    if (c.media_note) continue; // los adjuntos viejos se tratan en el paso 2
+    await admin.from("messages").update({ content: { type: "text", text: String(c.text ?? "") } }).eq("id", row.id);
+    textFixed += 1;
+  }
+
+  // 2) Adjuntos sin descargar.
+  const { data: mediaRows } = await admin
+    .from("messages")
+    .select("id, wa_message_id, type, content, conversation:conversations!inner(channel_id, organization_id, brand_id, channel:channels!inner(type))")
+    .eq("conversation.channel.type", "waha")
+    .or("content->>media_note.not.is.null,content->>media_error.not.is.null")
+    .order("created_at", { ascending: false })
+    .limit(MEDIA_FIX_LIMIT);
+
+  let mediaFixed = 0;
+  let mediaFailed = 0;
+  const pending = ((mediaRows || []) as unknown as MsgRow[]).filter((m) => !m.content?.storage_path);
+
+  // URLs de los adjuntos, desde los eventos de webhook originales.
+  const ids = pending.map((m) => m.wa_message_id).filter((v): v is string => Boolean(v));
+  const mediaByWaId = new Map<string, { url?: string | null; mimetype?: string | null; filename?: string | null; body?: string }>();
+  if (ids.length > 0) {
+    const { data: events } = await admin
+      .from("webhook_events")
+      .select("payload")
+      .eq("channel", "waha")
+      .order("created_at", { ascending: false })
+      .limit(600);
+    for (const ev of events || []) {
+      const p = ((ev.payload as { payload?: Record<string, unknown> } | null)?.payload || {}) as Record<string, unknown>;
+      const id = typeof p.id === "string" ? p.id : null;
+      const media = p.media as { url?: string; mimetype?: string; filename?: string } | null | undefined;
+      if (id && media?.url && ids.includes(id) && !mediaByWaId.has(id)) {
+        mediaByWaId.set(id, { ...media, body: typeof p.body === "string" ? p.body : "" });
+      }
+    }
+  }
+
+  for (const m of pending) {
+    const conv = m.conversation;
+    const c = m.content || {};
+    const fromEvent = m.wa_message_id ? mediaByWaId.get(m.wa_message_id) : undefined;
+    const providerUrl = (typeof c.provider_url === "string" && c.provider_url) || fromEvent?.url || null;
+    if (!conv || !providerUrl) {
+      mediaFailed += 1;
+      continue;
+    }
+    const rebuilt = await buildWahaAttachmentContent({
+      organizationId: conv.organization_id,
+      brandId: conv.brand_id,
+      media: {
+        url: providerUrl,
+        mimetype: (typeof c.mime_type === "string" && c.mime_type) || fromEvent?.mimetype || null,
+        filename: (typeof c.filename === "string" && c.filename) || fromEvent?.filename || null,
+      },
+      caption: (typeof c.caption === "string" && c.caption) || fromEvent?.body || null,
+      providerType: m.type !== "text" ? m.type : null,
+    });
+    if (!rebuilt.storage_path) {
+      mediaFailed += 1;
+      continue;
+    }
+    await admin.from("messages").update({ type: rebuilt.type, content: rebuilt }).eq("id", m.id);
+    mediaFixed += 1;
+    try {
+      const { understandInboundMedia } = await import("@/lib/chatbot/media-understanding");
+      await understandInboundMedia({
+        messageId: m.id,
+        organizationId: conv.organization_id,
+        brandId: conv.brand_id,
+        channelId: conv.channel_id,
+        content: rebuilt,
+      });
+    } catch {
+      // best-effort
+    }
+  }
+
+  return NextResponse.json({ ok: true, textFixed, mediaFixed, mediaFailed, mediaPending: pending.length });
+}

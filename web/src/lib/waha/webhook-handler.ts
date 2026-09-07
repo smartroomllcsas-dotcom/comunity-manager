@@ -1,6 +1,7 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySupabaseClient = Pick<import("@supabase/supabase-js").SupabaseClient<any, any, any>, "from">;
 import type { WahaMessageEvent } from "./types";
+import { attachmentTypeFromMime, buildWahaAttachmentContent } from "./media";
 import { checkBillingFeature } from "@/lib/billing/service";
 import { BILLING_FEATURES } from "@/lib/billing/features";
 
@@ -88,7 +89,10 @@ export async function processWahaWebhookEvent(
       type?: string;
       timestamp?: number;
       notifyName?: string;
-      _data?: { key?: { remoteJidAlt?: string }; pushName?: string };
+      hasMedia?: boolean;
+      media?: { url?: string | null; mimetype?: string | null; filename?: string | null } | null;
+      location?: { latitude?: number; longitude?: number; description?: string } | null;
+      _data?: { key?: { remoteJidAlt?: string }; pushName?: string; type?: string };
     };
 
     if (p.fromMe) return { ok: true }; // outbound echo
@@ -229,19 +233,47 @@ export async function processWahaWebhookEvent(
       conversationId = (newConvo as { id: string }).id;
     }
 
-    // 3. Insert message
-    const msgType = mapWahaType(p.type);
+    // 3. Insert message.
+    // WAHA no siempre manda `type`: con adjunto viene `hasMedia` + `media.mimetype`.
+    // Antes se guardaba `{ text }` sin `type` (el Inbox mostraba "[undefined]")
+    // y los adjuntos quedaban como texto vacío. Ahora el contenido tiene la
+    // misma forma que el de Meta y el adjunto se descarga y guarda.
     const bodyText = typeof p.body === "string" ? p.body : "";
-    const content =
-      msgType === "text"
-        ? { text: bodyText }
-        : { text: bodyText || `[${msgType}]`, media_note: "media_not_downloaded" };
+    const hasMedia = Boolean(p.hasMedia && p.media?.url) || Boolean(p.media?.mimetype);
+    const mappedType = mapWahaType(p.type ?? p._data?.type);
+    const msgType: ReturnType<typeof mapWahaType> = hasMedia
+      ? mappedType === "text"
+        ? attachmentTypeFromMime(p.media?.mimetype)
+        : mappedType
+      : p.location && typeof p.location.latitude === "number"
+        ? "location"
+        : "text";
+
+    let content: Record<string, unknown>;
+    if (msgType === "location" && p.location) {
+      content = {
+        type: "location",
+        latitude: p.location.latitude,
+        longitude: p.location.longitude,
+        ...(p.location.description ? { name: p.location.description } : {}),
+      };
+    } else if (msgType !== "text") {
+      content = (await buildWahaAttachmentContent({
+        organizationId: orgId,
+        brandId,
+        media: p.media || {},
+        caption: bodyText || null,
+        providerType: msgType,
+      })) as unknown as Record<string, unknown>;
+    } else {
+      content = { type: "text", text: bodyText };
+    }
 
     const receivedAt = p.timestamp
       ? new Date(p.timestamp * 1000).toISOString()
       : new Date().toISOString();
 
-    const { error: mErr } = await admin
+    const { data: insertedMsg, error: mErr } = await admin
       .from("messages")
       .insert({
         conversation_id: conversationId,
@@ -253,11 +285,33 @@ export async function processWahaWebhookEvent(
         status: "delivered",
         is_bot: false,
         created_at: receivedAt,
-      });
+      })
+      .select("id")
+      .single();
     if (mErr) return { ok: false, error: `message insert: ${mErr.message}` };
 
+    // Adjunto: texto para el agente (transcripción/descripción). Best-effort.
+    if (msgType !== "text" && msgType !== "location" && (insertedMsg as { id?: string } | null)?.id) {
+      try {
+        const { understandInboundMedia } = await import("@/lib/chatbot/media-understanding");
+        await understandInboundMedia({
+          messageId: (insertedMsg as { id: string }).id,
+          organizationId: orgId,
+          brandId,
+          channelId,
+          content: content as unknown as import("@/lib/inbox/attachments").AttachmentContent,
+        });
+      } catch (e) {
+        console.warn("[waha] análisis de adjunto falló:", e);
+      }
+    }
+
     // 4. Update conversation preview + unread_count
-    const preview = (bodyText || `[${msgType}]`).slice(0, 100);
+    const previewLabel: Record<string, string> = {
+      image: "📷 Imagen", video: "🎬 Video", audio: "🎤 Audio", document: "📄 Documento",
+      sticker: "Sticker", location: "📍 Ubicación",
+    };
+    const preview = (bodyText || previewLabel[msgType] || `[${msgType}]`).slice(0, 100);
     await admin
       .from("conversations")
       .update({
