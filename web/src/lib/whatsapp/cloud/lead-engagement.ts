@@ -12,6 +12,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getWabaCredentialsForClient } from "@/lib/whatsapp/cloud/business-account";
 import { WabaCloudClient } from "@/lib/whatsapp/cloud/client";
 import type { WaComponent } from "@/lib/whatsapp/cloud/types";
+import {
+  getFirstTouchUtilitySettings,
+  isMarketingRestrictedError,
+  phoneNeedsUtility,
+} from "@/lib/whatsapp/cloud/first-touch-utility";
 
 export interface LeadAgentSettings {
   id: string;
@@ -304,111 +309,51 @@ export async function sendFirstTouchTemplate(
     if (!settings.first_touch_template_id)
       return { sent: false, reason: "no_template_configured" };
 
-    const { data: template } = await supabaseAdmin
-      .from("cm_wa_templates")
-      .select("id, whatsapp_account_id, name, language, status, components, parameter_format")
-      .eq("id", settings.first_touch_template_id)
-      .eq("client_id", input.clientId)
-      .maybeSingle();
-    if (!template) return { sent: false, reason: "template_not_found" };
-    if (template.status !== "APPROVED")
-      return { sent: false, reason: `template_${String(template.status).toLowerCase()}` };
-
-    // Límite de seguridad por hora (por cuenta)
-    const oneHourAgo = new Date(Date.now() - 3600_000).toISOString();
-    const { count } = await supabaseAdmin
-      .from("cm_wa_template_sends")
-      .select("id", { count: "exact", head: true })
-      .eq("whatsapp_account_id", template.whatsapp_account_id)
-      .gte("created_at", oneHourAgo);
-    if ((count ?? 0) >= settings.max_sends_per_hour)
-      return { sent: false, reason: "rate_limited" };
-
     const to = input.phone.replace(/[^\d]/g, "");
     if (to.length < 7) return { sent: false, reason: "invalid_phone" };
 
-    const creds = await getWabaCredentialsForClient(
-      input.clientId,
-      template.whatsapp_account_id
-    );
-    const client = new WabaCloudClient(
-      creds.account.waba_id,
-      creds.account.phone_number_id,
-      creds.token
-    );
-
-    const components = (template.components ?? []) as WaComponent[];
     const firstName = (input.leadName || "").trim().split(/\s+/)[0] || "Hola";
     const topic = (input.topic || "").trim() || "tu proyecto";
+    const values = { nombre: firstName, tema: topic };
 
-    const valueFor = (name: string, index: number) => {
-      const n = name.toLowerCase();
-      if (/nombre|name/.test(n)) return firstName;
-      if (/tema|topic|campa|proyecto|asunto/.test(n)) return topic;
-      return index === 0 ? firstName : topic;
-    };
+    // Plantilla UTILITY para países donde Meta no entrega marketing (+1…):
+    // se usa directamente; en el resto, como reintento si Meta rechaza.
+    const utility = await getFirstTouchUtilitySettings(input.clientId);
+    const utilityReady = utility.enabled && utility.template_id;
+    const preferUtility = utilityReady && phoneNeedsUtility(to, utility.country_codes);
 
-    let sendComponents: unknown[] = [];
-    const renderValues: Record<string, string> = {};
-    if (template.parameter_format === "NAMED") {
-      const names = bodyParamNames(components);
-      if (names.length > 0) {
-        sendComponents = [
-          {
-            type: "body",
-            parameters: names.map((name, i) => {
-              renderValues[name] = valueFor(name, i);
-              return { type: "text", parameter_name: name, text: renderValues[name] };
-            }),
-          },
-        ];
-      }
-    } else {
-      const n = bodyPositionalCount(components);
-      if (n > 0) {
-        sendComponents = [
-          {
-            type: "body",
-            parameters: Array.from({ length: n }, (_v, i) => {
-              renderValues[String(i + 1)] = i === 0 ? firstName : topic;
-              return { type: "text", text: renderValues[String(i + 1)] };
-            }),
-          },
-        ];
-      }
+    if (preferUtility) {
+      const viaUtility = await sendBrandTemplate({
+        clientId: input.clientId,
+        templateId: utility.template_id as string,
+        phone: to,
+        values,
+        maxSendsPerHour: settings.max_sends_per_hour,
+      });
+      if (viaUtility.sent) return viaUtility;
+      // Si la Utility aún no está aprobada, se intenta la normal (puede fallar
+      // por país, pero el motivo queda registrado).
+      if (!/^template_/.test(viaUtility.reason)) return viaUtility;
     }
 
-    const resp = await client.sendTemplateMessage({
-      to,
-      templateName: template.name,
-      language: template.language,
-      components: sendComponents,
-    });
-    const wamid = (resp as { messages?: Array<{ id?: string }> }).messages?.[0]?.id;
-
-    await supabaseAdmin.from("cm_wa_template_sends").insert({
-      client_id: input.clientId,
-      whatsapp_account_id: template.whatsapp_account_id,
-      template_id: template.id,
-      to_phone: to,
-      template_name: template.name,
-      language: template.language,
-      wamid: wamid ?? null,
-      status: "sent",
-    });
-
-    await recordFirstTouchInInbox({
+    const viaMarketing = await sendBrandTemplate({
       clientId: input.clientId,
-      to,
-      wamid,
-      phoneNumberId: creds.account.phone_number_id,
-      templateName: template.name,
-      language: template.language,
-      components: sendComponents,
-      renderedText: renderBody(components, renderValues),
+      templateId: settings.first_touch_template_id,
+      phone: to,
+      values,
+      maxSendsPerHour: settings.max_sends_per_hour,
     });
-
-    return { sent: true, wamid, templateName: template.name };
+    if (viaMarketing.sent || preferUtility || !utilityReady) return viaMarketing;
+    if (isMarketingRestrictedError(viaMarketing.reason)) {
+      return sendBrandTemplate({
+        clientId: input.clientId,
+        templateId: utility.template_id as string,
+        phone: to,
+        values,
+        maxSendsPerHour: settings.max_sends_per_hour,
+      });
+    }
+    return viaMarketing;
   } catch (e) {
     console.error("[lead-engagement] first touch failed:", e);
     return {
