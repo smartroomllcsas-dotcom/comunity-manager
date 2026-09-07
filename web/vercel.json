@@ -66,6 +66,14 @@
     {
       "path": "/api/cron/waha-media-retry",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/booking-reminders",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/reengage-leads",
+      "schedule": "35 * * * *"
     }
   ]
 }

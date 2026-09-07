@@ -20,6 +20,12 @@ import {
   getChannelInstructions,
   setChannelInstructions,
 } from "@/lib/whatsapp/cloud/channel-instructions";
+import {
+  REMINDER_TEMPLATE_NAME,
+  ensureReminderTemplate,
+  getBookingReminderSettings,
+  setBookingReminderSettings,
+} from "@/lib/whatsapp/cloud/booking-reminder";
 
 const roleValues = AGENT_ROLES.map((o) => o.value) as [string, ...string[]];
 const toneValues = AGENT_TONES.map((o) => o.value) as [string, ...string[]];
@@ -46,10 +52,23 @@ const putSchema = z.object({
       messenger: z.string().max(CHANNEL_INSTRUCTION_MAX).nullable().optional(),
     })
     .optional(),
+  // Recordatorio de reunión (N minutos antes de la cita agendada en Cal.com).
+  booking_reminder: z
+    .object({
+      enabled: z.boolean().optional(),
+      template_id: z.string().uuid().nullable().optional(),
+      minutes_before: z.number().int().min(5).max(1440).optional(),
+    })
+    .optional(),
+  /** Crear en Meta la plantilla de recordatorio si la marca no la tiene. */
+  create_reminder_template: z.boolean().optional(),
 });
 
 async function loadPayload(clientId: string) {
-  const channel_instructions = await getChannelInstructions(clientId);
+  const [channel_instructions, booking_reminder] = await Promise.all([
+    getChannelInstructions(clientId),
+    getBookingReminderSettings(clientId),
+  ]);
   const [{ data: settings }, { data: templates }] = await Promise.all([
     supabaseAdmin
       .from("cm_lead_agent_settings")
@@ -63,7 +82,9 @@ async function loadPayload(clientId: string) {
       .order("created_at", { ascending: false }),
   ]);
   return {
-    settings: settings ? { ...(settings as Record<string, unknown>), channel_instructions } : null,
+    settings: settings
+      ? { ...(settings as Record<string, unknown>), channel_instructions, booking_reminder }
+      : null,
     templates: templates ?? [],
   };
 }
@@ -87,13 +108,42 @@ export async function PUT(request: NextRequest) {
       { status: 422 }
     );
   }
-  const { clientId, channel_instructions, ...fields } = parsed.data;
+  const { clientId, channel_instructions, booking_reminder, create_reminder_template, ...fields } = parsed.data;
 
   const access = await getCmClientAccess(request, clientId);
   if (!access) return NextResponse.json({ error: "No autorizado para esta marca" }, { status: 403 });
 
   if (channel_instructions !== undefined) {
     const saved = await setChannelInstructions(access.clientId, channel_instructions);
+    if (!saved.ok) return NextResponse.json({ error: saved.error }, { status: 500 });
+  }
+
+  let reminderTemplateNotice: string | null = null;
+  if (create_reminder_template) {
+    const { data: brand } = await supabaseAdmin.from("cm_clients").select("name").eq("id", access.clientId).maybeSingle();
+    const created = await ensureReminderTemplate(access.clientId, (brand?.name as string) || "nuestro equipo");
+    if ("error" in created) return NextResponse.json({ error: created.error }, { status: 400 });
+    reminderTemplateNotice = created.created
+      ? `Plantilla "${REMINDER_TEMPLATE_NAME}" enviada a Meta para aprobación (estado ${created.status}).`
+      : `La plantilla "${REMINDER_TEMPLATE_NAME}" ya existía (estado ${created.status}).`;
+    // Se deja seleccionada como plantilla de recordatorio.
+    const current = await getBookingReminderSettings(access.clientId);
+    await setBookingReminderSettings(access.clientId, { ...current, template_id: created.id });
+  }
+
+  if (booking_reminder !== undefined) {
+    const current = await getBookingReminderSettings(access.clientId);
+    const merged = { ...current, ...booking_reminder };
+    if (merged.template_id) {
+      const { data: tpl } = await supabaseAdmin
+        .from("cm_wa_templates")
+        .select("id")
+        .eq("id", merged.template_id)
+        .eq("client_id", access.clientId)
+        .maybeSingle();
+      if (!tpl) return NextResponse.json({ error: "La plantilla de recordatorio no pertenece a esta marca" }, { status: 422 });
+    }
+    const saved = await setBookingReminderSettings(access.clientId, merged);
     if (!saved.ok) return NextResponse.json({ error: saved.error }, { status: 500 });
   }
 
@@ -124,5 +174,5 @@ export async function PUT(request: NextRequest) {
     );
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json(await loadPayload(access.clientId));
+  return NextResponse.json({ ...(await loadPayload(access.clientId)), notice: reminderTemplateNotice });
 }

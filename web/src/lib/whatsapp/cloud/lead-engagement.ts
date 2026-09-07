@@ -172,6 +172,125 @@ export type FirstTouchResult =
   | { sent: false; reason: string };
 
 /**
+ * Envío genérico de una plantilla APROBADA de la marca a un número, con
+ * valores por nombre de variable. Lo usan el primer contacto, la retoma a
+ * las 24 h y el recordatorio de reunión. Respeta el límite por hora de la
+ * marca, registra el envío en cm_wa_template_sends y lo deja en el chat.
+ */
+export async function sendBrandTemplate(input: {
+  clientId: string;
+  templateId: string;
+  phone: string;
+  /** Valores por nombre ({{nombre}}, {{tema}}, {{hora}}…); para posicionales se usan en orden. */
+  values: Record<string, string>;
+  /** Sin límite por hora (recordatorios: son pocos y con hora exacta). */
+  skipRateLimit?: boolean;
+  maxSendsPerHour?: number;
+}): Promise<FirstTouchResult> {
+  try {
+    const { data: template } = await supabaseAdmin
+      .from("cm_wa_templates")
+      .select("id, whatsapp_account_id, name, language, status, components, parameter_format")
+      .eq("id", input.templateId)
+      .eq("client_id", input.clientId)
+      .maybeSingle();
+    if (!template) return { sent: false, reason: "template_not_found" };
+    if (template.status !== "APPROVED")
+      return { sent: false, reason: `template_${String(template.status).toLowerCase()}` };
+
+    if (!input.skipRateLimit) {
+      const oneHourAgo = new Date(Date.now() - 3600_000).toISOString();
+      const { count } = await supabaseAdmin
+        .from("cm_wa_template_sends")
+        .select("id", { count: "exact", head: true })
+        .eq("whatsapp_account_id", template.whatsapp_account_id)
+        .gte("created_at", oneHourAgo);
+      if ((count ?? 0) >= (input.maxSendsPerHour ?? 20)) return { sent: false, reason: "rate_limited" };
+    }
+
+    const to = input.phone.replace(/[^\d]/g, "");
+    if (to.length < 7) return { sent: false, reason: "invalid_phone" };
+
+    const creds = await getWabaCredentialsForClient(input.clientId, template.whatsapp_account_id);
+    const client = new WabaCloudClient(creds.account.waba_id, creds.account.phone_number_id, creds.token);
+
+    const components = (template.components ?? []) as WaComponent[];
+    const ordered = Object.values(input.values);
+    const valueFor = (name: string, index: number) => {
+      if (input.values[name] !== undefined) return input.values[name];
+      const n = name.toLowerCase();
+      const byAlias = Object.entries(input.values).find(([k]) => n.includes(k.toLowerCase()));
+      return byAlias?.[1] ?? ordered[index] ?? "";
+    };
+
+    let sendComponents: unknown[] = [];
+    const renderValues: Record<string, string> = {};
+    if (template.parameter_format === "NAMED") {
+      const names = bodyParamNames(components);
+      if (names.length > 0) {
+        sendComponents = [
+          {
+            type: "body",
+            parameters: names.map((name, i) => {
+              renderValues[name] = valueFor(name, i);
+              return { type: "text", parameter_name: name, text: renderValues[name] };
+            }),
+          },
+        ];
+      }
+    } else {
+      const n = bodyPositionalCount(components);
+      if (n > 0) {
+        sendComponents = [
+          {
+            type: "body",
+            parameters: Array.from({ length: n }, (_v, i) => {
+              renderValues[String(i + 1)] = ordered[i] ?? "";
+              return { type: "text", text: renderValues[String(i + 1)] };
+            }),
+          },
+        ];
+      }
+    }
+
+    const resp = await client.sendTemplateMessage({
+      to,
+      templateName: template.name,
+      language: template.language,
+      components: sendComponents,
+    });
+    const wamid = (resp as { messages?: Array<{ id?: string }> }).messages?.[0]?.id;
+
+    await supabaseAdmin.from("cm_wa_template_sends").insert({
+      client_id: input.clientId,
+      whatsapp_account_id: template.whatsapp_account_id,
+      template_id: template.id,
+      to_phone: to,
+      template_name: template.name,
+      language: template.language,
+      wamid: wamid ?? null,
+      status: "sent",
+    });
+
+    await recordFirstTouchInInbox({
+      clientId: input.clientId,
+      to,
+      wamid,
+      phoneNumberId: creds.account.phone_number_id,
+      templateName: template.name,
+      language: template.language,
+      components: sendComponents,
+      renderedText: renderBody(components, renderValues),
+    });
+
+    return { sent: true, wamid, templateName: template.name };
+  } catch (e) {
+    console.error("[lead-engagement] template send failed:", e);
+    return { sent: false, reason: e instanceof Error ? e.message.slice(0, 200) : "unknown_error" };
+  }
+}
+
+/**
  * Envía la plantilla de primer contacto configurada para la marca.
  * Rellena variables: los nombres tipo "nombre" reciben el nombre del lead,
  * los tipo "tema"/"campaña" el topic; el resto usa el primer valor útil.

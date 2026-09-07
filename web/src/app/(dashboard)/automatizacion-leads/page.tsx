@@ -61,6 +61,8 @@ interface Settings {
   response_delay_seconds: number;
   /** Instrucciones extra del agente por canal (misma empresa, distinto trato). */
   channel_instructions: { whatsapp?: string | null; instagram?: string | null; messenger?: string | null };
+  /** Recordatorio de reunión (Cal.com) por WhatsApp, N minutos antes. */
+  booking_reminder: { enabled: boolean; template_id: string | null; minutes_before: number };
 }
 
 const CHANNEL_INSTRUCTION_FIELDS: Array<{
@@ -117,6 +119,7 @@ const emptySettings: Settings = {
   brochure_mode: "off",
   response_delay_seconds: 0,
   channel_instructions: {},
+  booking_reminder: { enabled: false, template_id: null, minutes_before: 60 },
 };
 
 export default function LeadAutomationPage() {
@@ -256,6 +259,28 @@ export default function LeadAutomationPage() {
     }
   }
 
+  const [creatingReminder, setCreatingReminder] = useState(false);
+  async function handleCreateReminderTemplate() {
+    if (!clientId) return;
+    setCreatingReminder(true);
+    try {
+      const res = await fetch("/api/whatsapp/cloud/lead-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, create_reminder_template: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "No se pudo crear la plantilla");
+      setSettings({ ...emptySettings, ...(data.settings ?? {}) });
+      setTemplates(Array.isArray(data.templates) ? data.templates : []);
+      toast.success(data.notice || "Plantilla creada");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setCreatingReminder(false);
+    }
+  }
+
   const approved = templates.filter((t) => t.status === "APPROVED");
   const templateLabel = (t: TemplateOption) =>
     `${t.name} (${t.language})${t.status !== "APPROVED" ? ` — ${t.status}` : ""}${t.tag ? ` · ${t.tag}` : ""}`;
@@ -370,7 +395,90 @@ export default function LeadAutomationPage() {
                   />
                   <span className="text-xs text-[#8b949e]">horas sin respuesta</span>
                 </div>
+                <p className="mt-1 text-[11px] text-[#8b949e]">
+                  Se envía una sola vez por cliente, sólo si el último mensaje fue nuestro y no está en
+                  Perdido, Cliente ni con reunión agendada. Corre cada hora.
+                </p>
               </div>
+
+              {/* Recordatorio de reunión */}
+              <div className="rounded-md border border-[#2d333b] bg-[#0d1117]/60 p-3 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-white">Recordatorio de reunión</p>
+                    <p className="text-xs text-[#8b949e]">
+                      Cuando el cliente agenda en Cal.com, se le envía esta plantilla antes de la cita.
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5 accent-blue-500"
+                    checked={settings.booking_reminder?.enabled ?? false}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        booking_reminder: { ...(s.booking_reminder || emptySettings.booking_reminder), enabled: e.target.checked },
+                      }))
+                    }
+                  />
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
+                  <select
+                    className={selectCls}
+                    value={settings.booking_reminder?.template_id ?? ""}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        booking_reminder: {
+                          ...(s.booking_reminder || emptySettings.booking_reminder),
+                          template_id: e.target.value || null,
+                        },
+                      }))
+                    }
+                  >
+                    <option value="">— plantilla de recordatorio —</option>
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id} disabled={t.status !== "APPROVED"}>
+                        {templateLabel(t)}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={5}
+                      max={1440}
+                      className="w-20 rounded-md bg-[#0d1117] border border-[#2d333b] px-2 py-1 text-sm text-white"
+                      value={settings.booking_reminder?.minutes_before ?? 60}
+                      onChange={(e) =>
+                        setSettings((s) => ({
+                          ...s,
+                          booking_reminder: {
+                            ...(s.booking_reminder || emptySettings.booking_reminder),
+                            minutes_before: Math.max(5, Math.min(1440, Number(e.target.value) || 60)),
+                          },
+                        }))
+                      }
+                    />
+                    <span className="text-xs text-[#8b949e]">min antes</span>
+                  </div>
+                </div>
+                {!templates.some((t) => t.name === "recordatorio_reunion") && (
+                  <button
+                    type="button"
+                    onClick={handleCreateReminderTemplate}
+                    disabled={creatingReminder}
+                    className="rounded-md border border-[#2d333b] px-3 py-1.5 text-xs text-white hover:bg-[#21262d] disabled:opacity-50"
+                  >
+                    {creatingReminder ? "Creando…" : "Crear plantilla \"recordatorio_reunion\" en Meta"}
+                  </button>
+                )}
+                <p className="text-[11px] text-[#8b949e]">
+                  La plantilla es de categoría Utility (Meta la entrega en todos los países). Queda en
+                  revisión hasta que Meta la apruebe; el envío se activa solo cuando esté aprobada.
+                </p>
+              </div>
+
               {approved.length === 0 && (
                 <p className="text-xs text-amber-300">
                   Esta marca aún no tiene plantillas APROBADAS — créalas en Plantillas y espera
