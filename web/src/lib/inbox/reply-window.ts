@@ -62,7 +62,9 @@ export function getReplyWindow(
   const last = lastInboundAt ? new Date(lastInboundAt) : null;
   const validLast = last && !Number.isNaN(last.getTime()) ? last : null;
 
-  if (!isWhatsApp && !isMeta) {
+  // WhatsApp por QR (WAHA) es una sesión normal de WhatsApp: no aplica la
+  // ventana de 24 h ni las plantillas de Meta.
+  if ((!isWhatsApp && !isMeta) || type === "waha") {
     return { channel: "other", networkLabel, state: "unrestricted", lastInboundAt: validLast, closesAt: null, humanAgentUntil: null, canSend: true };
   }
 

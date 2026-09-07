@@ -114,13 +114,48 @@ export async function processWahaWebhookEvent(
       return { ok: true };
     }
 
+    // Mensajes de protocolo (borrados, claves, sincronización) y otros sin
+    // contenido: WhatsApp los manda por chats @lid y no son mensajes reales.
+    // Antes se guardaban como "[text]" vacío y creaban contactos con el id @lid.
+    const bodyText = typeof p.body === "string" ? p.body : "";
+    const hasMedia = Boolean(p.hasMedia && p.media?.url) || Boolean(p.media?.mimetype);
+    const hasLocation = Boolean(p.location && typeof p.location.latitude === "number");
+    const rawMessage = (p._data as { message?: Record<string, unknown> } | undefined)?.message;
+    const rawKeys = rawMessage && typeof rawMessage === "object" ? Object.keys(rawMessage) : [];
+    const isProtocol =
+      rawKeys.length > 0 &&
+      rawKeys.every((k) =>
+        ["protocolMessage", "messageContextInfo", "senderKeyDistributionMessage", "reactionMessage", "pollUpdateMessage"].includes(k)
+      );
+    if (isProtocol || (!bodyText.trim() && !hasMedia && !hasLocation)) {
+      return { ok: true };
+    }
+
     let waId = "";
+    let lid = "";
     if (from.endsWith("@c.us")) {
       waId = from.slice(0, -"@c.us".length);
     } else if (from.endsWith("@lid")) {
       // LID addressing (privacy mode): real phone comes in _data.key.remoteJidAlt
+      lid = from.slice(0, -"@lid".length);
       const alt = String(p._data?.key?.remoteJidAlt ?? "");
-      waId = alt.includes("@") ? alt.split("@")[0] : from.slice(0, -"@lid".length);
+      waId = alt.includes("@") ? alt.split("@")[0] : "";
+      if (!waId) {
+        // Sin número en el evento: buscar un contacto que ya conozcamos con ese lid.
+        try {
+          const { data: known } = await admin
+            .from("contacts")
+            .select("wa_id")
+            .eq("custom_fields->>wa_lid", lid)
+            .not("wa_id", "is", null)
+            .limit(1)
+            .maybeSingle();
+          waId = String((known as { wa_id?: string } | null)?.wa_id || "");
+        } catch {
+          waId = "";
+        }
+      }
+      if (!waId) waId = lid; // último recurso: se muestra el id; se corrige cuando llegue el número
     } else {
       return { ok: true }; // unknown addressing, skip
     }
@@ -205,6 +240,19 @@ export async function processWahaWebhookEvent(
 
     let contactRowId = (existingContact as { id?: string } | null)?.id;
 
+    // Guardar lid → número para resolver eventos futuros que vengan sin número.
+    if (contactRowId && lid && waId !== lid) {
+      try {
+        const { data: cur } = await admin.from("contacts").select("custom_fields").eq("id", contactRowId).maybeSingle();
+        const cf = ((cur as { custom_fields?: Record<string, unknown> | null } | null)?.custom_fields || {}) as Record<string, unknown>;
+        if (cf.wa_lid !== lid) {
+          await admin.from("contacts").update({ custom_fields: { ...cf, wa_lid: lid } }).eq("id", contactRowId);
+        }
+      } catch {
+        // best-effort
+      }
+    }
+
     if (!contactRowId) {
       // billing gate on new contact
       const billing = await checkBillingFeature({
@@ -227,6 +275,7 @@ export async function processWahaWebhookEvent(
           wa_id: waId,
           name: p.notifyName ?? p._data?.pushName ?? null,
           last_message_at: new Date().toISOString(),
+          ...(lid && waId !== lid ? { custom_fields: { wa_lid: lid } } : {}),
         })
         .select("id")
         .single();
@@ -282,8 +331,6 @@ export async function processWahaWebhookEvent(
     // Antes se guardaba `{ text }` sin `type` (el Inbox mostraba "[undefined]")
     // y los adjuntos quedaban como texto vacío. Ahora el contenido tiene la
     // misma forma que el de Meta y el adjunto se descarga y guarda.
-    const bodyText = typeof p.body === "string" ? p.body : "";
-    const hasMedia = Boolean(p.hasMedia && p.media?.url) || Boolean(p.media?.mimetype);
     const mappedType = mapWahaType(p.type ?? p._data?.type);
     const msgType: ReturnType<typeof mapWahaType> = hasMedia
       ? mappedType === "text"
