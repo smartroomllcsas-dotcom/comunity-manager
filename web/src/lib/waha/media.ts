@@ -76,8 +76,16 @@ export async function downloadWahaMedia(
       media: { buffer, mimeType, size: buffer.byteLength, filename: opts.filename || null },
     };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "error";
-    return { ok: false, error: msg.includes("abort") ? "descarga_timeout" : "descarga_fallida" };
+    const msg = e instanceof Error ? `${e.message}${e.cause ? ` (${String((e.cause as Error)?.message || e.cause)})` : ""}` : "error";
+    let host = "?";
+    try {
+      host = new URL(url).host;
+    } catch {}
+    console.warn("[waha-media] descarga fallida", { host, error: msg.slice(0, 200) });
+    return {
+      ok: false,
+      error: msg.includes("abort") ? "descarga_timeout" : `descarga_fallida: ${msg.slice(0, 120)}`,
+    };
   } finally {
     clearTimeout(timeout);
   }
