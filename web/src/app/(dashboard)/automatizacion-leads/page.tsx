@@ -137,6 +137,8 @@ export default function LeadAutomationPage() {
   const [saving, setSaving] = useState(false);
   const [uploadingBrochure, setUploadingBrochure] = useState(false);
   const [pendingLeads, setPendingLeads] = useState<PendingLead[]>([]);
+  const [unreachableLeads, setUnreachableLeads] = useState<PendingLead[]>([]);
+  const [showUnreachable, setShowUnreachable] = useState(false);
   const [loadingLeads, setLoadingLeads] = useState(false);
   const [sendingLeads, setSendingLeads] = useState<string | "all" | null>(null);
 
@@ -151,6 +153,7 @@ export default function LeadAutomationPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "No se pudieron cargar los leads pendientes");
       setPendingLeads(Array.isArray(data.leads) ? data.leads : []);
+      setUnreachableLeads(Array.isArray(data.unreachable) ? data.unreachable : []);
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
@@ -798,9 +801,11 @@ export default function LeadAutomationPage() {
                     )}
                   </p>
                   <p className="text-xs text-[#8b949e]">
-                    Llegaron antes de activar la automatización (o falló el envío) y nunca recibieron
-                    la plantilla de primer contacto. Sincronízalos para que el agente inicie la
-                    conversación. Usa la configuración <strong>guardada</strong> arriba.
+                    Llegaron antes de activar la automatización (o el envío quedó pendiente) y aún no
+                    reciben la plantilla de primer contacto. Sincronízalos para que el agente inicie la
+                    conversación: primero los que nunca se intentaron, del más antiguo al más nuevo, hasta
+                    el límite por hora ({settings.max_sends_per_hour}/h, configurable arriba). Usa la
+                    configuración <strong>guardada</strong>.
                   </p>
                 </div>
                 <button
@@ -864,6 +869,59 @@ export default function LeadAutomationPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+
+              {unreachableLeads.length > 0 && (
+                <div className="border-t border-[#2d333b] pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowUnreachable((v) => !v)}
+                    className="text-xs text-[#8b949e] hover:text-white"
+                  >
+                    {showUnreachable ? "▾" : "▸"} No se pueden contactar por WhatsApp ({unreachableLeads.length})
+                  </button>
+                  <p className="text-[11px] text-[#6e7681] mt-1">
+                    WhatsApp ya rechazó estos números (sin WhatsApp, Meta limitó los mensajes de marketing,
+                    inactivo 24 h o teléfono inválido). No entran en «Sincronizar todos» porque volverían a
+                    fallar y gastan el cupo por hora; los asesores ya recibieron el correo para contactarlos
+                    por otro medio. Los limitados por Meta se reintentan solos cuando Meta apruebe la
+                    plantilla Utility.
+                  </p>
+                  {showUnreachable && (
+                    <div className="overflow-x-auto mt-2">
+                      <table className="w-full text-xs">
+                        <tbody>
+                          {unreachableLeads.map((lead) => (
+                            <tr key={lead.id} className="border-t border-[#2d333b]">
+                              <td className="py-1.5 pr-3 text-white">
+                                {lead.name || "—"}
+                                {lead.company && (
+                                  <span className="block text-[11px] text-[#8b949e]">{lead.company}</span>
+                                )}
+                              </td>
+                              <td className="py-1.5 pr-3 font-mono">{lead.phone || "—"}</td>
+                              <td className="py-1.5 pr-3 text-[#8b949e]">
+                                {new Date(lead.created_at).toLocaleDateString("es-CO", { day: "2-digit", month: "short" })}
+                              </td>
+                              <td className="py-1.5 pr-3 text-[#8b949e]">
+                                {lead.reason ? reasonLabel(lead.reason) : "sin teléfono"}
+                              </td>
+                              <td className="py-1.5 text-right">
+                                <button
+                                  onClick={() => handleSendPending([lead.id])}
+                                  disabled={sendingLeads !== null || !lead.phone}
+                                  className="rounded-md border border-[#2d333b] px-2 py-1 text-[11px] text-[#8b949e] hover:bg-[#21262d] disabled:opacity-50"
+                                >
+                                  {sendingLeads === lead.id ? "Enviando…" : "Reintentar"}
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

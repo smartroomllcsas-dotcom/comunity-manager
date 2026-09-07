@@ -3,12 +3,18 @@
  * automatización y nunca recibieron la plantilla de primer contacto.
  *
  * GET  /api/whatsapp/cloud/lead-backfill?clientId=<uuid>
- *   → { leads: [{ id, name, phone, created_at, reason, campaign, company }] }
- *     Contactos de la marca con source=facebook_lead_form cuyo
- *     custom_fields.wa_first_touch no es "enviado".
+ *   → { leads: [...], unreachable: [...] }
+ *     `leads`: contactos de la marca con source=facebook_lead_form cuyo
+ *     custom_fields.wa_first_touch no es "enviado" y que vale la pena
+ *     reintentar (nunca intentados, límite por hora, etc.).
+ *     `unreachable`: WhatsApp ya dijo que no llega (número sin WhatsApp,
+ *     Meta limitó marketing a ese número, inactivo 24 h, teléfono inválido).
+ *     Reintentarlos gasta el cupo por hora y vuelve a fallar; los asesores ya
+ *     recibieron el correo. Sólo se reintentan si se piden por id.
  *
  * POST /api/whatsapp/cloud/lead-backfill
- *   body: { clientId, contactIds?: string[] }   (sin contactIds = todos los pendientes)
+ *   body: { clientId, contactIds?: string[] }   (sin contactIds = todos los reintentables,
+ *          primero los que nunca se intentaron, del más antiguo al más nuevo)
  *   → { results: [{ id, name, sent, reason? }], sent, failed }
  *     Envía la plantilla de primer contacto configurada (misma lógica que el
  *     lead nuevo) y marca el contacto. Respeta el límite por hora de la marca.
@@ -63,6 +69,36 @@ function toPending(row: ContactRow): PendingLead {
   };
 }
 
+/**
+ * Motivo que no cambia por reintentar (WhatsApp no entrega a ese número).
+ * "Meta limitó marketing" sí puede cambiar cuando la marca tenga aprobada la
+ * plantilla Utility de primer contacto: entonces vuelve a ser reintentable.
+ */
+export function isUnreachableReason(reason: string | null, utilityApproved: boolean): boolean {
+  if (!reason) return false;
+  if (reason === "no_enviado (invalid_phone)" || reason === "sin_telefono") return true;
+  if (!reason.startsWith("fallido (")) return false;
+  if (/limit[oó] los mensajes de marketing/i.test(reason)) return !utilityApproved;
+  return true;
+}
+
+async function utilityFirstTouchApproved(brandId: string): Promise<boolean> {
+  try {
+    const { getFirstTouchUtilitySettings } = await import("@/lib/whatsapp/cloud/first-touch-utility");
+    const utility = await getFirstTouchUtilitySettings(brandId);
+    if (!utility.enabled || !utility.template_id) return false;
+    const { supabaseAdmin } = await import("@/lib/supabase");
+    const { data } = await supabaseAdmin
+      .from("cm_wa_templates")
+      .select("status")
+      .eq("id", utility.template_id)
+      .maybeSingle();
+    return String(data?.status || "").toUpperCase() === "APPROVED";
+  } catch {
+    return false;
+  }
+}
+
 async function loadPending(brandId: string, contactIds?: string[]) {
   const admin = createAdminClient("smarttalk");
   let query = admin
@@ -92,8 +128,14 @@ export async function GET(request: NextRequest) {
   if (!access) return NextResponse.json({ error: "No autorizado para esta marca" }, { status: 403 });
 
   try {
-    const rows = await loadPending(access.clientId);
-    return NextResponse.json({ leads: rows.map(toPending) });
+    const [rows, utilityApproved] = await Promise.all([
+      loadPending(access.clientId),
+      utilityFirstTouchApproved(access.clientId),
+    ]);
+    const all = rows.map(toPending);
+    const unreachable = all.filter((l) => isUnreachableReason(l.reason, utilityApproved) || !l.phone);
+    const leads = all.filter((l) => !unreachable.includes(l));
+    return NextResponse.json({ leads, unreachable });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
@@ -120,7 +162,24 @@ export async function POST(request: NextRequest) {
 
   let rows: ContactRow[];
   try {
-    rows = (await loadPending(access.clientId, contactIds)).slice(0, MAX_PER_REQUEST);
+    rows = await loadPending(access.clientId, contactIds);
+    if (!contactIds?.length) {
+      // "Sincronizar todos": sólo los reintentables. Antes se gastaba el cupo
+      // por hora en números que WhatsApp ya había rechazado y los nunca
+      // intentados (los más antiguos) no llegaban a su turno.
+      const utilityApproved = await utilityFirstTouchApproved(access.clientId);
+      rows = rows.filter((row) => {
+        const lead = toPending(row);
+        return lead.phone && !isUnreachableReason(lead.reason, utilityApproved);
+      });
+      rows.sort((a, b) => {
+        const aTried = a.custom_fields?.wa_first_touch ? 1 : 0;
+        const bTried = b.custom_fields?.wa_first_touch ? 1 : 0;
+        if (aTried !== bTried) return aTried - bTried; // nunca intentados primero
+        return a.created_at.localeCompare(b.created_at); // más antiguos primero
+      });
+    }
+    rows = rows.slice(0, MAX_PER_REQUEST);
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
