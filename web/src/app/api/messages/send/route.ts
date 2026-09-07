@@ -235,6 +235,63 @@ export async function POST(request: NextRequest) {
       let waResponse: { messages: { id: string }[] };
       switch (content.type) {
         case "template": {
+          // 1) Sistema nuevo: plantilla aprobada de la MARCA (cm_wa_templates),
+          //    enviada con la cuenta WABA de esa marca. Es lo que muestra el
+          //    selector del chat.
+          if (conversation.brand_id) {
+            const pub = createAdminClient("public");
+            const { data: cmTemplate } = await pub
+              .from("cm_wa_templates")
+              .select("id, name, language, status, components, whatsapp_account_id")
+              .eq("client_id", conversation.brand_id)
+              .eq("name", content.template_name)
+              .eq("language", content.language)
+              .eq("status", "APPROVED")
+              .limit(1)
+              .maybeSingle();
+            if (cmTemplate) {
+              const { getWabaClientForClient } = await import("@/lib/whatsapp/cloud/business-account");
+              const waba = await getWabaClientForClient(conversation.brand_id, cmTemplate.whatsapp_account_id);
+              const to = String(conversation.contact.wa_id || "").replace(/[^\d]/g, "");
+              const resp = (await waba.client.sendTemplateMessage({
+                to,
+                templateName: cmTemplate.name,
+                language: cmTemplate.language,
+                components: content.components || [],
+              })) as { messages?: Array<{ id: string }> };
+              waResponse = { messages: resp.messages || [] };
+              // Texto renderizado para que el chat muestre lo que recibió el cliente.
+              const bodyText = ((cmTemplate.components as Array<{ type?: string; text?: string }>) || []).find(
+                (c) => c?.type === "BODY"
+              )?.text;
+              if (bodyText) {
+                const values: Record<string, string> = {};
+                for (const comp of (content.components || []) as Array<{ type?: string; parameters?: Array<{ parameter_name?: string; text?: string }> }>) {
+                  if (comp?.type !== "body") continue;
+                  (comp.parameters || []).forEach((p, i) => {
+                    values[p.parameter_name || String(i + 1)] = p.text || "";
+                  });
+                }
+                (content as { text?: string }).text = bodyText.replace(
+                  /\{\{\s*([\w]+)\s*\}\}/g,
+                  (m, key: string) => values[key] ?? m
+                );
+              }
+              await pub.from("cm_wa_template_sends").insert({
+                client_id: conversation.brand_id,
+                whatsapp_account_id: cmTemplate.whatsapp_account_id,
+                template_id: cmTemplate.id,
+                to_phone: to,
+                template_name: cmTemplate.name,
+                language: cmTemplate.language,
+                wamid: waResponse.messages[0]?.id ?? null,
+                status: "sent",
+              });
+              break;
+            }
+          }
+
+          // 2) Sistema viejo (message_templates), por compatibilidad.
           let templateQuery = admin
             .from("message_templates")
             .select("id, name, language, components, status, channel_id")

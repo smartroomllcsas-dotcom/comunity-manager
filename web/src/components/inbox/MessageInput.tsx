@@ -32,6 +32,7 @@ interface MessageInputProps {
   messages?: Message[];
   channelId?: string | null;
   channelType?: string | null;
+  brandId?: string | null;
   whatsappWindowExpired?: boolean;
 }
 
@@ -42,6 +43,7 @@ export function MessageInput({
   messages,
   channelId,
   channelType,
+  brandId,
   whatsappWindowExpired,
 }: MessageInputProps) {
   const [text, setText] = useState("");
@@ -59,7 +61,8 @@ export function MessageInput({
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiVisible, setAiVisible] = useState(false);
-  const { data: templates, isLoading: templatesLoading } = useTemplates();
+  // Plantillas aprobadas de la MARCA de la conversación (cm_wa_templates).
+  const { data: templates, isLoading: templatesLoading } = useTemplates(brandId);
 
   const isWhatsApp = !!channelType?.includes("whatsapp");
   const requiresTemplate = Boolean(isWhatsApp && whatsappWindowExpired);

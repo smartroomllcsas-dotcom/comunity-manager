@@ -288,3 +288,38 @@ describe("buildTemplateComponents", () => {
     expect(out.map((c) => (c as { type: string }).type)).toEqual(["header", "body", "button"]);
   });
 });
+
+describe("variables con nombre ({{nombre}}) — plantillas cm_wa_templates NAMED", () => {
+  const named = {
+    id: "t-named",
+    organization_id: "org",
+    wa_template_id: null,
+    name: "inicio_conversacion_lead",
+    language: "es_CO",
+    category: "marketing",
+    status: "approved",
+    created_at: "",
+    components: [{ type: "BODY", text: "Hola {{nombre}} 👋 gracias por tu interés en {{tema}}." }],
+  } as unknown as import("./TemplateBanner").InboxTemplate;
+
+  it("extrae las variables con nombre en orden de aparición", async () => {
+    const { extractTemplateVariables, templateHasVariables } = await import("./TemplateBanner");
+    expect(extractTemplateVariables(named)).toEqual(["nombre", "tema"]);
+    expect(templateHasVariables(named)).toBe(true);
+  });
+
+  it("arma los parámetros con parameter_name y renderiza la vista previa", async () => {
+    const { buildTemplateComponents, renderTemplatePreview } = await import("./TemplateBanner");
+    const components = buildTemplateComponents({
+      bodyIndices: ["nombre", "tema"],
+      bodyValues: { nombre: "Ana", tema: "tu tienda online" },
+    }) as Array<{ type: string; parameters: Array<Record<string, string>> }>;
+    expect(components[0].parameters).toEqual([
+      { type: "text", parameter_name: "nombre", text: "Ana" },
+      { type: "text", parameter_name: "tema", text: "tu tienda online" },
+    ]);
+    expect(renderTemplatePreview(named, { nombre: "Ana", tema: "tu tienda online" })).toBe(
+      "Hola Ana 👋 gracias por tu interés en tu tienda online.",
+    );
+  });
+});

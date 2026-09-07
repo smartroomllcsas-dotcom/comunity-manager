@@ -387,6 +387,7 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
             messages={messages || []}
             channelId={conversation.channel_id}
             channelType={conversation.channel?.type}
+            brandId={conversation.brand_id}
             whatsappWindowExpired={whatsappWindowExpired}
           />
         </>

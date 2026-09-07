@@ -5,7 +5,28 @@ import type { MessageTemplate } from "@/types/database";
 
 export type InboxTemplate = MessageTemplate & {
   channel_id?: string | null;
+  /** "NAMED" ({{nombre}}) o "POSITIONAL" ({{1}}) — plantillas de cm_wa_templates. */
+  parameter_format?: string | null;
+  whatsapp_account_id?: string | null;
+  source?: "cm" | "legacy";
 };
+
+/** Clave de variable tal como aparece en el body: "1", "2" … o "nombre", "tema". */
+export type TemplateVarKey = string;
+const VAR_RE = /\{\{\s*([A-Za-z_][\w]*|\d+)\s*\}\}/g;
+
+/** Variables del body (numeradas o con nombre), en orden de aparición y sin repetir. */
+export function extractTemplateVariables(template: InboxTemplate): TemplateVarKey[] {
+  const body = getTemplateBodyPreview(template);
+  const keys: TemplateVarKey[] = [];
+  for (const match of body.matchAll(VAR_RE)) {
+    if (!keys.includes(match[1])) keys.push(match[1]);
+  }
+  // Las numeradas en orden numérico; las con nombre en orden de aparición.
+  const numeric = keys.filter((k) => /^\d+$/.test(k)).sort((a, b) => Number(a) - Number(b));
+  const named = keys.filter((k) => !/^\d+$/.test(k));
+  return [...numeric, ...named];
+}
 
 export function getTemplateBodyPreview(template: InboxTemplate) {
   const components = Array.isArray(template.components) ? template.components : [];
@@ -18,7 +39,7 @@ export function getTemplateBodyPreview(template: InboxTemplate) {
 }
 
 export function templateHasVariables(template: InboxTemplate) {
-  return /\{\{\s*\d+\s*\}\}/.test(getTemplateBodyPreview(template));
+  return extractTemplateVariables(template).length > 0;
 }
 
 /** Extrae los índices únicos de variables del body ("{{1}}", "{{2}}", …) en orden ascendente. */
@@ -34,13 +55,12 @@ export function extractTemplateVariableIndices(template: InboxTemplate): number[
   return [...found].sort((a, b) => a - b);
 }
 
-/** Reemplaza las variables del body con los valores del usuario para la vista previa. */
-export function renderTemplatePreview(template: InboxTemplate, values: Record<number, string>) {
+/** Reemplaza las variables del body (numeradas o con nombre) con los valores del usuario. */
+export function renderTemplatePreview(template: InboxTemplate, values: Record<TemplateVarKey, string>) {
   const body = getTemplateBodyPreview(template);
-  return body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, raw: string) => {
-    const idx = Number(raw);
-    const value = values[idx];
-    return value && value.trim() ? value : `{{${idx}}}`;
+  return body.replace(VAR_RE, (_, key: string) => {
+    const value = values[key];
+    return value && value.trim() ? value : `{{${key}}}`;
   });
 }
 
@@ -112,8 +132,8 @@ export type HeaderLocationValues = {
 
 /** Construye el payload `components` esperado por la WhatsApp Cloud API. Soporta HEADER + BODY + BUTTONS (quick_reply + url). */
 export function buildTemplateComponents(params: {
-  bodyIndices: number[];
-  bodyValues: Record<number, string>;
+  bodyIndices: TemplateVarKey[];
+  bodyValues: Record<TemplateVarKey, string>;
   header?: HeaderInfo;
   headerTextValues?: Record<number, string>;
   headerMediaUrl?: string;
@@ -182,7 +202,13 @@ export function buildTemplateComponents(params: {
   if (params.bodyIndices.length > 0) {
     out.push({
       type: "body",
-      parameters: params.bodyIndices.map((idx) => ({ type: "text", text: params.bodyValues[idx] ?? "" })),
+      // Meta exige `parameter_name` para plantillas con variables con nombre
+      // ({{nombre}}); las numeradas ({{1}}) van por posición.
+      parameters: params.bodyIndices.map((key) =>
+        /^\d+$/.test(key)
+          ? { type: "text", text: params.bodyValues[key] ?? "" }
+          : { type: "text", parameter_name: key, text: params.bodyValues[key] ?? "" }
+      ),
     });
   }
 
@@ -221,7 +247,9 @@ export function buildTemplateBodyComponents(
   indices: number[],
   values: Record<number, string>
 ): unknown[] {
-  return buildTemplateComponents({ bodyIndices: indices, bodyValues: values });
+  const bodyValues: Record<string, string> = {};
+  for (const [k, v] of Object.entries(values)) bodyValues[String(k)] = v;
+  return buildTemplateComponents({ bodyIndices: indices.map(String), bodyValues });
 }
 
 type TemplateBannerProps = {
@@ -244,7 +272,7 @@ export function TemplateBanner({
 }: TemplateBannerProps) {
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
   const variableIndices = useMemo(
-    () => (selectedTemplate ? extractTemplateVariableIndices(selectedTemplate) : []),
+    () => (selectedTemplate ? extractTemplateVariables(selectedTemplate) : []),
     [selectedTemplate]
   );
   const header = useMemo(
@@ -255,7 +283,7 @@ export function TemplateBanner({
     () => (selectedTemplate ? extractButtons(selectedTemplate) : []),
     [selectedTemplate]
   );
-  const [values, setValues] = useState<Record<number, string>>({});
+  const [values, setValues] = useState<Record<TemplateVarKey, string>>({});
   const [headerTextValues, setHeaderTextValues] = useState<Record<number, string>>({});
   const [headerMediaUrl, setHeaderMediaUrl] = useState("");
   const [headerMediaFilename, setHeaderMediaFilename] = useState("");
@@ -330,7 +358,8 @@ export function TemplateBanner({
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-amber-100">Ventana de WhatsApp cerrada</p>
           <p className="mt-0.5 text-xs leading-relaxed text-amber-100/70">
-            Han pasado mas de 24 horas desde el ultimo mensaje del cliente. Para retomar, envia una plantilla aprobada.
+            Pasaron más de 24 horas desde el último mensaje del cliente (la fecha exacta está arriba). Para retomar, envía una
+            de las plantillas aprobadas de esta empresa.
           </p>
           <div className="mt-3 flex flex-col gap-2 sm:flex-row">
             <select
@@ -476,7 +505,7 @@ export function TemplateBanner({
               {variableIndices.map((idx) => (
                 <label key={idx} className="flex flex-col gap-1">
                   <span className="text-[10px] uppercase tracking-[0.15em] text-amber-200/70">
-                    Variable {`{{${idx}}}`}
+                    {/^\d+$/.test(idx) ? `Variable {{${idx}}}` : idx.replace(/_/g, " ")}
                   </span>
                   <input
                     value={values[idx] ?? ""}
