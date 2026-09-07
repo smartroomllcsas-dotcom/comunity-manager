@@ -58,6 +58,11 @@ describe("wahaExternalId", () => {
       "true_1@c.us_ABC"
     );
   });
+  it("normalizes @s.whatsapp.net to @c.us (NOWEB) so the echo matches", () => {
+    expect(
+      wahaExternalId({ key: { id: "ABC", remoteJid: "1@s.whatsapp.net", fromMe: true } }, "1@c.us")
+    ).toBe("true_1@c.us_ABC");
+  });
   it("returns empty string when unknown", () => {
     expect(wahaExternalId({}, "1@c.us")).toBe("");
   });

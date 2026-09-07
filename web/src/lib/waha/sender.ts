@@ -54,6 +54,11 @@ export function wahaExternalId(r: unknown, chatId: string): string {
     if (o.id._serialized) return o.id._serialized;
     if (o.id.id) return `true_${chatId}_${o.id.id}`;
   }
-  if (o.key?.id) return `true_${o.key.remoteJid || chatId}_${o.key.id}`;
+  if (o.key?.id) {
+    // NOWEB responde remoteJid como 57...@s.whatsapp.net; el webhook del eco
+    // usa 57...@c.us. Se normaliza para que el eco se reconozca como el mismo.
+    const jid = (o.key.remoteJid || chatId).replace(/@s\.whatsapp\.net$/, "@c.us");
+    return `true_${jid}_${o.key.id}`;
+  }
   return "";
 }
