@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendText, sendMedia, sendTemplate, getOrgWhatsAppCredentials } from "@/lib/whatsapp/api";
-import { sendMetaTextMessage, sendMetaAttachment } from "@/lib/meta";
+import { sendMetaTextMessage, sendMetaAttachment, isMetaMessagingWindowError } from "@/lib/meta";
 import {
   sendRespondIoText,
   sendRespondIoAttachment,
@@ -174,7 +174,27 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Conversation contact is missing Meta recipient id" }, { status: 400 });
       }
       if (content.type === "text") {
-        const resp = await sendMetaTextMessage(channelAccessToken, recipientId, content.text);
+        let resp: { message_id?: string } | null = null;
+        try {
+          resp = await sendMetaTextMessage(channelAccessToken, recipientId, content.text);
+        } catch (sendError) {
+          if (!isMetaMessagingWindowError(sendError)) throw sendError;
+          // Fuera de la ventana de 24 h: se reintenta con la etiqueta de agente
+          // humano (7 días). Si Meta también la rechaza, se explica al asesor
+          // en vez del error crudo.
+          try {
+            resp = await sendMetaTextMessage(channelAccessToken, recipientId, content.text, {
+              tag: "HUMAN_AGENT",
+            });
+          } catch {
+            const network = channelType === "instagram" ? "Instagram" : "Messenger";
+            throw new Error(
+              `Meta API: ${network} sólo permite responder hasta 24 horas después del último mensaje del cliente ` +
+                `(7 días con permiso de agente humano). Esta conversación ya venció: hay que esperar a que el cliente ` +
+                `vuelva a escribir, o contactarlo por otro canal.`
+            );
+          }
+        }
         providerMessageId = typeof resp?.message_id === "string" ? resp.message_id : undefined;
       } else if (
         content.type === "image" ||

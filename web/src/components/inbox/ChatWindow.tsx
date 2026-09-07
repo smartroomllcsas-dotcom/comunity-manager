@@ -1,4 +1,5 @@
 "use client";
+import { toast } from "sonner";
 import { useMessages } from "@/hooks/useMessages";
 import { useCurrentAgent } from "@/hooks/useCurrentAgent";
 import { useInboxStore } from "@/stores/inbox";
@@ -126,6 +127,10 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
         error = { error: errorText || `HTTP ${response.status}` };
       }
       console.error("Failed to send:", error);
+      // Antes el fallo sólo iba a la consola: el asesor veía "enviando" y
+      // nada salía, sin saber por qué (p. ej. ventana de 24 h de Instagram).
+      const detail = (error as { error?: string })?.error || `HTTP ${response.status}`;
+      toast.error("No se pudo enviar el mensaje", { description: detail, duration: 8000 });
       return;
     }
     queryClient.invalidateQueries({ queryKey: ["messages", conversation.id] });

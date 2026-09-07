@@ -386,20 +386,37 @@ export async function publishToInstagram(igUserId: string, pageToken: string, op
 // Messenger replies
 // -----------------------------------------------------------------------------
 
+/**
+ * Messenger/Instagram sólo permiten responder dentro de las 24 h siguientes
+ * al último mensaje del cliente. Con la etiqueta HUMAN_AGENT (permiso
+ * `human_agent` de la app) la ventana se extiende a 7 días.
+ */
+export function isMetaMessagingWindowError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return /outside of allowed window|\(code: (10|2018)\)|#2018|\(#10\)/i.test(message)
+}
+
 export async function sendMetaTextMessage(
   accessToken: string,
   recipientId: string,
   text: string,
+  options: { tag?: 'HUMAN_AGENT' } = {},
 ) {
+  const params: Record<string, string> = {
+    access_token: accessToken,
+    recipient: JSON.stringify({ id: recipientId }),
+    message: JSON.stringify({ text }),
+  }
+  if (options.tag) {
+    params.messaging_type = 'MESSAGE_TAG'
+    params.tag = options.tag
+  } else {
+    params.messaging_type = 'RESPONSE'
+  }
   return metaFetch(`${META_GRAPH_URL}/me/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      access_token: accessToken,
-      messaging_type: 'RESPONSE',
-      recipient: JSON.stringify({ id: recipientId }),
-      message: JSON.stringify({ text }),
-    }),
+    body: new URLSearchParams(params),
   })
 }
 
