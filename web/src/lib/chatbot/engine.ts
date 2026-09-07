@@ -12,6 +12,56 @@ interface FlowContext {
   channelId?: string;
 }
 
+async function sendFixedReplyIfMatches(
+  admin: ReturnType<typeof createAdminClient>,
+  context: FlowContext,
+  brandId: string,
+): Promise<boolean> {
+  const { data: channel } = await admin
+    .from("channels")
+    .select("type")
+    .eq("id", context.channelId!)
+    .maybeSingle();
+  const { channelKindForType } = await import("@/lib/whatsapp/cloud/channel-instructions");
+  const kind = channelKindForType((channel as { type?: string } | null)?.type);
+  if (!kind) return false;
+  const { getFixedReplies, matchFixedReply } = await import("@/lib/whatsapp/cloud/fixed-replies");
+  const rules = (await getFixedReplies(brandId))[kind];
+  if (!rules?.length) return false;
+
+  const { data: previous } = await admin
+    .from("messages")
+    .select("direction, is_bot, content")
+    .eq("conversation_id", context.conversationId)
+    .order("created_at", { ascending: false })
+    .limit(60);
+  const rows = (previous || []) as Array<{ direction: string; is_bot: boolean | null; content?: { text?: string } | null }>;
+  const textOf = (m: { content?: { text?: string } | null }) => String((m.content || {}).text || "");
+  const previousTexts = rows.filter((m) => m.direction === "inbound").map(textOf);
+  const previousBotTexts = rows.filter((m) => m.direction === "outbound").map(textOf);
+  const reply = matchFixedReply(rules, context.messageText, previousTexts, previousBotTexts);
+  if (!reply) return false;
+
+  const { getOutboundSender } = await import("@/lib/chatbot/outbound");
+  const sender = await getOutboundSender(context.channelId!);
+  if (!sender) return false;
+  const result = (await sender.sendText(context.contactWaId, reply)) as { messages?: Array<{ id?: string }> };
+  await admin.from("messages").insert({
+    conversation_id: context.conversationId,
+    direction: "outbound",
+    type: "text",
+    content: { type: "text", text: reply },
+    wa_message_id: result?.messages?.[0]?.id,
+    status: "sent",
+    is_bot: true,
+  });
+  await admin
+    .from("conversations")
+    .update({ last_message_preview: reply.slice(0, 100), updated_at: new Date().toISOString() })
+    .eq("id", context.conversationId);
+  return true;
+}
+
 export async function processIncomingWithChatbot(context: FlowContext): Promise<boolean> {
   const admin = createAdminClient();
 
@@ -30,6 +80,16 @@ export async function processIncomingWithChatbot(context: FlowContext): Promise<
   // Marca (empresa) del lead: define QUÉ agente responde. Modelo de agencia:
   // cada empresa tiene su propio agente; nunca se usa el de otra empresa.
   const brandId = (conversation as { brand_id?: string | null } | null)?.brand_id ?? null;
+
+  // Respuestas fijas por canal (texto exacto exigido por la empresa, sin IA).
+  if (brandId && context.channelId && context.messageText?.trim()) {
+    try {
+      const fixed = await sendFixedReplyIfMatches(admin, { ...context, contactId }, brandId);
+      if (fixed) return true;
+    } catch (e) {
+      console.error("[chatbot] respuesta fija falló:", e);
+    }
+  }
 
   // Continue active flow
   if (metadata.active_flow_id && metadata.current_node_id) {
