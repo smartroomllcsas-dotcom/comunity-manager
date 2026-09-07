@@ -16,8 +16,8 @@ import { buildWahaAttachmentContent } from "@/lib/waha/media";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-const TEXT_FIX_LIMIT = 500;
-const MEDIA_FIX_LIMIT = 25;
+const TEXT_FIX_LIMIT = 2000;
+const MEDIA_FIX_LIMIT = 40;
 
 type MsgRow = {
   id: string;
@@ -56,7 +56,9 @@ export async function GET(request: NextRequest) {
     .from("messages")
     .select("id, wa_message_id, type, content, conversation:conversations!inner(channel_id, organization_id, brand_id, channel:channels!inner(type))")
     .eq("conversation.channel.type", "waha")
-    .or("content->>media_note.not.is.null,content->>media_error.not.is.null")
+    // Adjuntos viejos: quedaron como texto vacío (WAHA no mandaba `type`), o
+    // con media_note / media_error de un intento fallido.
+    .or("content->>media_note.not.is.null,content->>media_error.not.is.null,content->>text.eq.")
     .order("created_at", { ascending: false })
     .limit(MEDIA_FIX_LIMIT);
 
