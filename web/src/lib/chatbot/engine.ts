@@ -81,6 +81,25 @@ export async function processIncomingWithChatbot(context: FlowContext): Promise<
   // cada empresa tiene su propio agente; nunca se usa el de otra empresa.
   const brandId = (conversation as { brand_id?: string | null } | null)?.brand_id ?? null;
 
+  // "No quiero que me contacten": se marca sí o sí (bandera + Perdido + nota)
+  // y el agente no insiste; queda fuera de sincronización y retoma.
+  if (contactId && context.messageText) {
+    try {
+      const { looksLikeOptOut, markDoNotContact } = await import("@/lib/smarttalk/do-not-contact");
+      if (looksLikeOptOut(context.messageText)) {
+        await markDoNotContact(admin, {
+          contactId,
+          organizationId: context.organizationId,
+          conversationId: context.conversationId,
+          reason: context.messageText,
+        });
+        return false;
+      }
+    } catch (e) {
+      console.error("[chatbot] no-contactar falló:", e);
+    }
+  }
+
   // Respuestas fijas por canal (texto exacto exigido por la empresa, sin IA).
   if (brandId && context.channelId && context.messageText?.trim()) {
     try {

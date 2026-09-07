@@ -38,6 +38,8 @@ type ContactRow = {
   wa_id: string | null;
   created_at: string;
   visibility_status: string | null;
+  lifecycle_stage_id: string | null;
+  organization_id: string | null;
   custom_fields: Record<string, unknown> | null;
 };
 
@@ -103,7 +105,7 @@ async function loadPending(brandId: string, contactIds?: string[]) {
   const admin = createAdminClient("smarttalk");
   let query = admin
     .from("contacts")
-    .select("id, name, wa_id, created_at, visibility_status, custom_fields")
+    .select("id, name, wa_id, created_at, visibility_status, lifecycle_stage_id, organization_id, custom_fields")
     .eq("brand_id", brandId)
     .eq("custom_fields->>source", "facebook_lead_form")
     .order("created_at", { ascending: false })
@@ -113,8 +115,14 @@ async function loadPending(brandId: string, contactIds?: string[]) {
   const { data, error } = await query;
   if (error) throw new Error(error.message);
 
-  return ((data || []) as ContactRow[]).filter((row) => {
+  const rowsAll = (data || []) as ContactRow[];
+  // "No contactar" (pidió no ser contactado o etapa Perdido): fuera sí o sí.
+  const { isDoNotContact, stopStageIdsForOrg } = await import("@/lib/smarttalk/do-not-contact");
+  const orgId = rowsAll.find((r) => r.organization_id)?.organization_id;
+  const stopIds = orgId ? await stopStageIdsForOrg(admin, orgId) : new Set<string>();
+  return rowsAll.filter((row) => {
     if (row.visibility_status === "restricted") return false;
+    if (isDoNotContact(row, stopIds)) return false;
     const touch = row.custom_fields?.wa_first_touch;
     return touch !== "enviado";
   });

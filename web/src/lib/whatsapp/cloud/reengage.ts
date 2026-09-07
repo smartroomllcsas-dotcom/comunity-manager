@@ -90,6 +90,7 @@ export async function runReengagement(now: Date = new Date()) {
       const cf = { ...((contact.custom_fields as Record<string, unknown> | null) || {}) };
       if (cf.wa_reengaged_at) continue;
       if (contact.lifecycle_stage_id && stopStageIds.has(contact.lifecycle_stage_id as string)) continue;
+      if ((contact.custom_fields as Record<string, unknown> | null)?.do_not_contact === true) continue;
       if (typeof cf.cita_estado === "string" && cf.cita_estado === "agendada") continue; // ya agendó
 
       const phone = (typeof cf.phone === "string" && cf.phone) || (contact.wa_id as string | null) || "";
