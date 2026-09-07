@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { sendWahaText } from "./sender";
+import { sendWahaText, wahaExternalId } from "./sender";
 
 function makeAdmin(sessionRow: { session_name: string } | null) {
   return {
@@ -41,5 +41,24 @@ describe("sendWahaText", () => {
         client: { sendText: vi.fn() } as any,
       })
     ).rejects.toThrow(/no waha session/i);
+  });
+});
+
+describe("wahaExternalId", () => {
+  it("keeps a plain string id", () => {
+    expect(wahaExternalId({ id: "true_1@c.us_ABC" }, "1@c.us")).toBe("true_1@c.us_ABC");
+  });
+  it("uses id._serialized (WEBJS)", () => {
+    expect(wahaExternalId({ id: { _serialized: "true_1@c.us_ABC", id: "ABC" } }, "1@c.us")).toBe(
+      "true_1@c.us_ABC"
+    );
+  });
+  it("builds true_<chat>_<id> from key.id (NOWEB)", () => {
+    expect(wahaExternalId({ key: { id: "ABC", remoteJid: "1@c.us", fromMe: true } }, "1@c.us")).toBe(
+      "true_1@c.us_ABC"
+    );
+  });
+  it("returns empty string when unknown", () => {
+    expect(wahaExternalId({}, "1@c.us")).toBe("");
   });
 });

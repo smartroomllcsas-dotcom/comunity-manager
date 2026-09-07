@@ -139,6 +139,21 @@ export async function processWahaWebhookEvent(
     // está guardado como saliente con otro id; no se duplica.
     if (isFromMe && typeof p.body === "string" && p.body.trim()) {
       try {
+        // Si el evento es reciente (llega en línea, no desde la cola), damos
+        // unos segundos para que el envío propio (agente/asesor) termine de
+        // guardar su fila; si no, el eco entraba antes y quedaba duplicado.
+        const ageMs = p.timestamp ? Date.now() - p.timestamp * 1000 : 0;
+        if (ageMs >= 0 && ageMs < 30_000) {
+          await new Promise((r) => setTimeout(r, 2_500));
+          if (p.id) {
+            const { data: dup2 } = await admin
+              .from("messages")
+              .select("id")
+              .eq("wa_message_id", p.id)
+              .maybeSingle();
+            if (dup2) return { ok: true };
+          }
+        }
         const since = new Date(Date.now() - 3 * 60_000).toISOString();
         const { data: echo } = await admin
           .from("messages")
@@ -317,7 +332,12 @@ export async function processWahaWebhookEvent(
       })
       .select("id")
       .single();
-    if (mErr) return { ok: false, error: `message insert: ${mErr.message}` };
+    if (mErr) {
+      // Índice único (conversación + wa_message_id): "message" y "message.any"
+      // procesados en paralelo → el segundo ya está guardado; no responder dos veces.
+      if (mErr.code === "23505" || /duplicate key/i.test(mErr.message)) return { ok: true };
+      return { ok: false, error: `message insert: ${mErr.message}` };
+    }
 
     // Adjunto entrante: texto para el agente (transcripción/descripción). Best-effort.
     if (!isFromMe && msgType !== "text" && msgType !== "location" && (insertedMsg as { id?: string } | null)?.id) {
@@ -357,7 +377,25 @@ export async function processWahaWebhookEvent(
     if (!isFromMe) {
       const messageText =
         msgType === "text" ? bodyText : (await import("@/lib/chatbot/media-understanding")).inboundContentToText(content);
-      if (messageText) {
+      // Si una persona (desde el celular o el Inbox) respondió en esta
+      // conversación en la última hora, el agente no se mete: la está
+      // atendiendo un humano.
+      let humanActive = false;
+      try {
+        const since = new Date(Date.now() - 60 * 60_000).toISOString();
+        const { data: recentHuman } = await admin
+          .from("messages")
+          .select("id")
+          .eq("conversation_id", conversationId)
+          .eq("direction", "outbound")
+          .or("is_bot.is.null,is_bot.eq.false")
+          .gte("created_at", since)
+          .limit(1);
+        humanActive = Boolean(recentHuman && recentHuman.length > 0);
+      } catch {
+        humanActive = false;
+      }
+      if (messageText && !humanActive) {
         try {
           const { processIncomingWithChatbot } = await import("@/lib/chatbot/engine");
           await processIncomingWithChatbot({

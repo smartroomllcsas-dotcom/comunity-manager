@@ -4,6 +4,8 @@ import { clientIp, rateLimitWithWhitelist } from "@/lib/rate-limit";
 import { verifyWahaSignature } from "@/lib/waha/signature";
 
 export const dynamic = "force-dynamic";
+// El agente de IA puede tardar (espera de agrupación + modelo + adjuntos).
+export const maxDuration = 120;
 
 const WEBHOOK_RATE_LIMIT = 200;
 const WEBHOOK_RATE_WINDOW_MS = 60 * 1000;
@@ -43,11 +45,48 @@ export async function POST(request: NextRequest) {
   }
 
   const admin = createAdminClient();
-  await admin.from("webhook_events").insert({
-    channel: "waha",
-    payload,
-    status: "pending",
-  });
+  // Mensajes del cliente y los enviados desde el celular se atienden en
+  // línea (respuesta del agente al instante). El resto (acks, el duplicado
+  // "message.any" de un entrante) va a la cola. Si algo falla en línea, el
+  // evento queda "pending" y el cron lo reintenta.
+  const ev = payload as { event?: string; payload?: { fromMe?: boolean } };
+  const inline =
+    ev.event === "message" || (ev.event === "message.any" && Boolean(ev.payload?.fromMe));
+  const { data: row } = await admin
+    .from("webhook_events")
+    .insert({
+      channel: "waha",
+      payload,
+      status: inline ? "processing" : "pending",
+      processed_at: inline ? new Date().toISOString() : null,
+    })
+    .select("id")
+    .single();
+
+  if (inline && row?.id) {
+    try {
+      const { processWebhookEventRow } = await import("@/lib/smarttalk/meta-webhook");
+      const result = await processWebhookEventRow({
+        id: row.id as string,
+        channel: "waha",
+        payload: payload as never,
+      });
+      if (!result.ok) {
+        await admin
+          .from("webhook_events")
+          .update({ status: "pending", processed_at: null })
+          .eq("id", row.id)
+          .eq("status", "processing");
+      }
+    } catch (e) {
+      console.error("[waha] proceso en línea falló:", e);
+      await admin
+        .from("webhook_events")
+        .update({ status: "pending", processed_at: null })
+        .eq("id", row.id)
+        .eq("status", "processing");
+    }
+  }
 
   return NextResponse.json({ ok: true });
 }

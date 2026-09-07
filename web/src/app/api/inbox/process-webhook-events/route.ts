@@ -27,38 +27,92 @@ function isAuthorized(request: NextRequest) {
   return custom === secret;
 }
 
-async function processBatch() {
-  const admin = createAdminClient("smarttalk");
+// Reclamo atómico: cada invocación marca "processing" las filas que va a
+// procesar (UPDATE condicional). Antes dos invocaciones solapadas (cada 2 min,
+// hasta 5 min de duración) tomaban las mismas filas y el agente respondía
+// dos veces. `processed_at` en una fila "processing" es la hora del reclamo;
+// si pasa el lease sin terminar (función caída), se vuelve a tomar.
+const CLAIM_LEASE_MS = 4 * 60 * 1000;
+const TIME_BUDGET_MS = 230 * 1000;
+const CONCURRENCY = 4;
 
-  // Elegimos pending (nunca procesados) y failed con attempts < MAX.
-  const { data: rows, error } = await admin
+type QueueRow = { id: string; channel: string; payload: unknown; attempts: number; status: string };
+
+async function claimRows(admin: ReturnType<typeof createAdminClient>): Promise<QueueRow[] | { error: string }> {
+  const staleBefore = new Date(Date.now() - CLAIM_LEASE_MS).toISOString();
+  const { data: candidates, error } = await admin
     .from("webhook_events")
-    .select("id, channel, payload, attempts, status")
-    .in("status", ["pending", "failed"])
-    .lt("attempts", MAX_ATTEMPTS)
+    .select("id, status, processed_at")
+    .or(
+      `status.eq.pending,and(status.eq.failed,attempts.lt.${MAX_ATTEMPTS}),and(status.eq.processing,processed_at.lt.${staleBefore})`
+    )
     .order("created_at", { ascending: true })
     .limit(BATCH_SIZE);
+  if (error) return { error: error.message };
+  const ids = (candidates ?? []).map((r) => r.id as string);
+  if (ids.length === 0) return [];
+  const { data: claimed, error: claimErr } = await admin
+    .from("webhook_events")
+    .update({ status: "processing", processed_at: new Date().toISOString() })
+    .in("id", ids)
+    .or(`status.eq.pending,status.eq.failed,and(status.eq.processing,processed_at.lt.${staleBefore})`)
+    .select("id, channel, payload, attempts, status");
+  if (claimErr) return { error: claimErr.message };
+  return (claimed ?? []) as QueueRow[];
+}
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+// Los eventos del mismo chat se procesan en orden; chats distintos en paralelo.
+function groupKey(row: QueueRow): string {
+  const p = row.payload as { payload?: { from?: string; to?: string }; entry?: Array<{ id?: string }> } | null;
+  if (row.channel === "waha") return `waha:${p?.payload?.from ?? p?.payload?.to ?? row.id}`;
+  return `${row.channel}:${p?.entry?.[0]?.id ?? row.id}`;
+}
+
+async function processBatch() {
+  const admin = createAdminClient("smarttalk");
+  const startedAt = Date.now();
 
   let processed = 0;
   let failed = 0;
+  let batches = 0;
   const errors: Array<{ id: string; error: string }> = [];
 
-  for (const row of rows ?? []) {
-    const result = await processWebhookEventRow({
-      id: row.id as string,
-      channel: row.channel as string,
-      payload: row.payload as MetaWebhookPayload,
-    });
-    if (result.ok) {
-      processed++;
-    } else {
-      failed++;
-      errors.push({ id: row.id as string, error: result.error || "unknown" });
+  while (Date.now() - startedAt < TIME_BUDGET_MS) {
+    const claimed = await claimRows(admin);
+    if (!Array.isArray(claimed)) {
+      return NextResponse.json({ error: claimed.error }, { status: 500 });
     }
+    if (claimed.length === 0) break;
+    batches++;
+
+    const groups = new Map<string, QueueRow[]>();
+    for (const row of claimed) {
+      const key = groupKey(row);
+      const list = groups.get(key) ?? [];
+      list.push(row);
+      groups.set(key, list);
+    }
+    const queue = Array.from(groups.values());
+    const worker = async () => {
+      for (;;) {
+        const group = queue.shift();
+        if (!group) return;
+        for (const row of group) {
+          const result = await processWebhookEventRow({
+            id: row.id,
+            channel: row.channel,
+            payload: row.payload as MetaWebhookPayload,
+          });
+          if (result.ok) {
+            processed++;
+          } else {
+            failed++;
+            errors.push({ id: row.id, error: result.error || "unknown" });
+          }
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
   }
 
   // Verifica dead letters + queue stall y notifica si aplica (cooldown interno).
@@ -81,7 +135,7 @@ async function processBatch() {
     .lt("hit_at", rateLimitCutoff);
 
   return NextResponse.json({
-    batch: rows?.length ?? 0,
+    batches,
     processed,
     failed,
     errors,

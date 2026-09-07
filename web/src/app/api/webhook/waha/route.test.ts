@@ -12,6 +12,11 @@ vi.mock("@/lib/rate-limit", () => ({
   rateLimitWithWhitelist: vi.fn().mockResolvedValue({ ok: true }),
 }));
 
+const processRow = vi.fn();
+vi.mock("@/lib/smarttalk/meta-webhook", () => ({
+  processWebhookEventRow: (...args: unknown[]) => processRow(...args),
+}));
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 const SECRET = "test-secret-xyz";
 const BODY = JSON.stringify({ event: "message", data: { id: "1" } });
@@ -40,8 +45,14 @@ describe("POST /api/webhook/waha", () => {
 
     // Reset admin mock to default happy path
     const { createAdminClient } = await import("@/lib/supabase/admin");
-    const insertMock = vi.fn().mockResolvedValue({ error: null });
-    const fromMock = vi.fn().mockReturnValue({ insert: insertMock });
+    processRow.mockReset().mockResolvedValue({ ok: true, processed: 1 });
+    const insertMock = vi.fn().mockReturnValue({
+      select: () => ({ single: async () => ({ data: { id: "evt-1" }, error: null }) }),
+    });
+    const updateMock = vi.fn().mockReturnValue({
+      eq: () => ({ eq: async () => ({ error: null }) }),
+    });
+    const fromMock = vi.fn().mockReturnValue({ insert: insertMock, update: updateMock });
     (createAdminClient as ReturnType<typeof vi.fn>).mockReturnValue({
       from: fromMock,
     });
@@ -75,11 +86,39 @@ describe("POST /api/webhook/waha", () => {
     const { createAdminClient } = await import("@/lib/supabase/admin");
     const admin = (createAdminClient as ReturnType<typeof vi.fn>).mock.results[0].value;
     const insertCall = admin.from("webhook_events").insert;
+    // Un "message" entrante se atiende en línea: se reclama como "processing"
+    // y se procesa en la misma petición (respuesta del agente al instante).
     expect(insertCall).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: "waha",
-        status: "pending",
+        status: "processing",
       })
+    );
+    expect(processRow).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "evt-1", channel: "waha" })
+    );
+  });
+
+  it("queues (pending) events that are not handled inline, e.g. message.ack", async () => {
+    const body = JSON.stringify({ event: "message.ack", payload: { id: "1" } });
+    const res = await POST(makeRequest(body, makeHmac(body, SECRET)) as any);
+    expect(res.status).toBe(200);
+    const { createAdminClient } = await import("@/lib/supabase/admin");
+    const admin = (createAdminClient as ReturnType<typeof vi.fn>).mock.results.at(-1)!.value;
+    expect(admin.from("webhook_events").insert).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "pending" })
+    );
+    expect(processRow).not.toHaveBeenCalled();
+  });
+
+  it("re-queues the event as pending when inline processing fails", async () => {
+    processRow.mockResolvedValue({ ok: false, error: "boom" });
+    const res = await POST(makeRequest(BODY, makeHmac(BODY, SECRET)) as any);
+    expect(res.status).toBe(200);
+    const { createAdminClient } = await import("@/lib/supabase/admin");
+    const admin = (createAdminClient as ReturnType<typeof vi.fn>).mock.results.at(-1)!.value;
+    expect(admin.from("webhook_events").update).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "pending" })
     );
   });
 });

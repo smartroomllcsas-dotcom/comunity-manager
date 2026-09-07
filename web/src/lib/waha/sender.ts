@@ -35,5 +35,25 @@ export async function sendWahaText(
     text: input.text,
   });
 
-  return { externalId: (r as { id: string }).id };
+  return { externalId: wahaExternalId(r, `${digits}@c.us`) };
+}
+
+/**
+ * Id del mensaje tal como llegará luego en el webhook (`true_<chat>_<id>`),
+ * para que el eco fromMe se reconozca como el mismo mensaje. WAHA responde
+ * distinto según el motor: `id` string, `id._serialized` (WEBJS) o
+ * `key.id` (NOWEB).
+ */
+export function wahaExternalId(r: unknown, chatId: string): string {
+  const o = (r ?? {}) as {
+    id?: string | { _serialized?: string; id?: string };
+    key?: { id?: string; remoteJid?: string; fromMe?: boolean };
+  };
+  if (typeof o.id === "string" && o.id) return o.id;
+  if (o.id && typeof o.id === "object") {
+    if (o.id._serialized) return o.id._serialized;
+    if (o.id.id) return `true_${chatId}_${o.id.id}`;
+  }
+  if (o.key?.id) return `true_${o.key.remoteJid || chatId}_${o.key.id}`;
+  return "";
 }
