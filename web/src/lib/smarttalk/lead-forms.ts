@@ -184,7 +184,11 @@ export async function ingestGraphLead(
     if (!fullName && /full.?name|nombre/i.test(name)) fullName = answer;
   }
 
-  const waId = phone || email || `lead:${leadgenId}`;
+  // wa_id SIEMPRE en dígitos (sin "+"): así coincide con el contacto que crea
+  // el webhook de WhatsApp cuando el lead responde. Antes el formulario
+  // guardaba "+57…" y WhatsApp "57…", y quedaban dos fichas del mismo lead:
+  // el "No"/Perdido caía en una y la sincronización seguía viendo la otra.
+  const waId = (phone ? phone.replace(/\D/g, "") : "") || email || `lead:${leadgenId}`;
   const leadMeta: Record<string, string> = {
     source: "facebook_lead_form",
     leadgen_id: leadgenId,
