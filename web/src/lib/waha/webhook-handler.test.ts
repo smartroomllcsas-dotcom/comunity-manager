@@ -3,6 +3,15 @@ import { processWahaWebhookEvent } from "./webhook-handler";
 import type { WahaMessageEvent } from "./types";
 
 // ─── Billing mock ───────────────────────────────────────────────────────────
+// El agente de IA y el análisis de adjuntos no forman parte de estas pruebas.
+vi.mock("@/lib/chatbot/engine", () => ({
+  processIncomingWithChatbot: vi.fn(async () => true),
+}));
+vi.mock("@/lib/chatbot/media-understanding", () => ({
+  understandInboundMedia: vi.fn(async () => ""),
+  inboundContentToText: vi.fn(() => ""),
+}));
+
 vi.mock("@/lib/billing/service", () => ({
   checkBillingFeature: vi.fn().mockResolvedValue({ allowed: true }),
 }));

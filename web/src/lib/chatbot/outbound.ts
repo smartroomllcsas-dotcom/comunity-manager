@@ -37,6 +37,29 @@ export async function getOutboundSender(
     .maybeSingle();
   if (!channel) return null;
 
+  // WhatsApp por código QR (WAHA): no usa token de Meta; envía por la sesión
+  // de la marca. Devuelve la misma forma { messages: [{ id }] } que Cloud.
+  if (channel.type === "waha") {
+    const { sendWahaText } = await import("@/lib/waha/sender");
+    const { wahaFromEnv } = await import("@/lib/waha/client");
+    const sendText = async (to: string, text: string) => {
+      const { externalId } = await sendWahaText({
+        admin,
+        channelId,
+        toPhone: to,
+        text,
+        client: wahaFromEnv(),
+      });
+      return { messages: [{ id: externalId }] };
+    };
+    return {
+      channelType: channel.type,
+      sendText,
+      // Sin envío de adjuntos por WAHA todavía: se manda el enlace como texto.
+      sendMedia: (to, _kind, url, filename) => sendText(to, `${filename ? `${filename}: ` : ""}${url}`),
+    };
+  }
+
   const token = resolveToken(channel.access_token_ciphertext, channel.access_token);
   if (!token) return null;
 

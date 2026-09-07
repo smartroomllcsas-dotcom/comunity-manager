@@ -135,6 +135,26 @@ export async function processWahaWebhookEvent(
         .maybeSingle();
       if (dup) return { ok: true };
     }
+    // Eco de lo que envió la propia plataforma (agente de IA o asesor): ya
+    // está guardado como saliente con otro id; no se duplica.
+    if (isFromMe && typeof p.body === "string" && p.body.trim()) {
+      try {
+        const since = new Date(Date.now() - 3 * 60_000).toISOString();
+        const { data: echo } = await admin
+          .from("messages")
+          .select("id, content")
+          .eq("direction", "outbound")
+          .gte("created_at", since)
+          .order("created_at", { ascending: false })
+          .limit(20);
+        const body = p.body.trim();
+        if ((echo || []).some((m) => String((m.content as { text?: string } | null)?.text || "").trim() === body)) {
+          return { ok: true };
+        }
+      } catch {
+        // best-effort: si la comprobación falla, se guarda igual
+      }
+    }
 
     // Look up channel via waha_sessions (session_name lives there, not in channels)
     const { data: session } = await admin
@@ -330,6 +350,29 @@ export async function processWahaWebhookEvent(
         updated_at: new Date().toISOString(),
       })
       .eq("id", conversationId);
+
+    // 5. Agente de IA (mismo motor que WhatsApp oficial / Instagram): sólo
+    //    para mensajes entrantes del cliente. Best-effort: nunca rompe la
+    //    ingesta. Responde con el agente de la marca si está activo.
+    if (!isFromMe) {
+      const messageText =
+        msgType === "text" ? bodyText : (await import("@/lib/chatbot/media-understanding")).inboundContentToText(content);
+      if (messageText) {
+        try {
+          const { processIncomingWithChatbot } = await import("@/lib/chatbot/engine");
+          await processIncomingWithChatbot({
+            conversationId,
+            contactWaId: waId,
+            contactId: contactRowId,
+            organizationId: orgId,
+            channelId,
+            messageText,
+          });
+        } catch (e) {
+          console.error("[waha] agente de IA falló:", e);
+        }
+      }
+    }
 
     return { ok: true };
   }
