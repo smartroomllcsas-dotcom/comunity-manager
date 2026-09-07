@@ -132,8 +132,9 @@ export type HeaderLocationValues = {
 
 /** Construye el payload `components` esperado por la WhatsApp Cloud API. Soporta HEADER + BODY + BUTTONS (quick_reply + url). */
 export function buildTemplateComponents(params: {
-  bodyIndices: TemplateVarKey[];
-  bodyValues: Record<TemplateVarKey, string>;
+  /** Claves numeradas (1, 2 o "1", "2") o con nombre ("nombre"). */
+  bodyIndices: Array<TemplateVarKey | number>;
+  bodyValues: Record<TemplateVarKey | number, string>;
   header?: HeaderInfo;
   headerTextValues?: Record<number, string>;
   headerMediaUrl?: string;
@@ -204,11 +205,13 @@ export function buildTemplateComponents(params: {
       type: "body",
       // Meta exige `parameter_name` para plantillas con variables con nombre
       // ({{nombre}}); las numeradas ({{1}}) van por posición.
-      parameters: params.bodyIndices.map((key) =>
-        /^\d+$/.test(key)
-          ? { type: "text", text: params.bodyValues[key] ?? "" }
-          : { type: "text", parameter_name: key, text: params.bodyValues[key] ?? "" }
-      ),
+      parameters: params.bodyIndices.map((rawKey) => {
+        const key = String(rawKey);
+        const text = params.bodyValues[rawKey] ?? params.bodyValues[key] ?? "";
+        return /^\d+$/.test(key)
+          ? { type: "text", text }
+          : { type: "text", parameter_name: key, text };
+      }),
     });
   }
 
