@@ -10,6 +10,38 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 // Anthropic devolvía 404 (model not_found), por eso el agente no respondía.
 const CHATBOT_MODEL = process.env.CHATBOT_AI_MODEL || "claude-sonnet-5";
 
+/**
+ * Historial en el formato del modelo. Debe empezar y terminar con un turno del
+ * cliente: si el último guardado es saliente (respuesta del asesor desde el
+ * celular, eco, orden por fecha del propio WhatsApp), el modelo rechazaba la
+ * llamada ("must end with a user message") y el agente se quedaba callado.
+ */
+export function toModelHistory(
+  rows: Array<{ direction: string; content: unknown }>,
+  currentText: string
+): { role: "user" | "assistant"; content: string }[] {
+  const out: { role: "user" | "assistant"; content: string }[] = [];
+  for (const m of [...rows].reverse()) {
+    // Adjuntos: usa la transcripción/descripción guardada en content.ai_text
+    // (ver media-understanding.ts) en vez de un "[media]" opaco.
+    const text = String(inboundContentToText(m.content) || "").trim();
+    if (!text) continue;
+    const role = m.direction === "inbound" ? ("user" as const) : ("assistant" as const);
+    if (out.length === 0 && role === "assistant") continue;
+    const last = out[out.length - 1];
+    if (last && last.role === role) {
+      last.content = `${last.content}\n${text}`;
+    } else {
+      out.push({ role, content: text });
+    }
+  }
+  const current = (currentText || "").trim();
+  if (out.length === 0 || out[out.length - 1].role !== "user") {
+    out.push({ role: "user", content: current || "Hola" });
+  }
+  return out;
+}
+
 export async function generateAIResponse(params: {
   systemPrompt: string;
   conversationHistory: { role: "user" | "assistant"; content: string }[];
@@ -184,12 +216,7 @@ export async function processWithAIAgent(
     .order("created_at", { ascending: false })
     .limit(20);
 
-  const chatHistory = (recentMessages || []).reverse().map((m) => ({
-    role: m.direction === "inbound" ? ("user" as const) : ("assistant" as const),
-    // Adjuntos: usa la transcripción/descripción guardada en content.ai_text
-    // (ver media-understanding.ts) en vez de un "[media]" opaco.
-    content: inboundContentToText(m.content),
-  }));
+  const chatHistory = toModelHistory(recentMessages || [], context.messageText);
 
   // Build knowledge base from agent's sources
   const { data: sources } = await admin
@@ -530,12 +557,7 @@ export async function processWithAI(
     .order("created_at", { ascending: false })
     .limit(20);
 
-  const chatHistory = (recentMessages || []).reverse().map((m) => ({
-    role: m.direction === "inbound" ? ("user" as const) : ("assistant" as const),
-    // Adjuntos: usa la transcripción/descripción guardada en content.ai_text
-    // (ver media-understanding.ts) en vez de un "[media]" opaco.
-    content: inboundContentToText(m.content),
-  }));
+  const chatHistory = toModelHistory(recentMessages || [], context.messageText);
 
   const knowledgeContext =
     config.knowledge_base.length > 0
