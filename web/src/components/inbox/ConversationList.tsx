@@ -4,12 +4,15 @@ import { useInboxStore } from "@/stores/inbox";
 import { ConversationFilters } from "./ConversationFilters";
 import { ConversationItem } from "./ConversationItem";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Loader2, Inbox } from "lucide-react";
+import { Loader2, Inbox, AlertTriangle } from "lucide-react";
 import type { Conversation } from "@/types/database";
 
 interface ConversationListProps {
   conversations?: Conversation[];
   isLoading?: boolean;
+  /** La consulta falló (sesión vencida, red, servidor): se muestra y se puede reintentar. */
+  errorMessage?: string | null;
+  onRetry?: () => void;
   hasNextPage?: boolean;
   isFetchingNextPage?: boolean;
   onLoadMore?: () => void;
@@ -18,6 +21,8 @@ interface ConversationListProps {
 export function ConversationList({
   conversations = [],
   isLoading = false,
+  errorMessage = null,
+  onRetry,
   hasNextPage = false,
   isFetchingNextPage = false,
   onLoadMore,
@@ -69,6 +74,21 @@ export function ConversationList({
         {isLoading ? (
           <div className="flex items-center justify-center py-8" role="status" aria-live="polite">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-label="Cargando conversaciones" />
+          </div>
+        ) : errorMessage ? (
+          <div className="flex flex-col items-center gap-2 px-4 py-8 text-center" role="alert">
+            <AlertTriangle className="h-5 w-5 text-amber-400" />
+            <p className="text-xs text-[var(--text-secondary)]">No se pudieron cargar los chats.</p>
+            <p className="text-[11px] text-[var(--text-tertiary)]">{errorMessage}</p>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="mt-1 rounded-md border border-white/[0.08] px-3 py-1.5 text-xs text-[var(--text-primary)] hover:bg-[var(--inbox-hover)]"
+              >
+                Reintentar
+              </button>
+            )}
           </div>
         ) : conversations?.length === 0 ? (
           <EmptyState

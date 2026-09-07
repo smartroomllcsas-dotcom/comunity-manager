@@ -3,7 +3,30 @@ import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useCurrentAgent } from "./useCurrentAgent";
 import { useInboxStore } from "@/stores/inbox";
 import type { Conversation } from "@/types/database";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
+
+// Vista con la que el servidor renderiza la semilla (page.tsx): sólo con estos
+// filtros la semilla es válida como dato inicial. Para cualquier otra vista
+// (otra marca, búsqueda…) se muestra "cargando" en vez de una lista vacía.
+const DEFAULT_VIEW = { filter: "all", searchQuery: "", statusFilter: "open", channelFilter: "all", brandFilter: "all" };
+
+// La lista se considera fresca durante este lapso: evita re-consultar al
+// volver a la pestaña o al cambiar y volver a un filtro en pocos segundos.
+const CONVERSATIONS_STALE_MS = 15_000;
+// Muchos mensajes seguidos (p. ej. 20 plantillas o un lead escribiendo en
+// ráfaga) disparaban una recarga completa por cada uno. Se agrupan.
+const REALTIME_DEBOUNCE_MS = 1_500;
+const SEARCH_DEBOUNCE_MS = 300;
+
+/** Valor retrasado: la búsqueda no consulta al servidor en cada tecla. */
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(t);
+  }, [value, delayMs]);
+  return debounced;
+}
 import { getConversationChannelKind } from "@/components/inbox/ChannelBadge";
 import { createClient } from "@/lib/supabase/client";
 
@@ -80,18 +103,24 @@ export function filterInboxConversations(
 export function useConversations(initialData: Conversation[] = []) {
   const { data: agent } = useCurrentAgent();
   const filter = useInboxStore((s) => s.filter);
-  const searchQuery = useInboxStore((s) => s.searchQuery);
+  const rawSearchQuery = useInboxStore((s) => s.searchQuery);
+  const searchQuery = useDebouncedValue(rawSearchQuery, SEARCH_DEBOUNCE_MS);
   const statusFilter = useInboxStore((s) => s.statusFilter);
   const channelFilter = useInboxStore((s) => s.channelFilter);
   const brandFilter = useInboxStore((s) => s.brandFilter);
   const queryClient = useQueryClient();
+  const invalidateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!agent?.organization_id) return;
 
     const supabase = createClient();
     const invalidate = () => {
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      if (invalidateTimer.current) clearTimeout(invalidateTimer.current);
+      invalidateTimer.current = setTimeout(() => {
+        invalidateTimer.current = null;
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      }, REALTIME_DEBOUNCE_MS);
     };
 
     const conversationsChannel = supabase
@@ -121,32 +150,47 @@ export function useConversations(initialData: Conversation[] = []) {
       .subscribe();
 
     return () => {
+      if (invalidateTimer.current) clearTimeout(invalidateTimer.current);
       supabase.removeChannel(conversationsChannel);
       supabase.removeChannel(messagesChannel);
     };
   }, [agent?.organization_id, queryClient]);
 
+  // La semilla del servidor sólo sirve para la vista por defecto. Antes se
+  // sembraba TODA vista (filtrando la semilla por marca): al cambiar a otra
+  // empresa la lista aparecía vacía al instante, sin "cargando", y si la
+  // consulta tardaba o fallaba el usuario creía que no había chats y
+  // recargaba la página.
+  const isDefaultView =
+    filter === DEFAULT_VIEW.filter &&
+    searchQuery === DEFAULT_VIEW.searchQuery &&
+    statusFilter === DEFAULT_VIEW.statusFilter &&
+    channelFilter === DEFAULT_VIEW.channelFilter &&
+    brandFilter === DEFAULT_VIEW.brandFilter;
+
   const query = useInfiniteQuery({
     queryKey: ["conversations", filter, searchQuery, statusFilter, channelFilter, brandFilter],
-    // Do not seed a brand-specific query with conversations from all brands.
-    // The API remains the authorization boundary; this prevents stale visual
-    // data while the request for the selected brand is loading.
-    initialData: {
-      pages: [
-        {
-          conversations: filterInboxConversations(initialData, {
-            filter,
-            searchQuery,
-            statusFilter,
-            channelFilter,
-            brandFilter,
-            agentId: agent?.id,
-          }),
-          nextCursor: null,
-        },
-      ],
-      pageParams: [null],
-    },
+    initialData:
+      isDefaultView && initialData.length > 0
+        ? {
+            pages: [
+              {
+                conversations: filterInboxConversations(initialData, {
+                  filter,
+                  searchQuery,
+                  statusFilter,
+                  channelFilter,
+                  brandFilter,
+                  agentId: agent?.id,
+                }),
+                nextCursor: null,
+              },
+            ],
+            pageParams: [null as string | null],
+          }
+        : undefined,
+    staleTime: CONVERSATIONS_STALE_MS,
+    retry: 1,
     initialPageParam: null as string | null,
     queryFn: async ({ pageParam }) => {
       const params = new URLSearchParams();

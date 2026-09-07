@@ -27,6 +27,9 @@ export function InboxClient({ initialConversations, initialChannels, initialBran
   const {
     data: conversations,
     isLoading,
+    isError,
+    error,
+    refetch,
     hasNextPage,
     isFetchingNextPage,
     fetchNextPage,
@@ -138,6 +141,8 @@ export function InboxClient({ initialConversations, initialChannels, initialBran
             <ConversationList
               conversations={conversations || []}
               isLoading={isLoading}
+              errorMessage={isError ? (error instanceof Error ? error.message : "Error de red") : null}
+              onRetry={() => void refetch()}
               hasNextPage={hasNextPage}
               isFetchingNextPage={isFetchingNextPage}
               onLoadMore={loadMoreConversations}
