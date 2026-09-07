@@ -383,15 +383,19 @@ export async function processWahaWebhookEvent(
       let humanActive = false;
       try {
         const since = new Date(Date.now() - 60 * 60_000).toISOString();
-        const { data: recentHuman } = await admin
+        const { data: recentOut } = await admin
           .from("messages")
-          .select("id")
+          .select("id, is_bot, content")
           .eq("conversation_id", conversationId)
           .eq("direction", "outbound")
-          .or("is_bot.is.null,is_bot.eq.false")
           .gte("created_at", since)
-          .limit(1);
-        humanActive = Boolean(recentHuman && recentHuman.length > 0);
+          .order("created_at", { ascending: false })
+          .limit(30);
+        const rows = (recentOut || []) as Array<{ is_bot: boolean | null; content: { text?: string } | null }>;
+        const botTexts = new Set(rows.filter((m) => m.is_bot).map((m) => String(m.content?.text || "").trim()));
+        // Un eco del propio agente (guardado como saliente sin is_bot) no cuenta
+        // como humano: mismo texto que un mensaje del bot.
+        humanActive = rows.some((m) => !m.is_bot && !botTexts.has(String(m.content?.text || "").trim()));
       } catch {
         humanActive = false;
       }
