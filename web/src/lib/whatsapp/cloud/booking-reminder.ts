@@ -65,13 +65,33 @@ export async function setBookingReminderSettings(
   return { ok: true, value };
 }
 
-/** Todas las marcas con recordatorio configurado. */
+/**
+ * Marcas con el recordatorio activo. Si una marca lo activó sin plantilla,
+ * se crea la plantilla en Meta aquí mismo (el servidor tiene las
+ * credenciales) y queda seleccionada; se enviará cuando Meta la apruebe.
+ */
 async function listConfiguredBrands(): Promise<Array<{ brandId: string; settings: BookingReminderSettings }>> {
   const pub = createAdminClient("public");
   const { data } = await pub.from("settings").select("key, value").like("key", `${KEY_PREFIX}%`);
-  return (data || [])
+  const enabled = (data || [])
     .map((row) => ({ brandId: String(row.key).slice(KEY_PREFIX.length), settings: sanitize(row.value) }))
-    .filter((b) => b.settings.enabled && b.settings.template_id);
+    .filter((b) => b.settings.enabled);
+
+  const out: Array<{ brandId: string; settings: BookingReminderSettings }> = [];
+  for (const b of enabled) {
+    if (!b.settings.template_id) {
+      const { data: brand } = await pub.from("cm_clients").select("name").eq("id", b.brandId).maybeSingle();
+      const created = await ensureReminderTemplate(b.brandId, (brand?.name as string) || "nuestro equipo");
+      if ("error" in created) {
+        console.warn("[booking-reminder] no se pudo crear la plantilla", { brandId: b.brandId, error: created.error });
+        continue;
+      }
+      b.settings.template_id = created.id;
+      await setBookingReminderSettings(b.brandId, b.settings);
+    }
+    out.push(b);
+  }
+  return out;
 }
 
 /**
