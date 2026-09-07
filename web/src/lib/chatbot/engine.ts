@@ -86,7 +86,14 @@ export async function processIncomingWithChatbot(context: FlowContext): Promise<
   if (contactId && context.messageText) {
     try {
       const { looksLikeOptOut, markDoNotContact } = await import("@/lib/smarttalk/do-not-contact");
-      if (looksLikeOptOut(context.messageText)) {
+      // ¿Es la primera respuesta del cliente? (el mensaje actual ya está guardado)
+      const { count: inboundCount } = await admin
+        .from("messages")
+        .select("id", { count: "exact", head: true })
+        .eq("conversation_id", context.conversationId)
+        .eq("direction", "inbound");
+      const firstReply = (inboundCount ?? 0) <= 1;
+      if (looksLikeOptOut(context.messageText, { firstReply })) {
         await markDoNotContact(admin, {
           contactId,
           organizationId: context.organizationId,

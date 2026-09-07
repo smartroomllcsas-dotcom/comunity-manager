@@ -18,6 +18,15 @@ describe("looksLikeOptOut", () => {
   );
 });
 
+describe("looksLikeOptOut first reply", () => {
+  it("a bare 'No' counts only as the first reply", () => {
+    expect(looksLikeOptOut("No", { firstReply: true })).toBe(true);
+    expect(looksLikeOptOut("no gracias", { firstReply: true })).toBe(true);
+    expect(looksLikeOptOut("No", { firstReply: false })).toBe(false);
+    expect(looksLikeOptOut("no tengo presupuesto aún", { firstReply: true })).toBe(false);
+  });
+});
+
 describe("isDoNotContact", () => {
   it("flag or stop stage", () => {
     expect(isDoNotContact({ custom_fields: { do_not_contact: true } })).toBe(true);

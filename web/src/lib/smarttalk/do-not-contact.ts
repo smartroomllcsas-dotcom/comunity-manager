@@ -12,10 +12,20 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export const OPT_OUT_PATTERN =
   /\b(no (quiero|deseo|me interesa|estoy interesad[oa]|necesito)( (que me|ser|nada|m[aá]s|que me sigan))?( (contact|escrib|llam|molest|env[ií]|mand)\w*)?|no me (escriban|escribas|llamen|llames|contacten|contactes|molesten|molestes|manden|mandes|env[ií]en)|dejen? de (escribir|llamar|molestar|enviar|mandar)|no (vuelvan|vuelvas) a (escribir|llamar|contactar)|no molestar|darme de baja|d[eé]nme de baja|quitenme|qu[ií]tame|elim[ií]n(a|en)me|borr(a|en)me|unsubscribe|stop)\b/i;
 
-export function looksLikeOptOut(text: string | null | undefined): boolean {
+/** Respuesta seca de rechazo a la primera pregunta ("¿te interesa?"): "No", "no gracias", "nop". */
+export const FIRST_REPLY_NO_PATTERN = /^(no|nop|nope|no,? gracias|gracias,? no|no,? por ahora|no me interesa|no,? no me interesa)[.!…]*$/i;
+
+export function looksLikeOptOut(
+  text: string | null | undefined,
+  opts: { firstReply?: boolean } = {},
+): boolean {
   const t = (text || "").trim();
   if (!t || t.length > 300) return false; // frases cortas y directas; textos largos los evalúa la IA
-  return OPT_OUT_PATTERN.test(t);
+  if (OPT_OUT_PATTERN.test(t)) return true;
+  // Un "No" a secas sólo cuenta como rechazo si es la primera respuesta del
+  // cliente (contesta a la plantilla de primer contacto); en medio de una
+  // conversación puede ser respuesta a cualquier otra pregunta.
+  return Boolean(opts.firstReply) && FIRST_REPLY_NO_PATTERN.test(t);
 }
 
 export function isDoNotContact(
