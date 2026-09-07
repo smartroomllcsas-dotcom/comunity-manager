@@ -63,7 +63,12 @@ interface Settings {
   channel_instructions: { whatsapp?: string | null; instagram?: string | null; messenger?: string | null };
   /** Recordatorio de reunión (Cal.com) por WhatsApp, N minutos antes. */
   booking_reminder: { enabled: boolean; template_id: string | null; minutes_before: number };
+  /** Respuestas exactas por canal: patrón → texto tal cual (sin IA). */
+  fixed_replies: { whatsapp?: FixedReply[]; instagram?: FixedReply[]; messenger?: FixedReply[] };
 }
+
+type FixedReply = { match: string; reply: string; unless?: string; once?: boolean };
+type ChannelKey = "whatsapp" | "instagram" | "messenger";
 
 const CHANNEL_INSTRUCTION_FIELDS: Array<{
   key: "whatsapp" | "instagram" | "messenger";
@@ -120,6 +125,7 @@ const emptySettings: Settings = {
   response_delay_seconds: 0,
   channel_instructions: {},
   booking_reminder: { enabled: false, template_id: null, minutes_before: 60 },
+  fixed_replies: {},
 };
 
 export default function LeadAutomationPage() {
@@ -246,7 +252,16 @@ export default function LeadAutomationPage() {
       const res = await fetch("/api/whatsapp/cloud/lead-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, ...settings }),
+        body: JSON.stringify({
+          clientId,
+          ...settings,
+          fixed_replies: Object.fromEntries(
+            (["whatsapp", "instagram", "messenger"] as ChannelKey[]).map((k) => [
+              k,
+              (settings.fixed_replies?.[k] ?? []).filter((r) => r.match.trim() && r.reply.trim()),
+            ])
+          ),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "No se pudo guardar");
@@ -600,6 +615,85 @@ export default function LeadAutomationPage() {
                     />
                   </div>
                 ))}
+              </div>
+
+              {/* Respuestas exactas por canal */}
+              <div className="rounded-md border border-[#2d333b] bg-[#0d1117]/60 p-3 space-y-3">
+                <div>
+                  <p className="text-sm font-medium text-white">Respuestas automáticas exactas (opcional)</p>
+                  <p className="text-xs text-[#8b949e]">
+                    Cuando el mensaje del cliente contenga alguna de las palabras clave, la plataforma envía el
+                    texto tal cual, sin pasar por la IA. Útil para mensajes que la empresa exige palabra por
+                    palabra (condiciones, bienvenida, pasos).
+                  </p>
+                </div>
+                {CHANNEL_INSTRUCTION_FIELDS.map((field) => {
+                  const rules = settings.fixed_replies?.[field.key] ?? [];
+                  const update = (next: FixedReply[]) =>
+                    setSettings((s) => ({
+                      ...s,
+                      fixed_replies: { ...(s.fixed_replies || {}), [field.key]: next },
+                    }));
+                  return (
+                    <div key={field.key} className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs text-[#8b949e]">{field.label}</label>
+                        <button
+                          type="button"
+                          className="text-xs text-[#58a6ff] hover:underline"
+                          onClick={() => update([...rules, { match: "", reply: "", once: true }])}
+                        >
+                          + Agregar respuesta
+                        </button>
+                      </div>
+                      {rules.length === 0 && (
+                        <p className="text-xs text-[#6e7681]">Sin respuestas exactas para {field.label}.</p>
+                      )}
+                      {rules.map((rule, idx) => (
+                        <div key={idx} className="rounded-md border border-[#2d333b] p-2 space-y-2">
+                          <input
+                            className="w-full rounded-md bg-[#0d1117] border border-[#2d333b] px-3 py-1.5 text-sm text-white"
+                            placeholder="Palabras clave separadas por | (ej: catálogo|precios|información)"
+                            value={rule.match}
+                            onChange={(e) => update(rules.map((r, i) => (i === idx ? { ...r, match: e.target.value } : r)))}
+                          />
+                          <textarea
+                            rows={4}
+                            className="w-full rounded-md bg-[#0d1117] border border-[#2d333b] px-3 py-2 text-sm text-white"
+                            placeholder="Texto exacto que se enviará"
+                            value={rule.reply}
+                            onChange={(e) => update(rules.map((r, i) => (i === idx ? { ...r, reply: e.target.value } : r)))}
+                          />
+                          <input
+                            className="w-full rounded-md bg-[#0d1117] border border-[#2d333b] px-3 py-1.5 text-sm text-white"
+                            placeholder="No enviar si el cliente ya escribió… (opcional, ej: quiero ser mayorista)"
+                            value={rule.unless ?? ""}
+                            onChange={(e) =>
+                              update(rules.map((r, i) => (i === idx ? { ...r, unless: e.target.value || undefined } : r)))
+                            }
+                          />
+                          <div className="flex items-center justify-between">
+                            <label className="flex items-center gap-2 text-xs text-[#8b949e]">
+                              <input
+                                type="checkbox"
+                                checked={rule.once !== false}
+                                onChange={(e) => update(rules.map((r, i) => (i === idx ? { ...r, once: e.target.checked } : r)))}
+                              />
+                              Enviar solo una vez por conversación
+                            </label>
+                            <button
+                              type="button"
+                              className="text-xs text-[#f85149] hover:underline"
+                              onClick={() => update(rules.filter((_, i) => i !== idx))}
+                            >
+                              Quitar
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
 
               <div>

@@ -20,6 +20,7 @@ import {
   getChannelInstructions,
   setChannelInstructions,
 } from "@/lib/whatsapp/cloud/channel-instructions";
+import { getFixedReplies, setFixedReplies } from "@/lib/whatsapp/cloud/fixed-replies";
 import {
   REMINDER_TEMPLATE_NAME,
   ensureReminderTemplate,
@@ -30,6 +31,13 @@ import {
 const roleValues = AGENT_ROLES.map((o) => o.value) as [string, ...string[]];
 const toneValues = AGENT_TONES.map((o) => o.value) as [string, ...string[]];
 const goalValues = AGENT_GOALS.map((o) => o.value) as [string, ...string[]];
+
+const fixedReplySchema = z.object({
+  match: z.string().min(1).max(500),
+  reply: z.string().min(1).max(4000),
+  unless: z.string().max(500).optional(),
+  once: z.boolean().optional(),
+});
 
 const putSchema = z.object({
   clientId: z.string().uuid(),
@@ -52,6 +60,15 @@ const putSchema = z.object({
       messenger: z.string().max(CHANNEL_INSTRUCTION_MAX).nullable().optional(),
     })
     .optional(),
+  // Respuestas exactas por canal: si el mensaje del cliente coincide con el
+  // patrón, se envía el texto tal cual (sin IA).
+  fixed_replies: z
+    .object({
+      whatsapp: z.array(fixedReplySchema).max(20).optional(),
+      instagram: z.array(fixedReplySchema).max(20).optional(),
+      messenger: z.array(fixedReplySchema).max(20).optional(),
+    })
+    .optional(),
   // Recordatorio de reunión (N minutos antes de la cita agendada en Cal.com).
   booking_reminder: z
     .object({
@@ -65,9 +82,10 @@ const putSchema = z.object({
 });
 
 async function loadPayload(clientId: string) {
-  const [channel_instructions, booking_reminder] = await Promise.all([
+  const [channel_instructions, booking_reminder, fixed_replies] = await Promise.all([
     getChannelInstructions(clientId),
     getBookingReminderSettings(clientId),
+    getFixedReplies(clientId),
   ]);
   const [{ data: settings }, { data: templates }] = await Promise.all([
     supabaseAdmin
@@ -83,7 +101,7 @@ async function loadPayload(clientId: string) {
   ]);
   return {
     settings: settings
-      ? { ...(settings as Record<string, unknown>), channel_instructions, booking_reminder }
+      ? { ...(settings as Record<string, unknown>), channel_instructions, booking_reminder, fixed_replies }
       : null,
     templates: templates ?? [],
   };
@@ -108,13 +126,19 @@ export async function PUT(request: NextRequest) {
       { status: 422 }
     );
   }
-  const { clientId, channel_instructions, booking_reminder, create_reminder_template, ...fields } = parsed.data;
+  const { clientId, channel_instructions, booking_reminder, fixed_replies, create_reminder_template, ...fields } =
+    parsed.data;
 
   const access = await getCmClientAccess(request, clientId);
   if (!access) return NextResponse.json({ error: "No autorizado para esta marca" }, { status: 403 });
 
   if (channel_instructions !== undefined) {
     const saved = await setChannelInstructions(access.clientId, channel_instructions);
+    if (!saved.ok) return NextResponse.json({ error: saved.error }, { status: 500 });
+  }
+
+  if (fixed_replies !== undefined) {
+    const saved = await setFixedReplies(access.clientId, fixed_replies);
     if (!saved.ok) return NextResponse.json({ error: saved.error }, { status: 500 });
   }
 
