@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/components/AuthProvider'
 import WhatsAppConnectButton from '@/components/WhatsAppConnectButton'
+import WahaConnect from '@/components/channels/WahaConnect'
 import WhatsAppSetupPanel from '@/components/WhatsAppSetupPanel'
 import { supabase } from '@/lib/supabase'
 import type { CMClient } from '@/types/database'
@@ -1040,6 +1041,41 @@ export default function ClientsPage() {
                         userId={user?.id}
                         onConnected={loadData}
                         compact
+                      />
+                    </div>
+                  )}
+
+                  {/* WhatsApp por código QR (WAHA): canal aparte del oficial de
+                      Meta; se puede tener los dos a la vez. */}
+                  {isChannelConnected(channelState.whatsappQr) ? (
+                    <div className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                        <span className="text-[11px] font-medium text-emerald-400">WhatsApp por QR conectado</span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-slate-300">
+                        Sesión: <span className="text-white">{channelState.whatsappQr.name || 'WhatsApp (QR)'}</span>
+                      </p>
+                      <div className="mt-2">
+                        <WahaConnect
+                          brandId={client.id}
+                          onConnected={loadData}
+                          label="Reconectar por QR"
+                          className="inline-flex w-full items-center justify-center rounded-md border border-white/10 bg-slate-800 px-3 py-2 text-[11px] text-slate-100 transition hover:bg-slate-700"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mb-3">
+                      <WahaConnect
+                        brandId={client.id}
+                        onConnected={loadData}
+                        label={
+                          channelState.whatsappQr.state === 'disconnected'
+                            ? 'Reconectar WhatsApp por QR'
+                            : 'Conectar WhatsApp por QR'
+                        }
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[11px] font-medium text-emerald-300 transition hover:bg-emerald-500/20"
                       />
                     </div>
                   )}

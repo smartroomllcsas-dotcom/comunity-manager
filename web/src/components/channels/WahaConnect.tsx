@@ -4,11 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 interface Props {
   brandId: string;
   onConnected?: (channelId: string) => void;
+  /** Texto del botón (por defecto "Conectar WhatsApp (Beta)"). */
+  label?: string;
+  /** Clases del botón, para integrarlo en tarjetas (p. ej. Clientes). */
+  className?: string;
 }
 
 type Status = "IDLE" | "STARTING" | "SCAN_QR_CODE" | "WORKING" | "FAILED" | "STOPPED";
 
-export default function WahaConnect({ brandId, onConnected }: Props) {
+export default function WahaConnect({ brandId, onConnected, label, className }: Props) {
   const [open, setOpen] = useState(false);
   const [channelId, setChannelId] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>("IDLE");
@@ -95,9 +99,9 @@ export default function WahaConnect({ brandId, onConnected }: Props) {
       <button
         type="button"
         onClick={() => { setOpen(true); void start(); }}
-        className="rounded bg-emerald-600 px-3 py-2 text-white hover:bg-emerald-700"
+        className={className || "rounded bg-emerald-600 px-3 py-2 text-white hover:bg-emerald-700"}
       >
-        Conectar WhatsApp (Beta)
+        {label || "Conectar WhatsApp (Beta)"}
       </button>
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" role="dialog" aria-modal="true">

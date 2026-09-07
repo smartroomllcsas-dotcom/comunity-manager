@@ -32,7 +32,7 @@
  * que nadie sabría interpretar.
  */
 
-export type BrandChannelKind = "messenger" | "instagram" | "whatsapp";
+export type BrandChannelKind = "messenger" | "instagram" | "whatsapp" | "whatsappQr";
 export type BrandChannelState = "active" | "error" | "disconnected" | "missing";
 
 /** Tipo de `smarttalk.channels` que respalda cada canal de la tarjeta. */
@@ -40,9 +40,11 @@ export const CHANNEL_TYPE_BY_KIND: Record<BrandChannelKind, string[]> = {
   messenger: ["facebook_messenger"],
   instagram: ["instagram"],
   whatsapp: ["whatsapp_business_api", "whatsapp_cloud_api"],
+  // WhatsApp por código QR (WAHA): canal aparte, convive con el oficial.
+  whatsappQr: ["waha"],
 };
 
-export const BRAND_CHANNEL_KINDS: BrandChannelKind[] = ["messenger", "instagram", "whatsapp"];
+export const BRAND_CHANNEL_KINDS: BrandChannelKind[] = ["messenger", "instagram", "whatsapp", "whatsappQr"];
 
 export interface BrandChannelStatus {
   kind: BrandChannelKind;
@@ -93,6 +95,7 @@ export function emptyBrandChannels(): BrandChannelMap {
     messenger: emptyChannelStatus("messenger"),
     instagram: emptyChannelStatus("instagram"),
     whatsapp: emptyChannelStatus("whatsapp"),
+    whatsappQr: emptyChannelStatus("whatsappQr"),
   };
 }
 
@@ -163,7 +166,9 @@ export function summarizeBrandChannels(rows: BrandChannelRow[]): BrandChannelMap
       assetId:
         kind === "whatsapp"
           ? row.whatsapp_phone_number_id ?? null
-          : row.meta_business_id ?? null,
+          : kind === "whatsappQr"
+            ? row.id
+            : row.meta_business_id ?? null,
       activationError: state === "error" ? row.activation_error ?? null : null,
     };
   }
