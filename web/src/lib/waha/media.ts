@@ -40,7 +40,10 @@ export function resolveWahaMediaUrl(url: string, baseUrl = process.env.WAHA_BASE
     const u = new URL(url);
     const base = new URL(baseUrl);
     u.protocol = base.protocol;
-    u.host = base.host;
+    // `host` sin puerto NO borra el puerto anterior (localhost:3000 → host:3000
+    // y la descarga moría por timeout contra Cloudflare); se asigna aparte.
+    u.hostname = base.hostname;
+    u.port = base.port;
     if (base.pathname && base.pathname !== "/") {
       u.pathname = `${base.pathname.replace(/\/$/, "")}${u.pathname}`;
     }

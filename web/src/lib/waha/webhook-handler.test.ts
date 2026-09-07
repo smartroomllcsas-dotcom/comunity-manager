@@ -259,28 +259,41 @@ describe("processWahaWebhookEvent — message (inbound)", () => {
     expect((convoUpdate!.data as Record<string, unknown>).unread_count).toBe(4); // 3 + 1
   });
 
-  it("fromMe=true → no DB writes, returns ok:true", async () => {
-    const { admin, inserts, updates } = makeSelectableAdmin();
+  it("fromMe=true (respuesta desde el celular) → mensaje SALIENTE en la conversación, sin sumar no leídos", async () => {
+    const { admin, inserts, updates } = makeSelectableAdmin({
+      contactRow: { id: "existing-contact-id" },
+      conversationRow: { id: "existing-convo-id", unread_count: 3 },
+    });
 
     const result = await processWahaWebhookEvent({
       id: "row-msg-3",
-      payload: makePayload("message", "brand_abc", {
+      payload: makePayload("message.any", "brand_abc", {
         id: "msg-echo",
         from: "573001112233@c.us",
         fromMe: true,
-        body: "outbound echo",
+        body: "Sí hermosa, lo tenemos",
         type: "chat",
+        notifyName: "Dueño del celular",
       }),
       admin,
     });
 
     expect(result).toEqual({ ok: true });
-    // Only waha_sessions update is allowed (from session lookup in session.status path)
-    // For non-session.status events, no waha_sessions update happens either
-    const nonSessionInserts = inserts.filter((i) => i.table !== "waha_sessions");
-    const nonSessionUpdates = updates.filter((u) => u.table !== "waha_sessions" && u.table !== "channels");
-    expect(nonSessionInserts).toHaveLength(0);
-    expect(nonSessionUpdates).toHaveLength(0);
+
+    const msgInsert = inserts.find((i) => i.table === "messages");
+    expect(msgInsert).toBeDefined();
+    const msg = msgInsert!.data as Record<string, unknown>;
+    expect(msg.direction).toBe("outbound");
+    expect(msg.status).toBe("sent");
+    expect(msg.content).toEqual({ type: "text", text: "Sí hermosa, lo tenemos" });
+
+    // El nombre del contacto no se pisa con el pushName del dueño del celular.
+    const contactUpdate = updates.find((u) => u.table === "contacts");
+    expect((contactUpdate!.data as Record<string, unknown>).name).toBeUndefined();
+
+    const convoUpdate = updates.find((u) => u.table === "conversations");
+    expect((convoUpdate!.data as Record<string, unknown>).unread_count).toBe(3); // sin cambio
+    expect((convoUpdate!.data as Record<string, unknown>).last_message_preview).toBe("Sí hermosa, lo tenemos");
   });
 
   it("group @g.us → no DB writes, returns ok:true", async () => {

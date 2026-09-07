@@ -12,12 +12,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { buildWahaAttachmentContent } from "@/lib/waha/media";
+import { processWahaWebhookEvent } from "@/lib/waha/webhook-handler";
+import type { WahaMessageEvent } from "@/lib/waha/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 const TEXT_FIX_LIMIT = 2000;
 const MEDIA_FIX_LIMIT = 40;
+const FROMME_SCAN_LIMIT = 800;
 
 type MsgRow = {
   id: string;
@@ -126,5 +129,51 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, textFixed, mediaFixed, mediaFailed, mediaPending: pending.length });
+  // 3) Respuestas escritas desde el celular (fromMe) que se descartaron antes
+  //    del 7 sep: se reprocesan desde el evento original y quedan como
+  //    mensajes salientes en su conversación.
+  let fromMeRecovered = 0;
+  let fromMeFailed = 0;
+  {
+    const { data: events } = await admin
+      .from("webhook_events")
+      .select("id, payload")
+      .eq("channel", "waha")
+      .order("created_at", { ascending: false })
+      .limit(FROMME_SCAN_LIMIT);
+    const candidates = (events || [])
+      .map((ev) => ({ id: ev.id as string, payload: ev.payload as WahaMessageEvent }))
+      .filter((ev) => {
+        const p = (ev.payload?.payload || {}) as Record<string, unknown>;
+        return (
+          (ev.payload?.event === "message" || ev.payload?.event === "message.any") &&
+          p.fromMe === true &&
+          typeof p.id === "string"
+        );
+      });
+    const ids = [...new Set(candidates.map((c) => String((c.payload.payload as { id: string }).id)))];
+    const { data: existing } = ids.length
+      ? await admin.from("messages").select("wa_message_id").in("wa_message_id", ids)
+      : { data: [] as Array<{ wa_message_id: string }> };
+    const have = new Set((existing || []).map((m) => m.wa_message_id as string));
+    const seen = new Set<string>();
+    for (const c of candidates) {
+      const waId = String((c.payload.payload as { id: string }).id);
+      if (have.has(waId) || seen.has(waId)) continue;
+      seen.add(waId);
+      const result = await processWahaWebhookEvent({ id: c.id, payload: c.payload, admin });
+      if (result.ok) fromMeRecovered += 1;
+      else fromMeFailed += 1;
+    }
+  }
+
+  return NextResponse.json({
+    ok: true,
+    textFixed,
+    mediaFixed,
+    mediaFailed,
+    mediaPending: pending.length,
+    fromMeRecovered,
+    fromMeFailed,
+  });
 }

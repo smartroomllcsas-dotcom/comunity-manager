@@ -95,8 +95,16 @@ export async function processWahaWebhookEvent(
       _data?: { key?: { remoteJidAlt?: string }; pushName?: string; type?: string };
     };
 
-    if (p.fromMe) return { ok: true }; // outbound echo
-    const from = String(p.from ?? "");
+    // fromMe = lo escribió quien maneja el celular del QR (o la propia
+    // plataforma). Antes se descartaba y el chat sólo mostraba al cliente: el
+    // asesor no veía sus propias respuestas y se perdía. Ahora se guarda como
+    // mensaje saliente. En estos eventos `from` sigue siendo el chat del
+    // cliente (WAHA/NOWEB) y, si viene `to`, ese es el destinatario.
+    const isFromMe = Boolean(p.fromMe);
+    const counterpart = isFromMe && typeof (p as { to?: string }).to === "string" && (p as { to?: string }).to
+      ? String((p as { to?: string }).to)
+      : String(p.from ?? "");
+    const from = counterpart;
     // skip groups, statuses, newsletters
     if (
       from === "status@broadcast" ||
@@ -190,12 +198,13 @@ export async function processWahaWebhookEvent(
       if (insErr) return { ok: false, error: `contact insert: ${insErr.message}` };
       contactRowId = (inserted as { id: string }).id;
     } else {
-      // touch last_message_at + optionally refresh notifyName
+      // touch last_message_at + optionally refresh notifyName (sólo en
+      // entrantes: en un fromMe el pushName es el del dueño del celular).
       await admin
         .from("contacts")
         .update({
           last_message_at: new Date().toISOString(),
-          ...(p.notifyName || p._data?.pushName
+          ...(!isFromMe && (p.notifyName || p._data?.pushName)
             ? { name: p.notifyName ?? p._data?.pushName }
             : {}),
         })
@@ -278,11 +287,11 @@ export async function processWahaWebhookEvent(
       .insert({
         conversation_id: conversationId,
         contact_id: contactRowId,
-        direction: "inbound",
+        direction: isFromMe ? "outbound" : "inbound",
         type: msgType,
         content,
         wa_message_id: p.id ?? null,
-        status: "delivered",
+        status: isFromMe ? "sent" : "delivered",
         is_bot: false,
         created_at: receivedAt,
       })
@@ -290,8 +299,8 @@ export async function processWahaWebhookEvent(
       .single();
     if (mErr) return { ok: false, error: `message insert: ${mErr.message}` };
 
-    // Adjunto: texto para el agente (transcripción/descripción). Best-effort.
-    if (msgType !== "text" && msgType !== "location" && (insertedMsg as { id?: string } | null)?.id) {
+    // Adjunto entrante: texto para el agente (transcripción/descripción). Best-effort.
+    if (!isFromMe && msgType !== "text" && msgType !== "location" && (insertedMsg as { id?: string } | null)?.id) {
       try {
         const { understandInboundMedia } = await import("@/lib/chatbot/media-understanding");
         await understandInboundMedia({
@@ -316,7 +325,8 @@ export async function processWahaWebhookEvent(
       .from("conversations")
       .update({
         last_message_preview: preview,
-        unread_count: existingUnread + 1,
+        // Una respuesta propia no suma "no leídos".
+        unread_count: isFromMe ? existingUnread : existingUnread + 1,
         updated_at: new Date().toISOString(),
       })
       .eq("id", conversationId);
