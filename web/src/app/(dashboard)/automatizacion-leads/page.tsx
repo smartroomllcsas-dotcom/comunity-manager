@@ -59,7 +59,33 @@ interface Settings {
   brochure_filename: string | null;
   brochure_mode: string;
   response_delay_seconds: number;
+  /** Instrucciones extra del agente por canal (misma empresa, distinto trato). */
+  channel_instructions: { whatsapp?: string | null; instagram?: string | null; messenger?: string | null };
 }
+
+const CHANNEL_INSTRUCTION_FIELDS: Array<{
+  key: "whatsapp" | "instagram" | "messenger";
+  label: string;
+  placeholder: string;
+}> = [
+  {
+    key: "whatsapp",
+    label: "WhatsApp",
+    placeholder:
+      "Ej: en WhatsApp responde corto y directo, ofrece agendar llamada, comparte precios desde…",
+  },
+  {
+    key: "instagram",
+    label: "Instagram",
+    placeholder:
+      "Ej: en Instagram el público es más joven: tono cercano, emojis, invita a ver el catálogo y a pedir por DM…",
+  },
+  {
+    key: "messenger",
+    label: "Messenger (Facebook)",
+    placeholder: "Ej: en Messenger suelen llegar de anuncios: pregunta primero qué anuncio vio…",
+  },
+];
 
 const DEFAULT_CONTEXT = `Eres el asesor comercial de esta empresa. Tu objetivo es calificar al lead y llevarlo a agendar una cita.
 
@@ -90,6 +116,7 @@ const emptySettings: Settings = {
   brochure_filename: null,
   brochure_mode: "off",
   response_delay_seconds: 0,
+  channel_instructions: {},
 };
 
 export default function LeadAutomationPage() {
@@ -435,6 +462,38 @@ export default function LeadAutomationPage() {
                 value={settings.agent_context ?? ""}
                 onChange={(e) => setSettings((s) => ({ ...s, agent_context: e.target.value || null }))}
               />
+
+              {/* Instrucciones por canal */}
+              <div className="rounded-md border border-[#2d333b] bg-[#0d1117]/60 p-3 space-y-3">
+                <div>
+                  <p className="text-sm font-medium text-white">Instrucciones por canal (opcional)</p>
+                  <p className="text-xs text-[#8b949e]">
+                    Las instrucciones de arriba aplican a todos los canales. Aquí agregas lo que cambia según por
+                    dónde escribe el cliente. Si se contradicen, manda la del canal.
+                  </p>
+                </div>
+                {CHANNEL_INSTRUCTION_FIELDS.map((field) => (
+                  <div key={field.key}>
+                    <label className="block text-xs text-[#8b949e] mb-1">{field.label}</label>
+                    <textarea
+                      rows={3}
+                      className="w-full rounded-md bg-[#0d1117] border border-[#2d333b] px-3 py-2 text-sm text-white"
+                      placeholder={field.placeholder}
+                      value={settings.channel_instructions?.[field.key] ?? ""}
+                      onChange={(e) =>
+                        setSettings((s) => ({
+                          ...s,
+                          channel_instructions: {
+                            ...(s.channel_instructions || {}),
+                            [field.key]: e.target.value || null,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+
               <div>
                 <label className="block text-xs text-[#8b949e] mb-1">
                   Enlace de agenda (Cal.com) — el agente lo comparte cuando el lead esté listo

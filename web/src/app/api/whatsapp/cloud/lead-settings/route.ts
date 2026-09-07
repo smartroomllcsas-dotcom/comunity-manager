@@ -15,6 +15,11 @@ import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getCmClientAccess } from "@/lib/cm-client-access";
 import { AGENT_ROLES, AGENT_TONES, AGENT_GOALS } from "@/lib/whatsapp/cloud/agent-presets";
+import {
+  CHANNEL_INSTRUCTION_MAX,
+  getChannelInstructions,
+  setChannelInstructions,
+} from "@/lib/whatsapp/cloud/channel-instructions";
 
 const roleValues = AGENT_ROLES.map((o) => o.value) as [string, ...string[]];
 const toneValues = AGENT_TONES.map((o) => o.value) as [string, ...string[]];
@@ -33,9 +38,18 @@ const putSchema = z.object({
   booking_url: z.string().url().max(500).nullable().optional(),
   max_sends_per_hour: z.number().int().min(1).max(500).optional(),
   response_delay_seconds: z.number().int().min(0).max(300).optional(),
+  // Instrucciones del agente por canal (misma empresa, distinto tono/oferta).
+  channel_instructions: z
+    .object({
+      whatsapp: z.string().max(CHANNEL_INSTRUCTION_MAX).nullable().optional(),
+      instagram: z.string().max(CHANNEL_INSTRUCTION_MAX).nullable().optional(),
+      messenger: z.string().max(CHANNEL_INSTRUCTION_MAX).nullable().optional(),
+    })
+    .optional(),
 });
 
 async function loadPayload(clientId: string) {
+  const channel_instructions = await getChannelInstructions(clientId);
   const [{ data: settings }, { data: templates }] = await Promise.all([
     supabaseAdmin
       .from("cm_lead_agent_settings")
@@ -48,7 +62,10 @@ async function loadPayload(clientId: string) {
       .eq("client_id", clientId)
       .order("created_at", { ascending: false }),
   ]);
-  return { settings: settings ?? null, templates: templates ?? [] };
+  return {
+    settings: settings ? { ...(settings as Record<string, unknown>), channel_instructions } : null,
+    templates: templates ?? [],
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -70,10 +87,15 @@ export async function PUT(request: NextRequest) {
       { status: 422 }
     );
   }
-  const { clientId, ...fields } = parsed.data;
+  const { clientId, channel_instructions, ...fields } = parsed.data;
 
   const access = await getCmClientAccess(request, clientId);
   if (!access) return NextResponse.json({ error: "No autorizado para esta marca" }, { status: 403 });
+
+  if (channel_instructions !== undefined) {
+    const saved = await setChannelInstructions(access.clientId, channel_instructions);
+    if (!saved.ok) return NextResponse.json({ error: saved.error }, { status: 500 });
+  }
 
   // Las plantillas elegidas deben ser de ESTA marca (respeto de portafolio).
   for (const key of ["first_touch_template_id", "reengage_template_id"] as const) {

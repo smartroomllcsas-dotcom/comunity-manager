@@ -293,6 +293,28 @@ export async function processWithAIAgent(
         if (settings.agent_context) {
           parts.push("Instrucciones adicionales del administrador:\n" + settings.agent_context);
         }
+        // Instrucciones por canal: la misma empresa puede responder distinto
+        // en WhatsApp que en Instagram/Messenger.
+        try {
+          const { getChannelInstructions, channelInstructionsPrompt, channelKindForType } = await import(
+            "@/lib/whatsapp/cloud/channel-instructions"
+          );
+          let channelType: string | null = null;
+          if (context.channelId) {
+            const { data: ch } = await admin.from("channels").select("type").eq("id", context.channelId).maybeSingle();
+            channelType = (ch?.type as string | null) || null;
+          }
+          const kind = channelKindForType(channelType);
+          if (kind) {
+            const perChannel = channelInstructionsPrompt(
+              await getChannelInstructions(convRow.brand_id as string),
+              kind
+            );
+            if (perChannel) parts.push(perChannel);
+          }
+        } catch (e) {
+          console.warn("[chatbot] instrucciones por canal no disponibles:", e);
+        }
         // Reserva hecha en Cal.com (la escribe /api/webhook/calcom): el agente
         // debe confirmarla y dejar de insistir con el enlace.
         const booking = (convRow.metadata as { booking?: { status?: string; when_text?: string; title?: string } } | null)?.booking;
