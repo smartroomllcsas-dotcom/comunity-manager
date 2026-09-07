@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendText, sendMedia, sendTemplate, getOrgWhatsAppCredentials } from "@/lib/whatsapp/api";
 import { sendMetaTextMessage, sendMetaAttachment, isMetaMessagingWindowError } from "@/lib/meta";
+import { getReplyWindow, describeReplyWindow } from "@/lib/inbox/reply-window";
 import {
   sendRespondIoText,
   sendRespondIoAttachment,
@@ -187,12 +188,21 @@ export async function POST(request: NextRequest) {
               tag: "HUMAN_AGENT",
             });
           } catch {
-            const network = channelType === "instagram" ? "Instagram" : "Messenger";
-            throw new Error(
-              `Meta API: ${network} sólo permite responder hasta 24 horas después del último mensaje del cliente ` +
-                `(7 días con permiso de agente humano). Esta conversación ya venció: hay que esperar a que el cliente ` +
-                `vuelva a escribir, o contactarlo por otro canal.`
+            // Mensaje con fechas concretas: último mensaje del cliente, cierre
+            // de la ventana de 24 h y del plazo de agente humano.
+            const { data: lastInbound } = await admin
+              .from("messages")
+              .select("created_at")
+              .eq("conversation_id", conversationId)
+              .eq("direction", "inbound")
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            const window = getReplyWindow(channelType, (lastInbound?.created_at as string | null) || null);
+            const detail = describeReplyWindow(
+              window.state === "open" || window.state === "human_agent" ? { ...window, state: "closed" } : window
             );
+            throw new Error(`Meta API: ${detail}`);
           }
         }
         providerMessageId = typeof resp?.message_id === "string" ? resp.message_id : undefined;

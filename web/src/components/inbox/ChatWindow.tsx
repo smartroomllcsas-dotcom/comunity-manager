@@ -1,4 +1,5 @@
 "use client";
+import { getReplyWindow, describeReplyWindow } from "@/lib/inbox/reply-window";
 import { toast } from "sonner";
 import { useMessages } from "@/hooks/useMessages";
 import { useCurrentAgent } from "@/hooks/useCurrentAgent";
@@ -18,6 +19,7 @@ import type { Conversation } from "@/types/database";
 import type { MessageContent } from "@/types/database";
 import {
   UserPlus,
+  Clock,
   CheckCircle2,
   XCircle,
   PanelRightOpen,
@@ -198,6 +200,17 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
       lastInboundMessage?.created_at &&
       Date.now() - new Date(lastInboundMessage.created_at).getTime() > 24 * 60 * 60 * 1000
   );
+  // Ventana de respuesta con fechas claras (WhatsApp 24 h; Instagram/Messenger
+  // 24 h + 7 días con agente humano). Se calcula sólo cuando ya cargaron los
+  // mensajes, para no bloquear por un historial aún vacío.
+  const replyWindow = isLoading ? null : getReplyWindow(channelType, lastInboundMessage?.created_at || null);
+  const replyWindowText = replyWindow ? describeReplyWindow(replyWindow) : "";
+  const replyWindowTone =
+    replyWindow?.state === "closed" || replyWindow?.state === "never_started"
+      ? "border-red-500/30 bg-red-500/10 text-red-200"
+      : replyWindow?.state === "human_agent" || replyWindow?.state === "template_only"
+        ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
+        : "border-white/[0.06] bg-white/[0.03] text-[var(--text-secondary)]";
 
   const statusColors: Record<string, string> = {
     open: "bg-emerald-500/10 text-emerald-400 border-white/[0.08]",
@@ -355,10 +368,21 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
             </div>
           </div>
 
+          {/* Ventana de respuesta: fechas claras y bloqueo cuando ya no se puede enviar */}
+          {replyWindow && replyWindow.state !== "unrestricted" && replyWindowText && (
+            <div
+              role={replyWindow.canSend ? "status" : "alert"}
+              className={`mx-3 mb-2 flex items-start gap-2 rounded-md border px-3 py-2 text-[12px] leading-relaxed ${replyWindowTone}`}
+            >
+              <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>{replyWindowText}</span>
+            </div>
+          )}
+
           {/* Message Input */}
           <MessageInput
             onSend={handleSend}
-            disabled={!agent}
+            disabled={!agent || (replyWindow ? !replyWindow.canSend : false)}
             conversationId={conversation.id}
             messages={messages || []}
             channelId={conversation.channel_id}
