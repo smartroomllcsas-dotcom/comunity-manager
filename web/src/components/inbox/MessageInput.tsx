@@ -34,6 +34,9 @@ interface MessageInputProps {
   channelType?: string | null;
   brandId?: string | null;
   whatsappWindowExpired?: boolean;
+  /** Para rellenar solas las variables de la plantilla (nombre, tema…). */
+  contactName?: string | null;
+  contactFields?: Record<string, unknown> | null;
 }
 
 export function MessageInput({
@@ -45,6 +48,8 @@ export function MessageInput({
   channelType,
   brandId,
   whatsappWindowExpired,
+  contactName,
+  contactFields,
 }: MessageInputProps) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -270,6 +275,8 @@ export function MessageInput({
             onSelectedTemplateChange={setSelectedTemplateId}
             onSend={handleTemplateSend}
             sending={sending}
+            contactName={contactName}
+            contactFields={contactFields}
           />
         )}
         <div className="flex items-end gap-2">

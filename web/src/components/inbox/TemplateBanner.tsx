@@ -263,7 +263,59 @@ type TemplateBannerProps = {
   /** Se invoca al enviar. Recibe los components ya armados con los valores del usuario. */
   onSend: (components: unknown[]) => void;
   sending: boolean;
+  /** Datos del contacto para rellenar las variables solas (nombre, tema…). */
+  contactName?: string | null;
+  contactFields?: Record<string, unknown> | null;
 };
+
+/** Etiqueta legible y ayuda para cada variable de la plantilla. */
+function describeVariable(key: TemplateVarKey): { label: string; hint: string; placeholder: string } {
+  const k = key.toLowerCase();
+  if (/^\d+$/.test(key)) {
+    return { label: `Variable {{${key}}}`, hint: "Texto que reemplaza ese hueco en el mensaje.", placeholder: `Valor para {{${key}}}` };
+  }
+  if (/nombre|name/.test(k)) {
+    return { label: "Nombre del cliente", hint: "Así lo saludará el mensaje. Se rellena con el nombre del contacto.", placeholder: "Ej: Ana" };
+  }
+  if (/tema|topic|campa|proyecto|asunto|servicio/.test(k)) {
+    return { label: "Tema o proyecto", hint: "De qué trata la conversación. Ej: tu página web, la campaña de anuncios.", placeholder: "Ej: tu tienda online" };
+  }
+  if (/empresa|company|negocio/.test(k)) {
+    return { label: "Empresa del cliente", hint: "Nombre de su empresa o negocio.", placeholder: "Ej: Ferretería El Sol" };
+  }
+  if (/fecha|date|dia/.test(k)) {
+    return { label: "Fecha", hint: "Fecha que verá el cliente.", placeholder: "Ej: martes 9 de septiembre" };
+  }
+  if (/hora|time/.test(k)) {
+    return { label: "Hora", hint: "Hora que verá el cliente.", placeholder: "Ej: 3:00 PM" };
+  }
+  return { label: key.replace(/_/g, " "), hint: `Reemplaza el hueco {{${key}}} del mensaje.`, placeholder: `Valor para ${key}` };
+}
+
+/** Valor inicial de una variable a partir del contacto (para no escribir a mano lo obvio). */
+function defaultVariableValue(key: TemplateVarKey, contactName?: string | null, fields?: Record<string, unknown> | null): string {
+  const k = key.toLowerCase();
+  const cf = fields || {};
+  const pick = (...names: string[]) => {
+    for (const n of names) {
+      const v = cf[n];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+    return "";
+  };
+  if (/nombre|name/.test(k)) {
+    const full = pick("nombre", "full_name") || (contactName || "").trim();
+    // Sólo el primer nombre; nunca un número de teléfono o un @usuario.
+    const first = full.split(/\s+/)[0] || "";
+    return /^[+\d@]/.test(first) ? "" : first;
+  }
+  if (/tema|topic|campa|proyecto|asunto|servicio/.test(k)) {
+    return pick("proyecto", "lead_campaign", "tema") || "tu proyecto";
+  }
+  if (/empresa|company|negocio/.test(k)) return pick("empresa", "company_name");
+  if (/correo|email/.test(k)) return pick("correo", "email");
+  return "";
+}
 
 export function TemplateBanner({
   templates,
@@ -272,6 +324,8 @@ export function TemplateBanner({
   onSelectedTemplateChange,
   onSend,
   sending,
+  contactName,
+  contactFields,
 }: TemplateBannerProps) {
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
   const variableIndices = useMemo(
@@ -293,14 +347,21 @@ export function TemplateBanner({
   const [headerLocation, setHeaderLocation] = useState<HeaderLocationValues>({});
   const [buttonPayloads, setButtonPayloads] = useState<Record<number, string>>({});
 
-  // Reset valores cuando cambia la plantilla seleccionada.
+  // Al cambiar de plantilla se reinician los valores y se rellenan solos los
+  // que salen del contacto (nombre, tema, empresa…); el asesor sólo corrige.
   useEffect(() => {
-    setValues({});
+    const initial: Record<TemplateVarKey, string> = {};
+    for (const key of variableIndices) {
+      const v = defaultVariableValue(key, contactName, contactFields);
+      if (v) initial[key] = v;
+    }
+    setValues(initial);
     setHeaderTextValues({});
     setHeaderMediaUrl("");
     setHeaderMediaFilename("");
     setHeaderLocation({});
     setButtonPayloads({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sólo al cambiar de plantilla
   }, [selectedTemplateId]);
 
   const allBodyVariablesFilled = variableIndices.every((idx) => (values[idx] ?? "").trim().length > 0);
@@ -504,23 +565,34 @@ export function TemplateBanner({
             </div>
           )}
           {selectedTemplate && variableIndices.length > 0 && (
-            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {variableIndices.map((idx) => (
-                <label key={idx} className="flex flex-col gap-1">
-                  <span className="text-[10px] uppercase tracking-[0.15em] text-amber-200/70">
-                    {/^\d+$/.test(idx) ? `Variable {{${idx}}}` : idx.replace(/_/g, " ")}
-                  </span>
-                  <input
-                    value={values[idx] ?? ""}
-                    onChange={(event) =>
-                      setValues((prev) => ({ ...prev, [idx]: event.target.value }))
-                    }
-                    disabled={sending}
-                    placeholder={`Valor para {{${idx}}}`}
-                    className="min-h-[34px] rounded-md border border-[#2d333b] bg-[#0d1117] px-3 text-sm text-white outline-none focus:border-amber-400/70"
-                  />
-                </label>
-              ))}
+            <div className="mt-3">
+              <p className="text-[11px] leading-relaxed text-amber-100/70">
+                La plantilla tiene huecos escritos como {"{{nombre}}"} o {"{{tema}}"}. Escribe aquí el valor de cada uno,
+                sin llaves: en el mensaje se reemplazan solos. Los que salen del contacto ya vienen rellenados.
+              </p>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {variableIndices.map((idx) => {
+                  const meta = describeVariable(idx);
+                  return (
+                    <label key={idx} className="flex flex-col gap-1">
+                      <span className="text-[11px] font-medium text-amber-100">
+                        {meta.label}
+                        <span className="ml-1 font-normal text-amber-200/60">{`{{${idx}}}`}</span>
+                      </span>
+                      <input
+                        value={values[idx] ?? ""}
+                        onChange={(event) =>
+                          setValues((prev) => ({ ...prev, [idx]: event.target.value }))
+                        }
+                        disabled={sending}
+                        placeholder={meta.placeholder}
+                        className="min-h-[34px] rounded-md border border-[#2d333b] bg-[#0d1117] px-3 text-sm text-white outline-none focus:border-amber-400/70"
+                      />
+                      <span className="text-[10px] text-amber-200/60">{meta.hint}</span>
+                    </label>
+                  );
+                })}
+              </div>
             </div>
           )}
           {selectedTemplate && buttons.length > 0 && (

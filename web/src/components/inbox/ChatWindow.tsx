@@ -389,6 +389,8 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
             channelType={conversation.channel?.type}
             brandId={conversation.brand_id}
             whatsappWindowExpired={whatsappWindowExpired}
+            contactName={contact?.name}
+            contactFields={(contact?.custom_fields as Record<string, unknown> | null) || null}
           />
         </>
       ) : (
