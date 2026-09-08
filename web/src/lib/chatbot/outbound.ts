@@ -64,11 +64,18 @@ export async function getOutboundSender(
   if (!token) return null;
 
   if (channel.type === "facebook_messenger" || channel.type === "instagram") {
+    // Graph responde { recipient_id, message_id }. Se devuelve con la forma de
+    // Cloud { messages:[{ id }] } para que el mensaje del bot guarde el mid y
+    // el eco que manda Meta (is_echo, mismo mid) no se duplique en el chat.
+    const asCloudShape = (r: unknown) => {
+      const id = (r as { message_id?: string } | null)?.message_id;
+      return id ? { messages: [{ id }] } : r;
+    };
     return {
       channelType: channel.type,
-      sendText: (to, text) => sendMetaTextMessage(token, to, text),
-      sendMedia: (to, kind, url) =>
-        sendMetaAttachment(token, to, kind === "document" ? "file" : "image", url),
+      sendText: async (to, text) => asCloudShape(await sendMetaTextMessage(token, to, text)),
+      sendMedia: async (to, kind, url) =>
+        asCloudShape(await sendMetaAttachment(token, to, kind === "document" ? "file" : "image", url)),
     };
   }
 

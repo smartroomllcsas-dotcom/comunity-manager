@@ -108,6 +108,28 @@ async function latestInboundMessageId(
 }
 
 /**
+ * Además de esperar unos segundos, mira la cola: si ya hay OTRO mensaje del
+ * mismo cliente esperando a procesarse, esta ejecución se retira y responde
+ * la de ese mensaje (con todo el contexto). Evita dos respuestas seguidas.
+ */
+async function anotherInboundQueued(
+  admin: ReturnType<typeof createAdminClient>,
+  context: { conversationId: string; contactWaId: string }
+): Promise<boolean> {
+  const { data } = await admin
+    .from("messages")
+    .select("created_at")
+    .eq("conversation_id", context.conversationId)
+    .eq("direction", "inbound")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const afterIso = (data?.created_at as string | undefined) || new Date(Date.now() - 60_000).toISOString();
+  const { hasNewerPendingInbound } = await import("@/lib/chatbot/pending-inbound");
+  return hasNewerPendingInbound(admin, { contactWaId: context.contactWaId, afterIso });
+}
+
+/**
  * metadata de la conversación con un parche aplicado. Antes se escribía
  * `{ ai_turn_count, ai_agent_id }` a secas y se perdía todo lo demás:
  * assigned_team_id (handoff), booking (Cal.com), source/channel…
@@ -396,6 +418,7 @@ export async function processWithAIAgent(
   if (latestInboundAfter && latestInboundAfter !== latestInboundBefore) {
     return true; // llegó un mensaje más nuevo: responde su ejecución
   }
+  if (await anotherInboundQueued(admin, context)) return true;
 
   let rawResponse: string;
   try {
@@ -569,6 +592,7 @@ export async function processWithAI(
   await new Promise((resolve) => setTimeout(resolve, COALESCE_INBOUND_MS));
   const latestInboundAfter = await latestInboundMessageId(admin, context.conversationId);
   if (latestInboundAfter && latestInboundAfter !== latestInboundBefore) return true;
+  if (await anotherInboundQueued(admin, context)) return true;
 
   let aiResponse: string;
   try {
