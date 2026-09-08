@@ -825,6 +825,16 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
           .update({ status: status.status === "read" ? "read" : "delivered" })
           .eq("wa_message_id", status.id)
           .in("conversation_id", channelConversationIds);
+        // Difusiones: seguimiento por destinatario (entregado / leído / fallido).
+        if (status.status === "delivered" || status.status === "read" || status.status === "failed") {
+          const { updateRecipientByWamid } = await import("@/lib/broadcasts/engine");
+          const err = (status as { errors?: Array<{ code?: number; title?: string }> }).errors?.[0];
+          await updateRecipientByWamid(
+            status.id,
+            status.status,
+            err ? `${err.title || "error"} (código ${err.code})` : null
+          );
+        }
       }
     }
   }

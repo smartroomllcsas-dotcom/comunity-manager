@@ -300,6 +300,16 @@ export async function processStatusUpdate(status: WebhookStatus, phoneNumberId: 
   if (status.status === "failed") {
     await markFirstTouchFailed(admin, status, conversationIds);
   }
+  // Difusiones: seguimiento por destinatario.
+  if (status.id && (status.status === "delivered" || status.status === "read" || status.status === "failed")) {
+    const { updateRecipientByWamid } = await import("@/lib/broadcasts/engine");
+    const err = status.errors?.[0];
+    await updateRecipientByWamid(
+      status.id,
+      status.status,
+      err ? `${WA_ERROR_LABELS[err.code] || err.title || "error"} (código ${err.code})` : null
+    );
+  }
 }
 
 const WA_ERROR_LABELS: Record<number, string> = {

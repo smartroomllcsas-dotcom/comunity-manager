@@ -13,7 +13,7 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 
 ### 8 sep 2026
 - **Base de datos**: aplicadas en producción (SQL Editor del Studio) la migración **048 Difusiones v2** (columnas de empresa, canal, plantilla nueva, audiencia, variables, programación, cupo por hora y seguimiento por destinatario) y la **046** pendiente (notas internas sin autor humano). Los archivos quedan en `web/supabase/migrations/`.
-- **Análisis de Difusiones**: el módulo actual no sirve para clientes reales (plantillas viejas, envío a toda la organización, sin seguimiento ni programación). Tablas listas; falta rehacer pantalla, audiencia, envío gradual y seguimiento.
+- **Difusiones v2, por empresa** (menú Difusiones): asistente en 3 pasos (mensaje → audiencia → envío). Canal WhatsApp API (plantilla aprobada de la empresa, variables con datos del contacto) o WhatsApp por QR (texto libre). Audiencia por etapa, origen, etiquetas, fecha de llegada y "sin escribir hace N días", con vista previa de cuántos reciben y quiénes quedan excluidos y por qué (sin número, no contactar/Perdido, sin WhatsApp, limitados por Meta, ya recibió la plantilla). Envío ahora o programado, ritmo por hora, pausar/reanudar/cancelar, reintentar fallidos. Seguimiento real por destinatario: enviado, entregado, leído, respondió, fallido con motivo. Cron cada 5 min. Todo validado por empresa (canal, plantilla, contactos, permisos).
 - **Home nueva** (`/es/os`): resumen por empresa con leads de hoy, chats que esperan respuesta, atendidos por la IA, reuniones, estado de canales, últimos 7 días, embudo, últimos leads y accesos rápidos. Selector de empresa.
 - **Instagram/Messenger sin duplicados**: el bot guarda el id de Meta y el eco ya no se repite en el chat. Borrados 67 ecos duplicados.
 - **Sin respuestas dobles**: si el cliente manda dos mensajes seguidos, responde solo la ejecución del último (revisa la cola antes de contestar).
@@ -47,5 +47,5 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 - Estado de la sesión WAHA en `waha_sessions` figura FAILED aunque funciona: sincronizar el estado.
 - Cuenta vieja `smartsends` y usuario admin antiguo: revisar. Contraseña del asesor smartroomllcsas@gmail.com la pone el usuario.
 - Billing P0, merge de `visual/os-fusion` a `master`, endurecer `/api/integrations/wa/send`.
-- **Difusiones v2**: construir el módulo sobre la migración 048 (audiencia por empresa, plantillas nuevas con variables, envío programado y gradual, seguimiento real, respuestas al Inbox, WhatsApp por QR).
+- **Difusiones**: probar en vivo con una difusión pequeña por empresa; luego borrar las 60 difusiones QA sintéticas del sistema viejo.
 - 3 tests `qa-e2e` (meta-oauth, profile, resilience) fallan desde antes.

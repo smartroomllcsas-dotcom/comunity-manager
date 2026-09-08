@@ -1,4 +1,4 @@
-import { BroadcastForm } from "@/components/broadcasts/BroadcastForm";
+import { BroadcastWizard } from "@/components/broadcasts/BroadcastWizard";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
@@ -13,11 +13,11 @@ export default function NewBroadcastPage() {
         </Link>
         <div>
           <h1 className="text-xl font-bold text-white">Nueva Difusión</h1>
-          <p className="text-xs text-[#8b949e] mt-0.5">Configura y envía un mensaje masivo a tus contactos</p>
+          <p className="text-xs text-[#8b949e] mt-0.5">Elige el mensaje, a quién llega y cuándo. Sólo contactos de la empresa activa.</p>
         </div>
       </div>
       <div className="p-6">
-        <BroadcastForm />
+        <BroadcastWizard />
       </div>
     </div>
   );
