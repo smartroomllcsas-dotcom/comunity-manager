@@ -285,3 +285,43 @@ export async function loadHomeBrands(userId: string, orgId: string): Promise<Hom
   const { data } = await q;
   return ((data || []) as HomeBrand[]).filter((b) => !/^\[QA/i.test(b.name));
 }
+
+/**
+ * Identidad para la Home: organización de SmartTalk + usuario.
+ * `identify()` en la sesión legacy devuelve como orgId el id de la primera
+ * marca (cm_clients), no la organización; por eso la Home decía "no tienes
+ * empresa". Se resuelve igual que /api/cm/clients: usuario de Supabase Auth →
+ * fila en smarttalk.agents → organization_id. Si no hay sesión de Auth, se
+ * traduce la marca a su organización.
+ */
+export async function resolveHomeIdentity(): Promise<{ userId: string; orgId: string } | null> {
+  try {
+    const { createClient } = await import("@/lib/supabase/server");
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: agent } = await createAdminClient("smarttalk")
+        .from("agents")
+        .select("organization_id")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (agent?.organization_id) return { userId: user.id, orgId: agent.organization_id as string };
+    }
+  } catch {
+    // sigue con la sesión legacy
+  }
+  try {
+    const { identify } = await import("@/lib/identify");
+    const ent = await identify();
+    if (!ent.userId || !ent.orgId) return null;
+    const { data: brand } = await createAdminClient("public")
+      .from("cm_clients")
+      .select("smarttalk_organization_id")
+      .eq("id", ent.orgId)
+      .maybeSingle();
+    const orgId = (brand?.smarttalk_organization_id as string | null) || ent.orgId;
+    return { userId: ent.userId, orgId };
+  } catch {
+    return null;
+  }
+}

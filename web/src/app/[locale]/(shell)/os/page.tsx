@@ -15,8 +15,7 @@ import {
   FileText,
   Phone,
 } from "lucide-react";
-import { identify } from "@/lib/identify";
-import { loadHomeBrands, loadHomeOverview, type HomeOverview } from "@/lib/home/overview";
+import { loadHomeBrands, loadHomeOverview, resolveHomeIdentity, type HomeOverview } from "@/lib/home/overview";
 import { HomeBrandSwitcher } from "@/components/home/HomeBrandSwitcher";
 
 export const dynamic = "force-dynamic";
@@ -106,8 +105,8 @@ export default async function HomePage() {
   let error: string | null = null;
 
   try {
-    const ent = await identify();
-    if (!ent.orgId || !ent.userId) throw new Error("Inicia sesión para ver tu resumen.");
+    const ent = await resolveHomeIdentity();
+    if (!ent) throw new Error("Inicia sesión para ver tu resumen.");
     brands = await loadHomeBrands(ent.userId, ent.orgId);
     if (brands.length === 0) throw new Error("Aún no tienes una empresa configurada. Crea la primera en Clientes.");
     const cookieStore = await cookies();
