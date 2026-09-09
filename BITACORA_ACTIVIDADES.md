@@ -11,6 +11,10 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 
 ## Aplicado
 
+### 9 sep 2026
+- **Agenda** (nuevo en el menú): calendario mensual con las reuniones agendadas por Cal.com de la empresa activa, próximas y pasadas, enlace a la ficha del contacto y al chat, botón "Agendar para un cliente" (página pública de Cal.com embebida) y acceso a Cal.com. El panel de Cal.com no se puede embeber (lo bloquea Cal.com), por eso abre en pestaña nueva.
+- Corregido el flujo de despliegue: varios deploys del 8 sep no habían salido; ahora se verifica la edad del último deploy.
+
 ### 8 sep 2026
 - **Base de datos**: aplicadas en producción (SQL Editor del Studio) la migración **048 Difusiones v2** (columnas de empresa, canal, plantilla nueva, audiencia, variables, programación, cupo por hora y seguimiento por destinatario) y la **046** pendiente (notas internas sin autor humano). Los archivos quedan en `web/supabase/migrations/`.
 - **Difusiones v2, por empresa** (menú Difusiones): asistente en 3 pasos (mensaje → audiencia → envío). Canal WhatsApp API (plantilla aprobada de la empresa, variables con datos del contacto) o WhatsApp por QR (texto libre). Audiencia por etapa, origen, etiquetas, fecha de llegada y "sin escribir hace N días", con vista previa de cuántos reciben y quiénes quedan excluidos y por qué (sin número, no contactar/Perdido, sin WhatsApp, limitados por Meta, ya recibió la plantilla). Envío ahora o programado, ritmo por hora, pausar/reanudar/cancelar, reintentar fallidos. Seguimiento real por destinatario: enviado, entregado, leído, respondió, fallido con motivo. Cron cada 5 min. Todo validado por empresa (canal, plantilla, contactos, permisos).
