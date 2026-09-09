@@ -4,6 +4,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { ArrowLeft, Pause, Play, XCircle, RotateCcw, RefreshCw } from "lucide-react";
 import { useActiveBrand } from "@/hooks/useActiveBrand";
+import { BrandPicker } from "@/components/broadcasts/BrandPicker";
 
 export const dynamic = "force-dynamic";
 
@@ -114,6 +115,7 @@ export default function BroadcastDetailPage({ params }: { params: Promise<{ id: 
           </p>
           {b?.last_error ? <p className="text-xs text-amber-300">{String(b.last_error)}</p> : null}
         </div>
+        <BrandPicker />
         <button onClick={() => void load()} className="rounded-md border border-[#2d333b] p-2 text-[#8b949e] hover:text-white"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /></button>
         {(b?.status === "sending" || b?.status === "scheduled") && (
           <button disabled={busy} onClick={() => act("pause")} className="inline-flex items-center gap-1 rounded-md border border-[#2d333b] px-3 py-2 text-xs text-white hover:bg-[#21262d]"><Pause className="h-3.5 w-3.5" /> Pausar</button>

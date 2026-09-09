@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useActiveBrand } from "@/hooks/useActiveBrand";
 import { extractTemplateVariables, getTemplateBodyPreview, type InboxTemplate } from "@/components/inbox/TemplateBanner";
+import { BrandPicker } from "@/components/broadcasts/BrandPicker";
 
 type Channel = { id: string; type: string; name: string | null; status: string | null; whatsapp_phone_number: string | null };
 type Template = { id: string; name: string; language: string; category: string; components: unknown; parameter_format: string | null };
@@ -73,6 +74,11 @@ export function BroadcastWizard() {
 
   useEffect(() => {
     if (!activeClientId) return;
+    setStep(1);
+    setTemplateId("");
+    setPreview(null);
+    setSelStages([]);
+    setSelTags([]);
     (async () => {
       try {
         const res = await fetch(`/api/broadcasts/v2?clientId=${activeClientId}`, { cache: "no-store" });
@@ -182,7 +188,14 @@ export function BroadcastWizard() {
     }
   }
 
-  if (!activeClientId) return <p className="text-sm text-[#8b949e]">Elige una empresa en el menú lateral.</p>;
+  if (!activeClientId) {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-[#8b949e]">Elige la empresa para la que será la difusión.</p>
+        <BrandPicker />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-3xl space-y-5">
@@ -196,7 +209,7 @@ export function BroadcastWizard() {
             {i + 1}. {label}
           </button>
         ))}
-        <span className="ml-auto rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-blue-300">{activeClient?.name}</span>
+        <span className="ml-auto"><BrandPicker /></span>
       </div>
 
       {step === 1 && (

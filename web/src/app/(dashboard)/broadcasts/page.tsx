@@ -4,6 +4,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Plus, Radio, RefreshCw, Pause, Play, XCircle, Eye } from "lucide-react";
 import { useActiveBrand } from "@/hooks/useActiveBrand";
+import { BrandPicker } from "@/components/broadcasts/BrandPicker";
 
 export const dynamic = "force-dynamic";
 
@@ -112,7 +113,10 @@ export default function BroadcastsPage() {
 
   if (!activeClientId) {
     return (
-      <div className="p-6 text-sm text-[#8b949e]">Elige una empresa en el menú lateral para ver sus difusiones.</div>
+      <div className="p-6 space-y-3">
+        <p className="text-sm text-[#8b949e]">Elige la empresa cuyas difusiones quieres ver.</p>
+        <BrandPicker />
+      </div>
     );
   }
 
@@ -125,6 +129,7 @@ export default function BroadcastsPage() {
             Mensajes masivos por WhatsApp para <span className="text-white">{activeClient?.name}</span>. Cada difusión es sólo de esta empresa.
           </p>
         </div>
+        <BrandPicker />
         <button onClick={() => void load()} className="rounded-md border border-[#2d333b] p-2 text-[#8b949e] hover:text-white" title="Actualizar">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>

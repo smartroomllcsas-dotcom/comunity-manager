@@ -47,5 +47,5 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 - Estado de la sesión WAHA en `waha_sessions` figura FAILED aunque funciona: sincronizar el estado.
 - Cuenta vieja `smartsends` y usuario admin antiguo: revisar. Contraseña del asesor smartroomllcsas@gmail.com la pone el usuario.
 - Billing P0, merge de `visual/os-fusion` a `master`, endurecer `/api/integrations/wa/send`.
-- **Difusiones**: probar en vivo con una difusión pequeña por empresa; luego borrar las 60 difusiones QA sintéticas del sistema viejo.
+- **Difusiones (pendiente de esta vista)**: primera prueba en vivo: crear una difusión en Smart Digital con la etiqueta o etapa de un grupo pequeño y ritmo 5 por hora, y revisar el detalle. Después borrar las 60 difusiones QA sintéticas del sistema viejo que siguen en la lista.
 - 3 tests `qa-e2e` (meta-oauth, profile, resilience) fallan desde antes.
