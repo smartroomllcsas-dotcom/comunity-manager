@@ -125,11 +125,9 @@ export default function AgendaPage() {
         </div>
         <BrandPicker />
         <button onClick={() => void load()} className="rounded-md border border-[#2d333b] p-2 text-[#8b949e] hover:text-white" title="Actualizar"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /></button>
-        {bookingUrl && (
-          <button onClick={() => setShowBooking(true)} className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 hover:bg-blue-700 px-3 py-2 text-sm font-medium text-white">
-            <CalendarDays className="h-4 w-4" /> Agendar para un cliente
-          </button>
-        )}
+        <button onClick={() => setShowBooking(true)} className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 hover:bg-blue-700 px-3 py-2 text-sm font-medium text-white">
+          <CalendarDays className="h-4 w-4" /> Agendar reunión
+        </button>
         <a href={calcomUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-md border border-[#2d333b] px-3 py-2 text-sm text-white hover:bg-[#21262d]">
           <ExternalLink className="h-4 w-4" /> Abrir Cal.com
         </a>
@@ -197,16 +195,17 @@ export default function AgendaPage() {
         </div>
       </div>
 
-      {showBooking && bookingUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setShowBooking(false)}>
-          <div className="w-full max-w-4xl h-[85vh] rounded-xl border border-[#2d333b] bg-[#0d1117] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-2 border-b border-[#2d333b]">
-              <div className="text-sm text-white">Agendar una reunión para un cliente · {activeClient?.name}</div>
-              <button onClick={() => setShowBooking(false)} className="text-[#8b949e] hover:text-white"><X className="h-4 w-4" /></button>
-            </div>
-            <iframe src={bookingUrl} className="flex-1 w-full bg-white" title="Cal.com" />
-          </div>
-        </div>
+      {showBooking && activeClientId && (
+        <ScheduleModal
+          clientId={activeClientId}
+          brandName={activeClient?.name || ""}
+          bookingUrl={bookingUrl}
+          onClose={() => setShowBooking(false)}
+          onSaved={() => {
+            setShowBooking(false);
+            void load();
+          }}
+        />
       )}
     </div>
   );
@@ -225,6 +224,162 @@ function MeetingRow({ m, muted }: { m: Meeting; muted?: boolean }) {
         {m.phone && <span className="inline-flex items-center gap-1 text-[#8b949e]"><Phone className="h-3 w-3" /> {m.phone}</span>}
         {m.conversationId && <Link href="/inbox" className="inline-flex items-center gap-1 text-blue-300 hover:underline"><MessageSquare className="h-3 w-3" /> Chat</Link>}
         {m.url && <a href={m.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-blue-300 hover:underline"><ExternalLink className="h-3 w-3" /> Cal.com</a>}
+      </div>
+    </div>
+  );
+}
+
+type ContactHit = { id: string; name: string; phone: string | null; email: string | null; stage: string | null };
+
+function ScheduleModal({
+  clientId,
+  brandName,
+  bookingUrl,
+  onClose,
+  onSaved,
+}: {
+  clientId: string;
+  brandName: string;
+  bookingUrl: string | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState<ContactHit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [contact, setContact] = useState<ContactHit | null>(null);
+  const [mode, setMode] = useState<"manual" | "calcom">("manual");
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("10:00");
+  const [duration, setDuration] = useState(30);
+  const [title, setTitle] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await fetch(`/api/agenda/contacts?clientId=${clientId}&q=${encodeURIComponent(q)}`, { cache: "no-store" });
+        const data = await res.json();
+        if (res.ok) setHits(data.contacts || []);
+      } finally {
+        setSearching(false);
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q, clientId]);
+
+  async function save() {
+    if (!contact) return toast.error("Elige el contacto");
+    if (!date || !time) return toast.error("Elige fecha y hora");
+    setSaving(true);
+    try {
+      // Hora de Colombia (UTC-5, sin horario de verano)
+      const startsAt = new Date(`${date}T${time}:00-05:00`).toISOString();
+      const res = await fetch("/api/agenda", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, contactId: contact.id, startsAt, durationMin: duration, title: title || undefined, note: note || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "No se pudo agendar");
+      toast.success(`Reunión agendada: ${data.when}`);
+      onSaved();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const calcomSrc = bookingUrl && contact
+    ? `${bookingUrl}${bookingUrl.includes("?") ? "&" : "?"}name=${encodeURIComponent(contact.name)}${contact.email ? `&email=${encodeURIComponent(contact.email)}` : ""}`
+    : bookingUrl;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
+      <div className={`w-full ${mode === "calcom" && contact ? "max-w-4xl h-[85vh]" : "max-w-xl"} rounded-xl border border-[#2d333b] bg-[#0d1117] overflow-hidden flex flex-col`} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[#2d333b]">
+          <div className="text-sm font-medium text-white">Agendar reunión · {brandName}</div>
+          <button onClick={onClose} className="text-[#8b949e] hover:text-white"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="p-4 space-y-3 overflow-y-auto">
+          {/* 1. Contacto */}
+          {!contact ? (
+            <div>
+              <label className="block text-xs text-[#8b949e] mb-1">¿Con quién? Busca por nombre o teléfono</label>
+              <input autoFocus className="w-full rounded-md bg-[#161b22] border border-[#2d333b] px-3 py-2 text-sm text-white" placeholder="Ej: Juan o 3163028683" value={q} onChange={(e) => setQ(e.target.value)} />
+              <div className="mt-2 max-h-56 overflow-y-auto rounded-md border border-[#2d333b]">
+                {searching && hits.length === 0 ? <p className="p-3 text-xs text-[#8b949e]">Buscando…</p> : hits.length === 0 ? <p className="p-3 text-xs text-[#8b949e]">Sin resultados en esta empresa.</p> : hits.map((h) => (
+                  <button key={h.id} onClick={() => setContact(h)} className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-[#161b22] border-b border-[#2d333b]/50">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm text-white">{h.name}</div>
+                      <div className="text-[11px] text-[#8b949e]">{h.phone || "sin teléfono"}{h.email ? ` · ${h.email}` : ""}</div>
+                    </div>
+                    {h.stage && <span className="shrink-0 rounded-full border border-[#2d333b] px-2 py-0.5 text-[10px] text-[#8b949e]">{h.stage}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 rounded-md border border-[#2d333b] bg-[#161b22] px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm text-white">{contact.name}</div>
+                <div className="text-[11px] text-[#8b949e]">{contact.phone || "sin teléfono"}{contact.email ? ` · ${contact.email}` : ""}</div>
+              </div>
+              <button onClick={() => setContact(null)} className="text-xs text-blue-300 hover:underline">Cambiar</button>
+            </div>
+          )}
+
+          {contact && (
+            <>
+              {/* 2. Modo */}
+              <div className="flex gap-2">
+                <button onClick={() => setMode("manual")} className={`rounded-full border px-3 py-1 text-xs ${mode === "manual" ? "border-blue-500/50 bg-blue-500/20 text-blue-200" : "border-[#2d333b] text-[#8b949e]"}`}>Registrar en el CRM</button>
+                {bookingUrl && (
+                  <button onClick={() => setMode("calcom")} className={`rounded-full border px-3 py-1 text-xs ${mode === "calcom" ? "border-blue-500/50 bg-blue-500/20 text-blue-200" : "border-[#2d333b] text-[#8b949e]"}`}>Por Cal.com (con enlace de videollamada)</button>
+                )}
+              </div>
+
+              {mode === "manual" ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="col-span-1">
+                      <label className="block text-xs text-[#8b949e] mb-1">Fecha</label>
+                      <input type="date" className="w-full rounded-md bg-[#161b22] border border-[#2d333b] px-3 py-2 text-sm text-white" value={date} onChange={(e) => setDate(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-[#8b949e] mb-1">Hora</label>
+                      <input type="time" className="w-full rounded-md bg-[#161b22] border border-[#2d333b] px-3 py-2 text-sm text-white" value={time} onChange={(e) => setTime(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-[#8b949e] mb-1">Duración</label>
+                      <select className="w-full rounded-md bg-[#161b22] border border-[#2d333b] px-3 py-2 text-sm text-white" value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
+                        {[15, 30, 45, 60, 90].map((d) => <option key={d} value={d}>{d} min</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[#8b949e] mb-1">Título (opcional)</label>
+                    <input className="w-full rounded-md bg-[#161b22] border border-[#2d333b] px-3 py-2 text-sm text-white" placeholder="Ej: Presentación de propuesta" value={title} onChange={(e) => setTitle(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[#8b949e] mb-1">Nota (opcional, queda en el chat)</label>
+                    <textarea rows={2} className="w-full rounded-md bg-[#161b22] border border-[#2d333b] px-3 py-2 text-sm text-white" value={note} onChange={(e) => setNote(e.target.value)} />
+                  </div>
+                  <p className="text-[11px] text-[#6e7681]">Se guarda en la ficha del contacto, aparece en la Home y en este calendario, y el recordatorio por WhatsApp (si está activo) le llega antes de la hora.</p>
+                  <div className="flex justify-end">
+                    <button disabled={saving} onClick={() => void save()} className="rounded-md bg-green-600 hover:bg-green-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? "Guardando…" : "Agendar"}</button>
+                  </div>
+                </div>
+              ) : (
+                calcomSrc && <iframe src={calcomSrc} className="h-[62vh] w-full rounded-md bg-white" title="Cal.com" />
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
