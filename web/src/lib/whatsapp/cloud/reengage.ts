@@ -101,13 +101,27 @@ export async function runReengagement(now: Date = new Date()) {
         (typeof cf.lead_campaign === "string" && cf.lead_campaign) ||
         "tu proyecto";
 
-      const result = await sendBrandTemplate({
-        clientId: cfg.client_id,
-        templateId: cfg.reengage_template_id as string,
-        phone,
-        values: { nombre: /^[+\d@]/.test(firstName) ? "" : firstName, tema: topic },
-        maxSendsPerHour: cfg.max_sends_per_hour ?? 20,
-      });
+      const values = { nombre: /^[+\d@]/.test(firstName) ? "" : firstName, tema: topic };
+      // Números donde Meta no entrega marketing (EE. UU./Canadá) o que Meta
+      // limitó: la retoma sale con la plantilla Utility de la empresa.
+      const { getFirstTouchUtilitySettings, phoneNeedsUtility, isMarketingRestrictedError } = await import(
+        "@/lib/whatsapp/cloud/first-touch-utility"
+      );
+      const utility = await getFirstTouchUtilitySettings(cfg.client_id);
+      const utilityReady = Boolean(utility.enabled && utility.template_id);
+      const digits = phone.replace(/\D/g, "");
+      let result = utilityReady && phoneNeedsUtility(digits, utility.country_codes)
+        ? await sendBrandTemplate({ clientId: cfg.client_id, templateId: utility.template_id as string, phone, values, maxSendsPerHour: cfg.max_sends_per_hour ?? 20 })
+        : await sendBrandTemplate({
+            clientId: cfg.client_id,
+            templateId: cfg.reengage_template_id as string,
+            phone,
+            values,
+            maxSendsPerHour: cfg.max_sends_per_hour ?? 20,
+          });
+      if (!result.sent && utilityReady && isMarketingRestrictedError(result.reason)) {
+        result = await sendBrandTemplate({ clientId: cfg.client_id, templateId: utility.template_id as string, phone, values, maxSendsPerHour: cfg.max_sends_per_hour ?? 20 });
+      }
 
       if (result.sent) {
         sent += 1;
