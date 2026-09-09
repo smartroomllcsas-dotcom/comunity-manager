@@ -7,6 +7,7 @@ import { useCurrentAgent } from "@/hooks/useCurrentAgent";
 import { useAuth } from "@/components/AuthProvider";
 import {
   LayoutDashboard,
+  CalendarDays,
   MessageSquare,
   Users,
   Send,
@@ -81,6 +82,7 @@ const CM_SECTIONS: NavSection[] = [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/inbox", label: "Bandeja de Entrada", icon: MessageSquare, badge: true },
       { href: "/broadcasts", label: "Difusiones", icon: Send },
+      { href: "/agenda", label: "Agenda", icon: CalendarDays },
       { href: "/chatbot", label: "Chatbot", icon: Bot },
       { href: "/composer", label: "Composer", icon: PenTool },
       { href: "/listening", label: "Escucha social", icon: Radio },
@@ -147,6 +149,7 @@ const UNIFIED_SECTIONS: NavSection[] = [
       { href: "/es/os", label: "Home", icon: Home },
       { href: "/inbox", label: "Bandeja de Entrada", icon: MessageSquare, badge: true },
       { href: "/broadcasts", label: "Difusiones", icon: Send },
+      { href: "/agenda", label: "Agenda", icon: CalendarDays },
       { href: "/contacts", label: "Contactos", icon: Users },
     ],
   },
