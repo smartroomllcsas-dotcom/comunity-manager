@@ -160,5 +160,36 @@ export async function POST(request: NextRequest) {
   } catch {
     // sin nota no pasa nada
   }
-  return NextResponse.json({ ok: true, when: whenText });
+
+  // Aviso por correo a TODOS los asesores de la empresa (igual que las reservas de Cal.com).
+  let notified = 0;
+  try {
+    const { brandAdvisorEmails, brandName } = await import("@/lib/smarttalk/lead-alerts");
+    const { notify } = await import("@/lib/notify/dispatcher");
+    const emails = await brandAdvisorEmails(admin, access.clientId);
+    if (emails.length > 0) {
+      const brand = (await brandName(access.clientId)) || "tu empresa";
+      const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://www.comunitymanager.io").replace(/\/$/, "");
+      const name = contact.name || "Un cliente";
+      const link = `${appUrl}/contacts/${contact.id}`;
+      const detail = `${name} tiene reunión ${whenText} (${p.durationMin || 30} min)${p.note ? `. Nota: ${p.note.trim()}` : ""}.`;
+      const subject = `📅 [${brand}] Reunión agendada manualmente: ${name} — ${whenText}`;
+      const text = `Empresa: ${brand}\n${detail} Abre la ficha: ${link}`;
+      const html =
+        `<p style="color:#555">Empresa: <b>${brand}</b></p>` +
+        `<p>${detail}</p>` +
+        `<p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px">Abrir ficha del contacto</a></p>`;
+      await notify({
+        organizationId: access.organizationId,
+        channels: ["email"],
+        recipients: { email: emails },
+        template: "custom",
+        variables: { subject, text, html },
+      });
+      notified = emails.length;
+    }
+  } catch (e) {
+    console.warn("[agenda] aviso a asesores falló (no crítico):", e);
+  }
+  return NextResponse.json({ ok: true, when: whenText, notified });
 }

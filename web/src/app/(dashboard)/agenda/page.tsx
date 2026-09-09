@@ -284,7 +284,7 @@ function ScheduleModal({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "No se pudo agendar");
-      toast.success(`Reunión agendada: ${data.when}`);
+      toast.success(`Reunión agendada: ${data.when}${data.notified ? ` · aviso enviado a ${data.notified} asesor${data.notified === 1 ? "" : "es"}` : ""}`);
       onSaved();
     } catch (e) {
       toast.error((e as Error).message);
