@@ -181,6 +181,40 @@ async function buildBookingLink(
   }
 }
 
+/**
+ * Pausa el bot para una conversación y avisa a los asesores. Antes sólo se
+ * reseteaba ai_turn_count a 0: el bot "escalaba" saltándose UN mensaje y
+ * retomaba en el siguiente (así llegó a responderle ~40 veces a un spammer).
+ * Con ai_paused el bot no vuelve a contestar hasta que un humano lo reactive.
+ */
+async function pauseAI(
+  admin: ReturnType<typeof createAdminClient>,
+  context: { conversationId: string; organizationId: string },
+  reason: "escalation_keyword" | "escalate_marker" | "max_turns"
+) {
+  await admin
+    .from("conversations")
+    .update({
+      metadata: await mergedMetadata(admin, context.conversationId, {
+        ai_turn_count: 0,
+        ai_paused: true,
+        ai_pause_reason: reason,
+        ai_paused_at: new Date().toISOString(),
+      }),
+    })
+    .eq("id", context.conversationId);
+  try {
+    const { notifyAIHandoff } = await import("@/lib/smarttalk/ai-handoff");
+    await notifyAIHandoff({
+      conversationId: context.conversationId,
+      organizationId: context.organizationId,
+      reason,
+    });
+  } catch (e) {
+    console.warn("[chatbot] aviso de handoff falló:", e);
+  }
+}
+
 interface AIContext {
   conversationId: string;
   contactWaId: string;
@@ -211,10 +245,7 @@ export async function processWithAIAgent(
     const lowerMsg = context.messageText.toLowerCase();
     for (const keyword of agentConfig.escalation_keywords) {
       if (lowerMsg.includes(keyword.toLowerCase())) {
-        await admin
-          .from("conversations")
-          .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
-          .eq("id", context.conversationId);
+        await pauseAI(admin, context, "escalation_keyword");
         return false;
       }
     }
@@ -223,10 +254,7 @@ export async function processWithAIAgent(
   // Check max turns
   const maxTurns = agentConfig.max_turns || 20;
   if (turnCount >= maxTurns) {
-    await admin
-      .from("conversations")
-      .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
-      .eq("id", context.conversationId);
+    await pauseAI(admin, context, "max_turns");
     return false;
   }
 
@@ -442,11 +470,14 @@ export async function processWithAIAgent(
   // Process actions
   const { cleanText, actions } = processAIActions(rawResponse);
 
-  if (cleanText.includes("[ESCALATE]")) {
-    await admin
-      .from("conversations")
-      .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
-      .eq("id", context.conversationId);
+  // [ESCALATE]: el agente calificó al lead y lo pasa a un humano. Se envía el
+  // texto restante (la despedida/confirmación) si lo hay, se pausa el bot y se
+  // avisa a los asesores. Antes se descartaba TODA la respuesta (el lead
+  // quedaba en silencio justo al calificar) y el bot retomaba después.
+  const escalated = cleanText.includes("[ESCALATE]");
+  const finalText = escalated ? cleanText.replace(/\[ESCALATE\]/g, "").trim() : cleanText;
+  if (escalated && !finalText) {
+    await pauseAI(admin, context, "escalate_marker");
     return false;
   }
 
@@ -467,7 +498,7 @@ export async function processWithAIAgent(
     console.error("[chatbot] sin emisor para el canal", context.channelId);
     return false;
   }
-  const result = (await sender.sendText(context.contactWaId, cleanText)) as {
+  const result = (await sender.sendText(context.contactWaId, finalText)) as {
     messages?: Array<{ id?: string }>;
   };
 
@@ -475,7 +506,7 @@ export async function processWithAIAgent(
     conversation_id: context.conversationId,
     direction: "outbound",
     type: "text",
-    content: { type: "text", text: cleanText },
+    content: { type: "text", text: finalText },
     wa_message_id: result?.messages?.[0]?.id,
     status: "sent",
     is_bot: true,
@@ -532,10 +563,14 @@ export async function processWithAIAgent(
         ai_agent_id: agentConfig.id,
         ...(brochureSent ? { brochure_sent: true } : {}),
       }),
-      last_message_preview: cleanText.slice(0, 100),
+      last_message_preview: finalText.slice(0, 100),
       updated_at: new Date().toISOString(),
     })
     .eq("id", context.conversationId);
+
+  if (escalated) {
+    await pauseAI(admin, context, "escalate_marker");
+  }
 
   return true;
 }
@@ -557,19 +592,13 @@ export async function processWithAI(
   const lowerMsg = context.messageText.toLowerCase();
   for (const keyword of config.escalation_rules.keywords) {
     if (lowerMsg.includes(keyword.toLowerCase())) {
-      await admin
-        .from("conversations")
-        .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
-        .eq("id", context.conversationId);
+      await pauseAI(admin, context, "escalation_keyword");
       return false;
     }
   }
 
   if (turnCount >= config.max_turns) {
-    await admin
-      .from("conversations")
-      .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
-      .eq("id", context.conversationId);
+    await pauseAI(admin, context, "max_turns");
     return false;
   }
 
@@ -607,10 +636,7 @@ export async function processWithAI(
   }
 
   if (aiResponse.includes("[ESCALATE]")) {
-    await admin
-      .from("conversations")
-      .update({ metadata: await mergedMetadata(admin, context.conversationId, { ai_turn_count: 0 }) })
-      .eq("id", context.conversationId);
+    await pauseAI(admin, context, "escalate_marker");
     return false;
   }
 

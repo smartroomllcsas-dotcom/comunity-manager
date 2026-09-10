@@ -75,7 +75,13 @@ export async function processIncomingWithChatbot(context: FlowContext): Promise<
     current_node_id?: string;
     ai_turn_count?: number;
     ai_agent_id?: string;
+    ai_paused?: boolean;
   };
+
+  // Bot en pausa para esta conversación (escaló a un humano o llegó al tope
+  // de turnos): no responde nada más; el webhook asigna asesor por
+  // round-robin y los asesores ya fueron avisados por email (ai-handoff).
+  if (metadata.ai_paused) return false;
   const contactId = context.contactId || conversation?.contact_id;
   // Marca (empresa) del lead: define QUÉ agente responde. Modelo de agencia:
   // cada empresa tiene su propio agente; nunca se usa el de otra empresa.
