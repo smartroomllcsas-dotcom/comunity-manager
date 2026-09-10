@@ -456,6 +456,7 @@ export async function processWahaWebhookEvent(
             organizationId: orgId,
             channelId,
             messageText,
+            messageId: (insertedMsg as { id?: string } | null)?.id,
           });
         } catch (e) {
           console.error("[waha] agente de IA falló:", e);

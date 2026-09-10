@@ -10,6 +10,9 @@ interface FlowContext {
   organizationId: string;
   messageText: string;
   channelId?: string;
+  /** id del mensaje entrante (tabla messages) que disparó esta ejecución —
+   * permite que en una ráfaga sólo responda la ejecución del último mensaje. */
+  messageId?: string;
 }
 
 async function sendFixedReplyIfMatches(

@@ -235,6 +235,7 @@ export async function processIncomingMessage(
       organizationId: org.id,
       messageText: textContent,
       channelId: channel.id,
+      messageId: insertedMessage[0].id as string,
     });
 
     // If not handled, assign via round-robin

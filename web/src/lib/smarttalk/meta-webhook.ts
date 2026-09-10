@@ -683,6 +683,7 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
             organizationId: channel.organization_id,
             channelId: channel.id,
             messageText: chatbotText,
+            messageId: insertedMessage?.[0]?.id as string | undefined,
           });
         } catch (e) {
           console.error("[meta-webhook] chatbot Messenger/IG falló:", e);

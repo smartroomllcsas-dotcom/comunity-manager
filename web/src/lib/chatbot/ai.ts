@@ -222,6 +222,8 @@ interface AIContext {
   organizationId: string;
   messageText: string;
   channelId?: string;
+  /** id del mensaje entrante (tabla messages) que disparó esta ejecución. */
+  messageId?: string;
 }
 
 interface AIAgentConfig {
@@ -439,11 +441,19 @@ export async function processWithAIAgent(
   // ejecución se retira y responde la que disparó el mensaje más reciente,
   // que ya tiene todo el contexto. Antes el agente contestaba dos veces.
   const latestInboundBefore = await latestInboundMessageId(admin, context.conversationId);
+  // Ráfagas (p. ej. 10 imágenes seguidas): cada mensaje dispara su PROPIA
+  // ejecución serverless en paralelo, y como todos los inbound ya estaban
+  // insertados antes de llegar aquí, la espera de abajo no detectaba nada y
+  // el bot contestaba una vez POR CADA mensaje de la ráfaga. Sólo responde
+  // la ejecución cuyo mensaje es el último de la conversación.
+  if (context.messageId && latestInboundBefore && latestInboundBefore !== context.messageId) {
+    return true;
+  }
   await new Promise((resolve) =>
     setTimeout(resolve, Math.max(responseDelaySeconds * 1000, COALESCE_INBOUND_MS))
   );
   const latestInboundAfter = await latestInboundMessageId(admin, context.conversationId);
-  if (latestInboundAfter && latestInboundAfter !== latestInboundBefore) {
+  if (latestInboundAfter && latestInboundAfter !== (context.messageId || latestInboundBefore)) {
     return true; // llegó un mensaje más nuevo: responde su ejecución
   }
   if (await anotherInboundQueued(admin, context)) return true;
@@ -465,6 +475,14 @@ export async function processWithAIAgent(
   if (!rawResponse || !rawResponse.trim()) {
     console.warn("[chatbot] respuesta de IA vacía; no se envía nada");
     return false;
+  }
+
+  // Re-chequeo tras la llamada al modelo (tarda segundos): si mientras tanto
+  // llegó otro mensaje del cliente, esta respuesta ya quedó desactualizada y
+  // la ejecución del mensaje nuevo contestará con todo el contexto.
+  if (context.messageId) {
+    const latestNow = await latestInboundMessageId(admin, context.conversationId);
+    if (latestNow && latestNow !== context.messageId) return true;
   }
 
   // Process actions
@@ -616,11 +634,14 @@ export async function processWithAI(
       ? config.knowledge_base.join("\n\n")
       : undefined;
 
-  // Agrupar mensajes seguidos del cliente (ver processWithAIAgent).
+  // Agrupar mensajes seguidos del cliente y ráfagas (ver processWithAIAgent).
   const latestInboundBefore = await latestInboundMessageId(admin, context.conversationId);
+  if (context.messageId && latestInboundBefore && latestInboundBefore !== context.messageId) {
+    return true;
+  }
   await new Promise((resolve) => setTimeout(resolve, COALESCE_INBOUND_MS));
   const latestInboundAfter = await latestInboundMessageId(admin, context.conversationId);
-  if (latestInboundAfter && latestInboundAfter !== latestInboundBefore) return true;
+  if (latestInboundAfter && latestInboundAfter !== (context.messageId || latestInboundBefore)) return true;
   if (await anotherInboundQueued(admin, context)) return true;
 
   let aiResponse: string;
