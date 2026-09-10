@@ -5,6 +5,7 @@ import { useMessages } from "@/hooks/useMessages";
 import { useCurrentAgent } from "@/hooks/useCurrentAgent";
 import { useInboxStore } from "@/stores/inbox";
 import { MessageBubble } from "./MessageBubble";
+import { bogotaDayKey, bogotaDayLabel } from "@/lib/inbox/time";
 import { MessageInput } from "./MessageInput";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InternalNotes } from "./InternalNotes";
@@ -371,7 +372,24 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
                   description="Envía el primer mensaje para iniciar la conversación."
                 />
               ) : (
-                messages?.map((msg) => <MessageBubble key={msg.id} message={msg} />)
+                messages?.map((msg, i) => {
+                  const prev = i > 0 ? messages[i - 1] : null;
+                  const newDay = !prev || bogotaDayKey(prev.created_at) !== bogotaDayKey(msg.created_at);
+                  return (
+                    <div key={msg.id}>
+                      {newDay && (
+                        <div className="my-3 flex items-center gap-3">
+                          <div className="h-px flex-1 bg-[var(--border-default,#2d333b)]" />
+                          <span className="rounded-full border border-[var(--border-default,#2d333b)] px-3 py-0.5 text-[11px] text-[var(--text-tertiary)]">
+                            {bogotaDayLabel(msg.created_at)}
+                          </span>
+                          <div className="h-px flex-1 bg-[var(--border-default,#2d333b)]" />
+                        </div>
+                      )}
+                      <MessageBubble message={msg} />
+                    </div>
+                  );
+                })
               )}
               <div ref={bottomRef} />
             </div>

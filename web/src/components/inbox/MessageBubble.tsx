@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import type { Message } from "@/types/database";
 import { Check, CheckCheck, Bot, Image as ImageIcon, FileText, MapPin, Music2, Sticker, FileCheck2, ExternalLink, Download } from "lucide-react";
 import { ATTACHMENT_TYPES, extensionFromName, formatBytes } from "@/lib/inbox/attachments";
-import { format } from "date-fns";
+import { formatBogotaTime, formatBogotaDateTime } from "@/lib/inbox/time";
 
 interface MessageBubbleProps {
   message: Message;
@@ -308,11 +308,15 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           "flex items-center gap-1 mt-1",
           isOutbound ? "justify-end" : "justify-start"
         )}>
-          <span className={cn(
-            "text-[10px] tabular-nums",
-            isOutbound && !isBot ? "text-white/50" : "text-[var(--text-tertiary)]"
-          )}>
-            {format(new Date(message.created_at), "HH:mm")}
+          <span
+            className={cn(
+              "text-[10px] tabular-nums",
+              isOutbound && !isBot ? "text-white/50" : "text-[var(--text-tertiary)]"
+            )}
+            title={formatBogotaDateTime(message.created_at)}
+          >
+            {/* Mensajes del cliente: fecha exacta; nuestros: hora (la fecha va en el separador del día). */}
+            {isOutbound ? formatBogotaTime(message.created_at) : formatBogotaDateTime(message.created_at)}
           </span>
           {isOutbound && statusIcons[message.status]}
         </div>

@@ -2,8 +2,7 @@
 import { cn } from "@/lib/utils";
 import { ContactAvatar } from "./ContactAvatar";
 import type { Conversation } from "@/types/database";
-import { format, isToday, isYesterday } from "date-fns";
-import { es } from "date-fns/locale";
+import { formatListTimestamp } from "@/lib/inbox/time";
 import { Clock } from "lucide-react";
 import { ChannelAvatarMark, ChannelBadge } from "./ChannelBadge";
 import { BrandTag } from "./BrandTag";
@@ -17,10 +16,7 @@ interface ConversationItemProps {
 }
 
 function formatTimestamp(dateStr: string) {
-  const date = new Date(dateStr);
-  if (isToday(date)) return format(date, "HH:mm");
-  if (isYesterday(date)) return "Ayer";
-  return format(date, "dd/MM", { locale: es });
+  return formatListTimestamp(dateStr);
 }
 
 export function ConversationItem({ conversation, isSelected, onClick }: ConversationItemProps) {
