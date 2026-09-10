@@ -85,6 +85,14 @@ export async function processIncomingWithChatbot(context: FlowContext): Promise<
   // de turnos): no responde nada más; el webhook asigna asesor por
   // round-robin y los asesores ya fueron avisados por email (ai-handoff).
   if (metadata.ai_paused) return false;
+  // Un asesor humano atendió este chat hace poco (mensaje o nota interna):
+  // el agente no se mete, en ningún canal. El asesor es dueño del chat.
+  try {
+    const { humanRepliedRecently } = await import("@/lib/chatbot/human-active");
+    if (await humanRepliedRecently(admin, context.conversationId)) return false;
+  } catch {
+    // sin bloqueo si la comprobación falla
+  }
   const contactId = context.contactId || conversation?.contact_id;
   // Marca (empresa) del lead: define QUÉ agente responde. Modelo de agencia:
   // cada empresa tiene su propio agente; nunca se usa el de otra empresa.

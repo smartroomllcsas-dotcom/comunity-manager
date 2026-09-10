@@ -171,7 +171,7 @@ export async function runFollowups(now: Date = new Date()): Promise<FollowupRunR
     const oldest = new Date(now.getTime() - MAX_AGE_DAYS * 86400_000).toISOString();
     const { data: conversations } = await admin
       .from("conversations")
-      .select("id, contact_id, updated_at, channel_id, channel:channels!inner(id, type)")
+      .select("id, contact_id, updated_at, channel_id, assigned_agent_id, metadata, channel:channels!inner(id, type)")
       .eq("brand_id", b.brandId)
       .in("status", ["open", "pending"])
       .lt("updated_at", cutoff)
@@ -181,20 +181,30 @@ export async function runFollowups(now: Date = new Date()): Promise<FollowupRunR
       .limit(PER_BRAND_LIMIT);
 
     let brandSent = 0;
-    for (const conv of (conversations || []) as Array<{ id: string; contact_id: string; channel_id: string; channel: { type: string } | Array<{ type: string }> }>) {
+    for (const conv of (conversations || []) as Array<{
+      id: string; contact_id: string; channel_id: string; assigned_agent_id: string | null;
+      metadata: Record<string, unknown> | null; channel: { type: string } | Array<{ type: string }>;
+    }>) {
       if (brandSent >= b.maxPerHour) break;
       res.considered += 1;
+      // Un asesor tiene el chat (asignado, bot en pausa): la automatización no se mete.
+      if (conv.assigned_agent_id || conv.metadata?.ai_paused === true) continue;
       const chType = (Array.isArray(conv.channel) ? conv.channel[0] : conv.channel)?.type || "";
       const isQr = chType === "waha";
 
       const { data: lastMsgs } = await admin
         .from("messages")
-        .select("direction, created_at")
+        .select("direction, created_at, is_bot, content")
         .eq("conversation_id", conv.id)
         .order("created_at", { ascending: false })
         .limit(50);
-      const msgs = (lastMsgs || []) as Array<{ direction: string; created_at: string }>;
+      const msgs = (lastMsgs || []) as Array<{ direction: string; created_at: string; is_bot: boolean | null; content: { text?: string } | null }>;
       if (!msgs.length || msgs[0].direction !== "outbound") continue;
+      // Si lo último lo escribió una persona, o hay nota interna humana
+      // reciente, el asesor está atendiendo: no hay seguimiento automático.
+      const { lastOutboundIsHuman, humanRepliedRecently } = await import("@/lib/chatbot/human-active");
+      if (lastOutboundIsHuman(msgs)) continue;
+      if (await humanRepliedRecently(admin, conv.id, 24 * 7)) continue;
       const lastInbound = msgs.find((m) => m.direction === "inbound");
       const silenceStart = lastInbound ? new Date(lastInbound.created_at) : new Date(msgs[msgs.length - 1].created_at);
       const hoursSilent = (now.getTime() - silenceStart.getTime()) / 3600_000;
