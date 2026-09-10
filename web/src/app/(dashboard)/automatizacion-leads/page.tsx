@@ -65,6 +65,14 @@ interface Settings {
   booking_reminder: { enabled: boolean; template_id: string | null; minutes_before: number };
   /** Respuestas exactas por canal: patrón → texto tal cual (sin IA). */
   fixed_replies: { whatsapp?: FixedReply[]; instagram?: FixedReply[]; messenger?: FixedReply[] };
+  /** Seguimiento automático por pasos (varios intentos y cierre). */
+  followup: {
+    enabled: boolean;
+    steps: Array<{ after_hours: number; template_id: string | null; text: string }>;
+    finish_mark_lost: boolean;
+    finish_after_hours: number;
+    notify_advisors: boolean;
+  };
 }
 
 type FixedReply = { match: string; reply: string; unless?: string; once?: boolean };
@@ -126,6 +134,17 @@ const emptySettings: Settings = {
   channel_instructions: {},
   booking_reminder: { enabled: false, template_id: null, minutes_before: 60 },
   fixed_replies: {},
+  followup: {
+    enabled: true,
+    steps: [
+      { after_hours: 24, template_id: null, text: "" },
+      { after_hours: 72, template_id: null, text: "" },
+      { after_hours: 168, template_id: null, text: "" },
+    ],
+    finish_mark_lost: true,
+    finish_after_hours: 48,
+    notify_advisors: true,
+  },
 };
 
 export default function LeadAutomationPage() {
@@ -396,27 +415,137 @@ export default function LeadAutomationPage() {
                     </option>
                   ))}
                 </select>
-                <div className="mt-2 flex items-center gap-2">
-                  <label className="text-xs text-[#8b949e]">Retomar después de</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={168}
-                    className="w-20 rounded-md bg-[#0d1117] border border-[#2d333b] px-2 py-1 text-sm text-white"
-                    value={settings.reengage_after_hours}
-                    onChange={(e) =>
+                <p className="mt-1 text-[11px] text-[#8b949e]">
+                  Es la plantilla que usa el seguimiento automático de abajo cuando un paso no tiene plantilla propia.
+                </p>
+              </div>
+
+              {/* Seguimiento automático por pasos */}
+              <div className="rounded-md border border-[#2d333b] bg-[#0d1117]/60 p-3 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-white">Seguimiento automático cuando el lead deja de responder</p>
+                    <p className="text-xs text-[#8b949e]">
+                      Cada intento sale cuando el cliente lleva esas horas sin escribir y el último mensaje fue nuestro. WhatsApp API usa la
+                      plantilla del paso (o la de retoma); WhatsApp por QR usa el texto. No aplica a Perdido, Cliente, «no contactar» ni a
+                      quien ya agendó. Corre cada hora.
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-[#8b949e]">
+                    <input
+                      type="checkbox"
+                      checked={settings.followup.enabled}
+                      onChange={(e) => setSettings((s) => ({ ...s, followup: { ...s.followup, enabled: e.target.checked } }))}
+                    />
+                    Activo
+                  </label>
+                </div>
+                {settings.followup.steps.map((step, idx) => (
+                  <div key={idx} className="rounded-md border border-[#2d333b] p-2 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-medium text-white">Intento {idx + 1}</span>
+                      <span className="text-xs text-[#8b949e]">a las</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={1440}
+                        className="w-20 rounded-md bg-[#0d1117] border border-[#2d333b] px-2 py-1 text-sm text-white"
+                        value={step.after_hours}
+                        onChange={(e) =>
+                          setSettings((s) => ({
+                            ...s,
+                            followup: {
+                              ...s.followup,
+                              steps: s.followup.steps.map((st, i) => (i === idx ? { ...st, after_hours: Math.max(1, Number(e.target.value) || 1) } : st)),
+                            },
+                          }))
+                        }
+                      />
+                      <span className="text-xs text-[#8b949e]">horas sin respuesta ({Math.round((step.after_hours / 24) * 10) / 10} días)</span>
+                      <select
+                        className="ml-auto rounded-md bg-[#0d1117] border border-[#2d333b] px-2 py-1 text-xs text-white"
+                        value={step.template_id ?? ""}
+                        onChange={(e) =>
+                          setSettings((s) => ({
+                            ...s,
+                            followup: { ...s.followup, steps: s.followup.steps.map((st, i) => (i === idx ? { ...st, template_id: e.target.value || null } : st)) },
+                          }))
+                        }
+                      >
+                        <option value="">Plantilla: la de retoma</option>
+                        {templates.map((t) => (
+                          <option key={t.id} value={t.id} disabled={t.status !== "APPROVED"}>{templateLabel(t)}</option>
+                        ))}
+                      </select>
+                      {settings.followup.steps.length > 1 && (
+                        <button
+                          type="button"
+                          className="text-xs text-[#f85149] hover:underline"
+                          onClick={() => setSettings((s) => ({ ...s, followup: { ...s.followup, steps: s.followup.steps.filter((_, i) => i !== idx) } }))}
+                        >
+                          Quitar
+                        </button>
+                      )}
+                    </div>
+                    <textarea
+                      rows={2}
+                      className="w-full rounded-md bg-[#0d1117] border border-[#2d333b] px-3 py-1.5 text-sm text-white"
+                      placeholder="Texto para WhatsApp por QR (usa {{contacto.nombre}}). Vacío = texto por defecto."
+                      value={step.text}
+                      onChange={(e) =>
+                        setSettings((s) => ({
+                          ...s,
+                          followup: { ...s.followup, steps: s.followup.steps.map((st, i) => (i === idx ? { ...st, text: e.target.value } : st)) },
+                        }))
+                      }
+                    />
+                  </div>
+                ))}
+                {settings.followup.steps.length < 5 && (
+                  <button
+                    type="button"
+                    className="text-xs text-[#58a6ff] hover:underline"
+                    onClick={() =>
                       setSettings((s) => ({
                         ...s,
-                        reengage_after_hours: Math.max(1, Math.min(168, Number(e.target.value) || 24)),
+                        followup: {
+                          ...s.followup,
+                          steps: [...s.followup.steps, { after_hours: (s.followup.steps[s.followup.steps.length - 1]?.after_hours || 24) * 2, template_id: null, text: "" }],
+                        },
                       }))
                     }
+                  >
+                    + Agregar intento
+                  </button>
+                )}
+                <div className="flex flex-wrap items-center gap-3 border-t border-[#2d333b] pt-2">
+                  <label className="flex items-center gap-2 text-xs text-[#8b949e]">
+                    <input
+                      type="checkbox"
+                      checked={settings.followup.finish_mark_lost}
+                      onChange={(e) => setSettings((s) => ({ ...s, followup: { ...s.followup, finish_mark_lost: e.target.checked } }))}
+                    />
+                    Si no responde a ninguno, marcar como Perdido
+                  </label>
+                  <span className="text-xs text-[#8b949e]">tras</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={720}
+                    className="w-20 rounded-md bg-[#0d1117] border border-[#2d333b] px-2 py-1 text-sm text-white"
+                    value={settings.followup.finish_after_hours}
+                    onChange={(e) => setSettings((s) => ({ ...s, followup: { ...s.followup, finish_after_hours: Math.max(0, Number(e.target.value) || 0) } }))}
                   />
-                  <span className="text-xs text-[#8b949e]">horas sin respuesta</span>
+                  <span className="text-xs text-[#8b949e]">horas más del último intento</span>
+                  <label className="flex items-center gap-2 text-xs text-[#8b949e]">
+                    <input
+                      type="checkbox"
+                      checked={settings.followup.notify_advisors}
+                      onChange={(e) => setSettings((s) => ({ ...s, followup: { ...s.followup, notify_advisors: e.target.checked } }))}
+                    />
+                    Avisar a los asesores por correo
+                  </label>
                 </div>
-                <p className="mt-1 text-[11px] text-[#8b949e]">
-                  Se envía una sola vez por cliente, sólo si el último mensaje fue nuestro y no está en
-                  Perdido, Cliente ni con reunión agendada. Corre cada hora.
-                </p>
               </div>
 
               {/* Recordatorio de reunión */}

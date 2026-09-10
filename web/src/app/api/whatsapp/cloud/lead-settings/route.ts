@@ -21,6 +21,7 @@ import {
   setChannelInstructions,
 } from "@/lib/whatsapp/cloud/channel-instructions";
 import { getFixedReplies, setFixedReplies } from "@/lib/whatsapp/cloud/fixed-replies";
+import { getFollowupSettings, setFollowupSettings } from "@/lib/whatsapp/cloud/followup";
 import {
   REMINDER_TEMPLATE_NAME,
   ensureReminderTemplate,
@@ -69,6 +70,20 @@ const putSchema = z.object({
       messenger: z.array(fixedReplySchema).max(20).optional(),
     })
     .optional(),
+  // Seguimiento automático por pasos (varios intentos y cierre).
+  followup: z
+    .object({
+      enabled: z.boolean().optional(),
+      steps: z
+        .array(z.object({ after_hours: z.number().min(1).max(1440), template_id: z.string().uuid().nullable().optional(), text: z.string().max(1000).optional() }))
+        .min(1)
+        .max(5)
+        .optional(),
+      finish_mark_lost: z.boolean().optional(),
+      finish_after_hours: z.number().min(0).max(720).optional(),
+      notify_advisors: z.boolean().optional(),
+    })
+    .optional(),
   // Recordatorio de reunión (N minutos antes de la cita agendada en Cal.com).
   booking_reminder: z
     .object({
@@ -82,10 +97,11 @@ const putSchema = z.object({
 });
 
 async function loadPayload(clientId: string) {
-  const [channel_instructions, booking_reminder, fixed_replies] = await Promise.all([
+  const [channel_instructions, booking_reminder, fixed_replies, followup] = await Promise.all([
     getChannelInstructions(clientId),
     getBookingReminderSettings(clientId),
     getFixedReplies(clientId),
+    getFollowupSettings(clientId),
   ]);
   const [{ data: settings }, { data: templates }] = await Promise.all([
     supabaseAdmin
@@ -101,7 +117,7 @@ async function loadPayload(clientId: string) {
   ]);
   return {
     settings: settings
-      ? { ...(settings as Record<string, unknown>), channel_instructions, booking_reminder, fixed_replies }
+      ? { ...(settings as Record<string, unknown>), channel_instructions, booking_reminder, fixed_replies, followup }
       : null,
     templates: templates ?? [],
   };
@@ -126,7 +142,7 @@ export async function PUT(request: NextRequest) {
       { status: 422 }
     );
   }
-  const { clientId, channel_instructions, booking_reminder, fixed_replies, create_reminder_template, ...fields } =
+  const { clientId, channel_instructions, booking_reminder, fixed_replies, followup, create_reminder_template, ...fields } =
     parsed.data;
 
   const access = await getCmClientAccess(request, clientId);
@@ -139,6 +155,11 @@ export async function PUT(request: NextRequest) {
 
   if (fixed_replies !== undefined) {
     const saved = await setFixedReplies(access.clientId, fixed_replies);
+    if (!saved.ok) return NextResponse.json({ error: saved.error }, { status: 500 });
+  }
+  if (followup !== undefined) {
+    const current = await getFollowupSettings(access.clientId);
+    const saved = await setFollowupSettings(access.clientId, { ...current, ...followup });
     if (!saved.ok) return NextResponse.json({ error: saved.error }, { status: 500 });
   }
 

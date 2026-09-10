@@ -11,6 +11,11 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 
 ## Aplicado
 
+### 10 sep 2026
+- **Seguimiento automático por pasos, para todas las empresas**: reemplaza la retoma única. Por defecto 3 intentos (24 h, 72 h y 7 días de silencio del cliente) y, si sigue sin responder 48 h después del último, se marca Perdido, nota en el chat y correo a los asesores. WhatsApp API usa plantilla (la del paso o la de retoma; Utility para EE. UU. o si Meta limita marketing); WhatsApp por QR usa texto (Moda incluido). Configurable en Automatización de leads → "Seguimiento automático". No aplica a Perdido/Cliente, "no contactar" ni a quien ya agendó.
+- Retoma con plantilla Utility para números de EE. UU./Canadá y limitados por Meta.
+- Plantillas Utility de Smart Digital aprobadas por Meta (9 sep): `recordatorio_reunion`, `confirmacion_solicitud_lead`, `confirmacion_pedido`. Recordatorio de reunión probado en vivo con una reunión manual.
+
 ### 9 sep 2026
 - **Agenda** (nuevo en el menú): calendario mensual con las reuniones agendadas por Cal.com de la empresa activa, próximas y pasadas, enlace a la ficha del contacto y al chat, botón "Agendar para un cliente" (página pública de Cal.com embebida) y acceso a Cal.com. El panel de Cal.com no se puede embeber (lo bloquea Cal.com), por eso abre en pestaña nueva.
 - Corregido el flujo de despliegue: varios deploys del 8 sep no habían salido; ahora se verifica la edad del último deploy.
@@ -45,7 +50,6 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 
 ## Pendiente
 
-- **Meta**: aprobación de `recordatorio_reunion` y `confirmacion_solicitud_lead` (Smart Digital). Al aprobarse, los 13 leads limitados por Meta se reintentan solos.
 - **Variables en Vercel**: `OPENAI_API_KEY` (audios/videos).
 - Contactos de Moda que entraron con id @lid como "número": se corrigen solos cuando WhatsApp mande el número; opcional una pasada consultando la agenda de WAHA.
 - Estado de la sesión WAHA en `waha_sessions` figura FAILED aunque funciona: sincronizar el estado.
