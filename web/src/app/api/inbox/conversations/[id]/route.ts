@@ -48,7 +48,9 @@ export async function PATCH(
   const body = (await request.json().catch(() => ({}))) as ConversationActionBody;
   const now = new Date().toISOString();
 
-  let payload: Record<string, unknown> = { updated_at: now };
+  // "read" no toca updated_at: el orden del Inbox sigue al último mensaje,
+  // no a cuándo se abrió el chat.
+  let payload: Record<string, unknown> = body.action === "read" ? {} : { updated_at: now };
 
   switch (body.action) {
     case "read":

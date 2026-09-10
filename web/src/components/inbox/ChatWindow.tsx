@@ -59,13 +59,22 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
 
   useEffect(() => {
     if (conversation.unread_count > 0) {
+      // Quitar la insignia de inmediato en la lista (sin esperar al servidor ni al realtime).
+      const clearUnread = (c: Conversation) => (c.id === conversation.id ? { ...c, unread_count: 0 } : c);
+      queryClient.setQueriesData<{ pages?: Array<{ conversations: Conversation[] }>; pageParams?: unknown[] }>(
+        { queryKey: ["conversations"] },
+        (old) =>
+          old?.pages
+            ? { ...old, pages: old.pages.map((p) => ({ ...p, conversations: (p.conversations || []).map(clearUnread) })) }
+            : old
+      );
       void fetch(`/api/inbox/conversations/${conversation.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "read" }),
-      });
+      }).then(() => queryClient.invalidateQueries({ queryKey: ["inbox-counts"] }));
     }
-  }, [conversation.id, conversation.unread_count]);
+  }, [conversation.id, conversation.unread_count, queryClient]);
 
   // Reset tab when conversation changes
   useEffect(() => {

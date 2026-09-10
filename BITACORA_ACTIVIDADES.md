@@ -12,6 +12,7 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 ## Aplicado
 
 ### 10 sep 2026
+- **Inbox**: la insignia de mensajes sin leer desaparece al instante al abrir el chat, y la lista se ordena por el último mensaje real (del cliente o nuestro). Antes, abrir un chat lo subía al inicio y responder no siempre lo movía. Migración **049** aplicada (trigger: cada mensaje nuevo mueve la conversación).
 - **Seguimiento automático por pasos, para todas las empresas**: reemplaza la retoma única. Por defecto 3 intentos (24 h, 72 h y 7 días de silencio del cliente) y, si sigue sin responder 48 h después del último, se marca Perdido, nota en el chat y correo a los asesores. WhatsApp API usa plantilla (la del paso o la de retoma; Utility para EE. UU. o si Meta limita marketing); WhatsApp por QR usa texto (Moda incluido). Configurable en Automatización de leads → "Seguimiento automático". No aplica a Perdido/Cliente, "no contactar" ni a quien ya agendó.
 - Retoma con plantilla Utility para números de EE. UU./Canadá y limitados por Meta.
 - Plantillas Utility de Smart Digital aprobadas por Meta (9 sep): `recordatorio_reunion`, `confirmacion_solicitud_lead`, `confirmacion_pedido`. Recordatorio de reunión probado en vivo con una reunión manual.

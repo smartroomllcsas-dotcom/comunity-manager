@@ -368,7 +368,7 @@ export async function POST(
       });
       await st
         .from("conversations")
-        .update({ last_message_at: now, last_message_preview: content.slice(0, 200), unread_count: 0 })
+        .update({ updated_at: now, last_message_preview: content.slice(0, 200), unread_count: 0 })
         .eq("id", parsed.ref);
     } catch {
       // no bloqueamos la respuesta si la persistencia smarttalk falla
