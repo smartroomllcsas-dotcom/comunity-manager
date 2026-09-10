@@ -12,6 +12,7 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 ## Aplicado
 
 ### 10 sep 2026
+- **Ramas unificadas**: `master` quedó igual a `visual/os-fusion` (239 commits integrados, sin conflictos; 262 pruebas en verde). Producción sigue desplegándose por CLI desde el mismo código.
 - **El asesor es dueño del chat**: si una persona respondió o dejó nota interna en un chat en las últimas 24 h, el agente IA no responde ahí (en ningún canal); y el seguimiento automático no toca chats con último mensaje humano, nota humana en 7 días, asesor asignado o bot en pausa. Antes el agente "reabordaba" clientes que ya había atendido un asesor.
 - **Inbox en hora de Colombia**: todas las horas del Inbox (lista y chat) se muestran en hora de Colombia sin depender del navegador; separadores por día ("Hoy", "Ayer", fecha completa) y fecha exacta en cada mensaje del cliente.
 - **Inbox**: la insignia de mensajes sin leer desaparece al instante al abrir el chat, y la lista se ordena por el último mensaje real (del cliente o nuestro). Antes, abrir un chat lo subía al inicio y responder no siempre lo movía. Migración **049** aplicada (trigger: cada mensaje nuevo mueve la conversación).
@@ -57,6 +58,6 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 - Contactos de Moda que entraron con id @lid como "número": se corrigen solos cuando WhatsApp mande el número; opcional una pasada consultando la agenda de WAHA.
 - Estado de la sesión WAHA en `waha_sessions` figura FAILED aunque funciona: sincronizar el estado.
 - Cuenta vieja `smartsends` y usuario admin antiguo: revisar. Contraseña del asesor smartroomllcsas@gmail.com la pone el usuario.
-- Billing P0, merge de `visual/os-fusion` a `master`, endurecer `/api/integrations/wa/send`.
+- Billing P0, endurecer `/api/integrations/wa/send`.
 - **Difusiones (pendiente de esta vista)**: primera prueba en vivo: crear una difusión en Smart Digital con la etiqueta o etapa de un grupo pequeño y ritmo 5 por hora, y revisar el detalle. Después borrar las 60 difusiones QA sintéticas del sistema viejo que siguen en la lista.
 - 3 tests `qa-e2e` (meta-oauth, profile, resilience) fallan desde antes.
