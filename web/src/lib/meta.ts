@@ -239,6 +239,8 @@ export async function subscribePageToApp(pageId: string, pageAccessToken: string
       'message_deliveries',
       'message_reads',
       'leadgen',
+      // Comentarios de publicaciones y pautas de la página.
+      'feed',
     ].join(','),
   })
 
@@ -256,6 +258,8 @@ export async function subscribeInstagramAccountToApp(
     subscribed_fields: [
       'messages',
       'messaging_postbacks',
+      // Comentarios en publicaciones y pautas de Instagram.
+      'comments',
     ].join(','),
   })
 
@@ -441,4 +445,63 @@ export async function sendMetaAttachment(
       }),
     }),
   });
+}
+
+/**
+ * Responder EN PÚBLICO un comentario.
+ * Facebook: POST /{comment-id}/comments · Instagram: POST /{comment-id}/replies
+ */
+export async function replyToComment(
+  accessToken: string,
+  platform: 'facebook' | 'instagram',
+  commentId: string,
+  message: string,
+): Promise<{ id?: string }> {
+  const path = platform === 'instagram' ? 'replies' : 'comments'
+  const params = new URLSearchParams({ access_token: accessToken, message })
+  return metaFetch(`${META_GRAPH_URL}/${encodeURIComponent(commentId)}/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params,
+  })
+}
+
+/**
+ * Mensaje AL INTERNO a quien comentó (private reply de Meta): se envía al
+ * comment_id, no a un usuario. Meta lo permite UNA sola vez por comentario y
+ * dentro de los 7 días siguientes. La respuesta trae el id del destinatario,
+ * con el que se abre la conversación en el Inbox.
+ */
+export async function sendPrivateReplyToComment(
+  accessToken: string,
+  commentId: string,
+  text: string,
+  options: { senderId?: string } = {},
+): Promise<{ recipient_id?: string; message_id?: string }> {
+  const params = new URLSearchParams({
+    access_token: accessToken,
+    recipient: JSON.stringify({ comment_id: commentId }),
+    message: JSON.stringify({ text }),
+  })
+  const target = options.senderId || 'me'
+  return metaFetch(`${META_GRAPH_URL}/${encodeURIComponent(target)}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params,
+  })
+}
+
+/** Enlace permanente del comentario o de su publicación (para abrirlo en Meta). */
+export async function getCommentPermalink(
+  accessToken: string,
+  commentId: string,
+): Promise<string | null> {
+  try {
+    const data = await metaFetch(
+      `${META_GRAPH_URL}/${encodeURIComponent(commentId)}?fields=permalink_url&access_token=${accessToken}`,
+    )
+    return (data?.permalink_url as string | undefined) || null
+  } catch {
+    return null
+  }
 }

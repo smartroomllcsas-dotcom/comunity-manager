@@ -717,6 +717,46 @@ async function persistMessengerLikeWebhook(channelKind: MetaChannelKind, payload
         continue;
       }
 
+      // Comentarios de publicaciones y pautas (Facebook "feed", Instagram
+      // "comments"): se guardan y, según las reglas de la empresa, se responden
+      // en público y se le escribe al interno a quien comentó.
+      if (change.field === "feed" || change.field === "comments") {
+        try {
+          const { parseCommentChange, handleIncomingComment, channelSelfId } = await import(
+            "@/lib/social/comments"
+          );
+          const commentChannel = {
+            id: channel.id,
+            organization_id: channel.organization_id,
+            brand_id: channel.brand_id,
+            type: channel.type,
+            meta_business_id: channel.meta_business_id,
+            access_token: channel.access_token,
+            access_token_ciphertext: channel.access_token_ciphertext,
+            config: channel.config,
+          };
+          const selfIds = [channelSelfId(commentChannel), entry.id].filter(Boolean) as string[];
+          const parsedComment = parseCommentChange(
+            channel.type === "instagram" ? "instagram" : "facebook",
+            change.field,
+            value as unknown as Record<string, unknown>,
+            selfIds
+          );
+          if (parsedComment) {
+            const { brandName } = await import("@/lib/smarttalk/lead-alerts");
+            const result = await handleIncomingComment(
+              commentChannel,
+              parsedComment,
+              await brandName(channel.brand_id)
+            );
+            if (result.stored) processed += 1;
+          }
+        } catch (e) {
+          console.error("[meta-webhook] comentario falló:", e);
+        }
+        continue;
+      }
+
       const messages = value.messages || [];
       for (const message of messages) {
         const contactId = extractContactId(

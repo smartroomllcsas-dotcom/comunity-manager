@@ -5,7 +5,7 @@ import type { Conversation } from "@/types/database";
 import type { ComponentType } from "react";
 import { MessageCircle, Music2, Globe2, Send, MessageSquare } from "lucide-react";
 
-function FacebookGlyph({ className }: { className?: string }) {
+export function FacebookGlyph({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
       <path d="M14 9h2.2V6.5H14V5.2c0-.7.5-1.2 1.2-1.2h1V1.5h-1.5C12.8 1.5 11 3.2 11 5.8V9H9v2.5h2V22h3V11.5h2.1L16.5 9H14Z" />
@@ -13,7 +13,7 @@ function FacebookGlyph({ className }: { className?: string }) {
   );
 }
 
-function InstagramGlyph({ className }: { className?: string }) {
+export function InstagramGlyph({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
       <rect x="3.5" y="3.5" width="17" height="17" rx="5" stroke="currentColor" strokeWidth="2" />
