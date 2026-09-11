@@ -120,6 +120,12 @@ export function getOAuthUrl(
     'leads_retrieval',
     'pages_manage_ads',
     'pages_read_engagement',
+    // Comentarios: responder públicamente un comentario de la página exige
+    // pages_manage_engagement. Igual que pages_manage_posts, Meta lo concede
+    // sólo si el caso de uso de la app lo incluye (revisión de la aplicación).
+    // Si el diálogo de conexión empieza a fallar con "Invalid Scopes:
+    // pages_manage_engagement", quítalo hasta que Meta lo apruebe.
+    'pages_manage_engagement',
     // NOTA (2026-08-29): 'pages_manage_posts' NO puede pedirse todavía — en
     // esta app requiere App Review ("Agregar a revisión" en el caso de uso
     // Administrar páginas). Incluirlo rompe el diálogo OAuth completo con
@@ -131,6 +137,8 @@ export function getOAuthUrl(
     scopes.push(
       'instagram_basic',
       'instagram_manage_messages',
+      // Responder comentarios de Instagram.
+      'instagram_manage_comments',
       // Bug 3 fix: publicar en IG requiere content_publish explicito.
       'instagram_content_publish',
     )

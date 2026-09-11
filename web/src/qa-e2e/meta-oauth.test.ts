@@ -42,8 +42,20 @@ describe("Meta OAuth", () => {
     const params = new URL(url).searchParams;
 
     expect(params.has("config_id")).toBe(false);
-    expect(params.get("scope")).toBe(
-      "pages_manage_metadata,pages_show_list,pages_messaging",
-    );
+    // La lista crece con cada capacidad (leads, comentarios…): se comprueba que
+    // estén los permisos base, no una cadena exacta que quede desactualizada.
+    const scope = params.get("scope") || "";
+    for (const permission of [
+      "pages_manage_metadata",
+      "pages_show_list",
+      "pages_messaging",
+      "pages_read_engagement",
+      // Responder comentarios de la página.
+      "pages_manage_engagement",
+    ]) {
+      expect(scope).toContain(permission);
+    }
+    // pages_manage_posts sigue fuera: rompe el diálogo hasta que Meta lo apruebe.
+    expect(scope).not.toContain("pages_manage_posts");
   });
 });
