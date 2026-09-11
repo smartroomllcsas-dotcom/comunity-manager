@@ -218,6 +218,8 @@ export async function runFollowups(now: Date = new Date()): Promise<FollowupRunR
       const cf = { ...((contact.custom_fields as Record<string, unknown> | null) || {}) };
       if (contact.lifecycle_stage_id && b.stopStageIds.has(contact.lifecycle_stage_id as string)) continue;
       if (cf.do_not_contact === true) continue;
+      // Un asesor detuvo el seguimiento de este cliente desde la ficha o el chat.
+      if (cf.wa_followup_stopped === true) continue;
       if (cf.cita_estado === "agendada") continue;
 
       const attempts = Number(cf.wa_followup_step ?? (cf.wa_reengaged_at ? 1 : 0)) || 0;

@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useInternalNotes } from "@/hooks/useInternalNotes";
 import { StickyNote, Send, Loader2 } from "lucide-react";
-import { format } from "date-fns";
+import { formatBogotaDateTime } from "@/lib/inbox/time";
 
 interface InternalNotesProps {
   conversationId: string;
@@ -68,7 +68,7 @@ export function InternalNotes({ conversationId }: InternalNotesProps) {
                     {note.agent?.name || "Agente"}
                   </span>
                   <span className="text-[10px] text-amber-400/50 ml-auto">
-                    {format(new Date(note.created_at), "dd/MM HH:mm")}
+                    {formatBogotaDateTime(note.created_at)}
                   </span>
                 </div>
                 <p className="text-[13px] text-amber-200 leading-relaxed whitespace-pre-wrap break-words">

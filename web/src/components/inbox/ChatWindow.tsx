@@ -9,6 +9,7 @@ import { bogotaDayKey, bogotaDayLabel } from "@/lib/inbox/time";
 import { MessageInput } from "./MessageInput";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InternalNotes } from "./InternalNotes";
+import { FollowupControl } from "./FollowupControl";
 import { SnoozeDropdown } from "./SnoozeDropdown";
 import { ClosingDialog } from "./ClosingDialog";
 import { ChannelBadge } from "./ChannelBadge";
@@ -421,7 +422,16 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
           />
         </>
       ) : (
-        <InternalNotes conversationId={conversation.id} />
+        <div className="flex h-full flex-col">
+          {conversation.contact_id && (
+            <div className="px-4 pt-3">
+              <FollowupControl contactId={conversation.contact_id} compact />
+            </div>
+          )}
+          <div className="min-h-0 flex-1">
+            <InternalNotes conversationId={conversation.id} />
+          </div>
+        </div>
       )}
 
       {/* Closing Dialog */}

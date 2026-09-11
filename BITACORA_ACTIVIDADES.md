@@ -11,6 +11,10 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 
 ## Aplicado
 
+### 11 sep 2026
+- **Detener el seguimiento de un cliente a mano**: bloque "Seguimiento automático" en la ficha del contacto y en la pestaña Notas del chat. Botón **Detener seguimiento** (con motivo opcional; el lead NO pasa a Perdido) y **No contactar** (sale de seguimiento, difusiones y sincronización, y pasa a Perdido). Ambos dejan nota en el chat firmada por el asesor y son reversibles.
+- Notas internas también en hora de Colombia.
+
 ### 10 sep 2026
 - **Ramas unificadas**: `master` quedó igual a `visual/os-fusion` (239 commits integrados, sin conflictos; 262 pruebas en verde). Producción sigue desplegándose por CLI desde el mismo código.
 - **El asesor es dueño del chat**: si una persona respondió o dejó nota interna en un chat en las últimas 24 h, el agente IA no responde ahí (en ningún canal); y el seguimiento automático no toca chats con último mensaje humano, nota humana en 7 días, asesor asignado o bot en pausa. Antes el agente "reabordaba" clientes que ya había atendido un asesor.

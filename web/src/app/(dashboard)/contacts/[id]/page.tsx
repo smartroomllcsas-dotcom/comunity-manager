@@ -8,6 +8,7 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { ArrowLeft, Phone, Mail, Tag, MessageSquare, Clock, Trash2, CalendarCheck, ExternalLink } from "lucide-react";
 import Link from "next/link";
+import { FollowupControl } from "@/components/inbox/FollowupControl";
 
 /** Estado de la cita guardada por el webhook de Cal.com (custom_fields.cita_*). */
 const citaConfig: Record<string, { label: string; bg: string; text: string; border: string }> = {
@@ -174,6 +175,13 @@ export default function ContactDetailPage() {
         {contact.visibility_status === "restricted" && (
           <div className="mb-6 rounded-lg border border-amber-500/30 bg-amber-500/10 px-5 py-4 text-sm text-amber-100">
             Este lead fue recibido cuando el plan ya había alcanzado el límite de contactos. Se conserva el nombre para trazabilidad, pero el teléfono, los mensajes y la conversación se habilitan al ampliar el plan o liberar un cupo.
+          </div>
+        )}
+
+        {/* Seguimiento automático: detenerlo cuando lo atiende un asesor */}
+        {contact.visibility_status !== "restricted" && (
+          <div className="mb-6">
+            <FollowupControl contactId={contactId} />
           </div>
         )}
 
