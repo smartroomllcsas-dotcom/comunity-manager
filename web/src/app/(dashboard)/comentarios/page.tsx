@@ -451,7 +451,32 @@ export default function CommentsPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="mt-2 flex flex-wrap gap-3 text-[11px]">
+                    <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px]">
+                      {/*
+                        Un comentario atendido a medias seguía sin botones: si la
+                        respuesta pública salía y el mensaje al interno fallaba, la
+                        ficha quedaba como "Respondido", mostraba el error en rojo y
+                        no daba forma de reintentar. Aquí está lo que falta.
+                      */}
+                      {c.status !== "ignorado" && !c.public_replied_at && (
+                        <button
+                          disabled={busy === c.id}
+                          onClick={() => act(c, "reply")}
+                          className={`${btn} border-green-500/40 bg-green-600/15 text-green-100`}
+                        >
+                          Reintentar la respuesta pública
+                        </button>
+                      )}
+                      {c.status !== "ignorado" && !c.dm_sent_at && (
+                        <button
+                          disabled={busy === c.id || !c.dm_allowed}
+                          title={c.dm_allowed ? undefined : c.dm_blocked_reason || ""}
+                          onClick={() => act(c, "dm")}
+                          className={`${btn} border-blue-500/40 bg-blue-600/20 text-blue-100`}
+                        >
+                          <Send className="h-3.5 w-3.5" /> Reintentar el mensaje al interno
+                        </button>
+                      )}
                       {c.conversation_id && (
                         <Link href="/inbox" className="text-blue-300 hover:underline">
                           Ver chat en la Bandeja
