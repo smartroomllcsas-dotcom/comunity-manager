@@ -1,69 +1,52 @@
-# Comentarios de Facebook e Instagram — qué hay que configurar en Meta
+# Comentarios de Facebook e Instagram — configuración en Meta
 
-El módulo **Comentarios** (menú del CRM) ya está desplegado. Para que funcione de
-punta a punta hacen falta tres cosas en la app de Meta **Community ManagerWA**
-(identificador `1491695645279792`). Sin ellas, los comentarios no llegan o la
-respuesta pública falla con un error de permisos.
+App **Community ManagerWA** (`1491695645279792`), portfolio `680953270632416`.
 
-## 1. Permisos (los que faltan hoy)
+## Ya quedó hecho (11 sep 2026)
 
-| Permiso | Para qué | ¿Ya lo tenemos? |
+| Qué | Dónde | Estado |
 |---|---|---|
-| `pages_read_engagement` | leer comentarios de la página | sí |
-| `pages_messaging` | escribir al interno (private reply) | sí |
-| `instagram_basic`, `instagram_manage_messages` | Instagram: leer y escribir al interno | sí |
-| **`pages_manage_engagement`** | **responder un comentario de la página** | **falta** |
-| **`instagram_manage_comments`** | **responder un comentario de Instagram** | **falta** |
+| Campo `feed` (comentarios de páginas) | Webhooks → objeto *Página* | Suscrito |
+| Campo `comments` (comentarios de Instagram) | Webhooks → objeto *Instagram* | Suscrito |
+| `pages_manage_engagement` (responder comentarios de la página) | Caso de uso *Administrar todos los aspectos de tu página* | Activado, "Listo para la prueba" |
+| `instagram_manage_comments` (responder comentarios de Instagram) | Caso de uso *API de Instagram* | Ya venía "Listo para la prueba" |
+| Ambos permisos en la conexión de canales | Configuración de Login for Business **CommunityManager Facebook Mess** (`1345028407804200`), de 7 a 9 permisos | Guardado |
 
-Los dos que faltan ya están pedidos en el código (`src/lib/meta.ts`), pero Meta
-sólo los concede si el **caso de uso de la app** los incluye. Si el diálogo de
-conexión empieza a fallar con `Invalid Scopes: pages_manage_engagement`, es que
-el caso de uso todavía no los tiene.
+Las URLs de webhook ya apuntaban a producción:
+`https://www.comunitymanager.io/api/webhook/facebook` y `…/api/webhook/instagram`.
 
-En el panel: **Casos de uso** → el caso que usa la app para páginas → *Personalizar*
-→ activar `pages_manage_engagement` (y `instagram_manage_comments` en el de
-Instagram). Si Meta los marca como "requiere revisión", hay que enviarlos a
-**Revisión de la aplicación** con un video del flujo.
+No se tocaron las configuraciones *CommunityManager Facebook* (`28411472441797718`)
+ni *Whatsapp B* (`994300759657345`).
 
-## 2. Configuración de inicio de sesión (Login for Business)
+## Lo que falta hacer
 
-La conexión de canales usa una configuración de Facebook Login for Business
-(`NEXT_PUBLIC_META_CONFIG_ID = 994300759657345`). **Los permisos de esa
-configuración mandan sobre lo que pida el código.** Hay que editarla y añadir
-los mismos dos permisos; si no, aunque el caso de uso los tenga, el token que
-recibimos no los traerá.
+1. **Reconectar Facebook e Instagram de cada empresa** en *Canales*. Los tokens
+   guardados se emitieron antes de estos permisos y no los traen. Reconectar no
+   borra conversaciones ni contactos.
+2. En el CRM, entrar a **Comentarios**, elegir la empresa y activar
+   *Atender comentarios automáticamente*. Eso suscribe esa página y esa cuenta
+   de Instagram concretas (`subscribed_apps`).
 
-## 3. Webhooks
+## Límite importante: acceso estándar
 
-En **Webhooks** de la app, además de los campos actuales:
+Los dos permisos de comentarios están en **acceso estándar**, no avanzado. Meta
+sólo los concede a personas **con un rol en la app** (administrador, desarrollador
+o tester) y sobre activos del propio portfolio comercial.
 
-- Objeto **Página**: activar el campo **`feed`** (comentarios de publicaciones y
-  de pautas).
-- Objeto **Instagram**: activar el campo **`comments`**.
+- Para las marcas propias (Smart Digital, Moda Style…) funciona, porque quien
+  conecta es administrador de la app.
+- Para un cliente externo que conecte su propia página con su usuario, harían
+  falta en **Revisión de la aplicación**: `pages_manage_engagement` e
+  `instagram_manage_comments` con acceso avanzado (requiere video del flujo y
+  verificación del negocio).
 
-La suscripción de cada página y cada cuenta de Instagram concreta la hace la
-plataforma sola: al activar *Atender comentarios automáticamente* en el módulo
-Comentarios llama a `subscribed_apps` con esos campos.
+Mientras tanto, el mensaje **al interno** sí funciona para cualquiera: usa
+`pages_messaging` e `instagram_manage_messages`, que ya tienen acceso avanzado.
 
-## 4. Reconectar los canales
-
-Los tokens guardados se emitieron **sin** los permisos nuevos. Después de los
-pasos 1 y 2 hay que entrar a **Canales** y volver a conectar Facebook e
-Instagram de cada empresa: así el token se vuelve a emitir con los permisos de
-comentarios. Reconectar no borra conversaciones ni contactos.
-
-## Qué funciona sin reconectar
-
-- Recibir y guardar los comentarios (en cuanto el webhook tenga `feed`/`comments`).
-- **Escribir al interno** a quien comentó: usa `pages_messaging` /
-  `instagram_manage_messages`, que ya están concedidos.
-
-Lo único que exige los permisos nuevos es **responder el comentario en público**.
-
-## Límites de Meta que ya respeta la plataforma
+## Límites de Meta que la plataforma ya respeta
 
 - Un solo mensaje al interno por comentario y dentro de **7 días**: el botón
   queda bloqueado con el motivo.
 - Respuestas públicas: las redacta la IA leyendo el comentario, no repite el
   texto anterior, espera unos segundos al azar y respeta un tope por hora
-  configurable, para que Meta no lo lea como spam.
+  configurable.
