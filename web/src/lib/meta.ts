@@ -479,20 +479,27 @@ export async function replyToComment(
  * comment_id, no a un usuario. Meta lo permite UNA sola vez por comentario y
  * dentro de los 7 días siguientes. La respuesta trae el id del destinatario,
  * con el que se abre la conversación en el Inbox.
+ *
+ * Vale para Facebook y para Instagram, y en los dos el destino es `me` — la
+ * página, resuelta por el token. Instagram tiene un endpoint propio
+ * `/{ig-user-id}/messages`, pero ese pertenece a la API de Instagram con inicio
+ * de sesión de Instagram; llamarlo con el token de la página devuelve
+ * "(#3) Application does not have the capability to make this API call".
+ * Los mensajes normales de Instagram salen por `/me/messages` desde el
+ * principio (ver sendMetaTextMessage): el privado a un comentario va por el
+ * mismo sitio.
  */
 export async function sendPrivateReplyToComment(
   accessToken: string,
   commentId: string,
   text: string,
-  options: { senderId?: string } = {},
 ): Promise<{ recipient_id?: string; message_id?: string }> {
   const params = new URLSearchParams({
     access_token: accessToken,
     recipient: JSON.stringify({ comment_id: commentId }),
     message: JSON.stringify({ text }),
   })
-  const target = options.senderId || 'me'
-  return metaFetch(`${META_GRAPH_URL}/${encodeURIComponent(target)}/messages`, {
+  return metaFetch(`${META_GRAPH_URL}/me/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params,

@@ -272,8 +272,7 @@ export async function sendPrivateReply(
   }
 
   try {
-    const senderId = channel.type === "instagram" ? channelSelfId(channel) || undefined : undefined;
-    const res = await sendPrivateReplyToComment(token, comment.commentId, text, { senderId });
+    const res = await sendPrivateReplyToComment(token, comment.commentId, text);
     const recipientId = (res?.recipient_id as string | undefined) || null;
     const now = new Date().toISOString();
 
