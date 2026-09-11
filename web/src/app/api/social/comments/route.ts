@@ -17,6 +17,9 @@ import { subscribePageToApp, subscribeInstagramAccountToApp } from "@/lib/meta";
 import { getCommentRules, setCommentRules, renderCommentText } from "@/lib/social/comment-rules";
 import {
   channelSelfId,
+  checkPrivateReplyAllowed,
+  composePublicReply,
+  pickVariant,
   replyPublicly,
   sendPrivateReply,
   type CommentChannel,
@@ -58,8 +61,16 @@ export async function GET(request: NextRequest) {
     loadChannels(access.organizationId, access.clientId),
   ]);
 
+  const annotated = ((comments || []) as Array<Record<string, unknown>>).map((c) => {
+    const check = checkPrivateReplyAllowed({
+      dm_sent_at: (c.dm_sent_at as string | null) ?? null,
+      commented_at: (c.commented_at as string | null) ?? null,
+    });
+    return { ...c, dm_allowed: check.allowed, dm_blocked_reason: check.reason || null };
+  });
+
   return NextResponse.json({
-    comments: comments || [],
+    comments: annotated,
     rules,
     channels: channels.map((c) => ({
       id: c.id,
@@ -75,6 +86,9 @@ const rulesSchema = z.object({
   rules: z.object({
     enabled: z.boolean().optional(),
     auto_public_reply: z.boolean().optional(),
+    public_reply_mode: z.enum(["ai", "texts"]).optional(),
+    ai_reply_instructions: z.string().max(900).optional(),
+    max_public_replies_per_hour: z.number().int().min(1).max(120).optional(),
     public_reply_texts: z.array(z.string().max(800)).max(10).optional(),
     auto_dm: z.boolean().optional(),
     dm_text: z.string().max(900).optional(),
@@ -162,13 +176,33 @@ export async function POST(request: NextRequest) {
   const results: string[] = [];
   const errors: string[] = [];
 
+  if (action === "dm" || action === "both") {
+    // Límite de Meta: se avisa antes de intentarlo.
+    const check = checkPrivateReplyAllowed({
+      dm_sent_at: (row.dm_sent_at as string | null) ?? null,
+      commented_at: (row.commented_at as string | null) ?? null,
+    });
+    if (!check.allowed) {
+      if (action === "dm") return NextResponse.json({ error: check.reason }, { status: 409 });
+      errors.push(check.reason as string);
+    }
+  }
+
   if (action === "reply" || action === "both") {
-    const message = renderCommentText(text || rules.public_reply_texts[0] || "", vars);
+    const composed = text
+      ? null
+      : await composePublicReply(
+          access.clientId,
+          { message: (row.message as string) || "", authorName: (row.author_name as string | null) || null },
+          rules,
+          vars.brandName
+        );
+    const message = composed || renderCommentText(text || pickVariant(rules.public_reply_texts, null), vars);
     if (!message.trim()) return NextResponse.json({ error: "Escribe la respuesta" }, { status: 422 });
     const res = await replyPublicly(channel, id, row.comment_id as string, message, "manual", access.cmUserId);
     res.ok ? results.push("respuesta publicada") : errors.push(res.error);
   }
-  if (action === "dm" || action === "both") {
+  if ((action === "dm" || action === "both") && errors.length === 0) {
     const message = renderCommentText(dmText || text || rules.dm_text, vars);
     if (!message.trim()) return NextResponse.json({ error: "Escribe el mensaje al interno" }, { status: 422 });
     const res = await sendPrivateReply(

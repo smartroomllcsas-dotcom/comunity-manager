@@ -49,6 +49,33 @@ export type CommentChannel = {
 
 const PRIVATE_REPLY_WINDOW_MS = 7 * 24 * 3600_000;
 
+export type PrivateReplyCheck = { allowed: boolean; reason?: string };
+
+/**
+ * Meta sólo deja UN mensaje al interno por comentario y dentro de 7 días.
+ * Se comprueba antes de intentarlo para no quemar el intento ni mostrar un
+ * error de la API al asesor.
+ */
+export function checkPrivateReplyAllowed(row: {
+  dm_sent_at?: string | null;
+  commented_at?: string | null;
+  author_id?: string | null;
+}): PrivateReplyCheck {
+  if (row.dm_sent_at) {
+    return { allowed: false, reason: "Ya se le escribió al interno por este comentario. Meta permite sólo uno." };
+  }
+  if (row.commented_at) {
+    const age = Date.now() - new Date(row.commented_at).getTime();
+    if (age > PRIVATE_REPLY_WINDOW_MS) {
+      return {
+        allowed: false,
+        reason: "Pasaron los 7 días que da Meta para escribir al interno por este comentario.",
+      };
+    }
+  }
+  return { allowed: true };
+}
+
 /** ¿El cambio del webhook es un comentario nuevo de otra persona? */
 export function parseCommentChange(
   platform: CommentPlatform,
@@ -227,10 +254,21 @@ export async function sendPrivateReply(
   if (!token) return { ok: false, error: "El canal no tiene credenciales de Meta" };
   const admin = createAdminClient("smarttalk");
 
-  if (comment.commentedAt && Date.now() - new Date(comment.commentedAt).getTime() > PRIVATE_REPLY_WINDOW_MS) {
-    const error = "Meta sólo permite escribir al interno dentro de los 7 días siguientes al comentario";
-    await admin.from("social_comments").update({ last_error: error }).eq("id", commentRowId);
-    return { ok: false, error };
+  const { data: current } = await admin
+    .from("social_comments")
+    .select("dm_sent_at, commented_at, author_id")
+    .eq("id", commentRowId)
+    .maybeSingle();
+  const check = checkPrivateReplyAllowed({
+    dm_sent_at: (current?.dm_sent_at as string | null) ?? null,
+    commented_at: (current?.commented_at as string | null) ?? comment.commentedAt,
+  });
+  if (!check.allowed) {
+    await admin
+      .from("social_comments")
+      .update({ last_error: check.reason, updated_at: new Date().toISOString() })
+      .eq("id", commentRowId);
+    return { ok: false, error: check.reason as string };
   }
 
   try {
@@ -359,6 +397,101 @@ async function linkConversation(
   }
 }
 
+/**
+ * Respuesta pública redactada por el agente de la empresa leyendo el comentario.
+ * Así cada respuesta es distinta y habla de lo que la persona preguntó, que es
+ * justo lo que evita que Meta la marque como spam.
+ * Si no hay agente o falla, devuelve null y se usan los textos fijos.
+ */
+export async function composePublicReply(
+  brandId: string,
+  comment: { message: string; authorName: string | null },
+  rules: CommentRules,
+  brandName: string | null
+): Promise<string | null> {
+  if (rules.public_reply_mode !== "ai") return null;
+  if (!comment.message.trim()) return null;
+  try {
+    const admin = createAdminClient("smarttalk");
+    const { data: agent } = await admin
+      .from("ai_agents")
+      .select("system_prompt")
+      .eq("brand_id", brandId)
+      .eq("is_active", true)
+      .order("is_default", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const first = String(comment.authorName || "").trim().split(/\s+/)[0] || "";
+    const who = /^[@+\d]/.test(first) ? "" : first;
+    const systemPrompt =
+      `${(agent?.system_prompt as string | undefined) || `Eres quien atiende las redes de ${brandName || "la empresa"}.`}\n\n` +
+      `## Respuesta PÚBLICA a un comentario\n` +
+      `Escribes una respuesta que verá todo el mundo debajo de un comentario en Facebook o Instagram.\n` +
+      `Reglas obligatorias:\n` +
+      `- Máximo 2 frases, menos de 250 caracteres.\n` +
+      `- Habla de lo que la persona preguntó; nunca una frase genérica de plantilla.\n` +
+      `- Nada de precios, enlaces, teléfonos ni correos.\n` +
+      `- Trato cercano${who ? `; puedes llamarla ${who}` : ""}. Un emoji como máximo.\n` +
+      `- Devuelve SÓLO el texto de la respuesta, sin comillas ni explicaciones.\n` +
+      (rules.ai_reply_instructions ? `- ${rules.ai_reply_instructions}\n` : "");
+
+    const { generateAIResponse } = await import("@/lib/chatbot/ai");
+    const raw = await generateAIResponse({
+      systemPrompt,
+      conversationHistory: [{ role: "user", content: comment.message.slice(0, 500) }],
+      maxTokens: 200,
+    });
+    const text = String(raw || "")
+      .replace(/^["'\s]+|["'\s]+$/g, "")
+      .replace(/https?:\/\/\S+/g, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+    if (!text || text.length < 3) return null;
+    return text.slice(0, 280);
+  } catch (e) {
+    console.warn("[comments] la IA no pudo redactar la respuesta pública:", e);
+    return null;
+  }
+}
+
+/**
+ * Protección anti-spam: Meta castiga responder muchos comentarios seguidos y
+ * repetir el mismo texto. Se limita por hora y no se repite el texto anterior.
+ */
+async function publicRepliesLastHour(brandId: string): Promise<number> {
+  const admin = createAdminClient("smarttalk");
+  const since = new Date(Date.now() - 3600_000).toISOString();
+  const { count } = await admin
+    .from("social_comments")
+    .select("id", { count: "exact", head: true })
+    .eq("brand_id", brandId)
+    .gte("public_replied_at", since);
+  return count ?? 0;
+}
+
+async function lastPublicReplyText(brandId: string): Promise<string | null> {
+  const admin = createAdminClient("smarttalk");
+  const { data } = await admin
+    .from("social_comments")
+    .select("public_reply_text")
+    .eq("brand_id", brandId)
+    .not("public_reply_text", "is", null)
+    .order("public_replied_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data?.public_reply_text as string | undefined) || null;
+}
+
+/** Elige un texto fijo distinto al último usado. */
+export function pickVariant(texts: string[], lastUsed: string | null): string {
+  const options = texts.filter((t) => t.trim());
+  if (options.length === 0) return "";
+  const fresh = options.filter((t) => t.trim() !== String(lastUsed || "").trim());
+  const pool = fresh.length > 0 ? fresh : options;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
 /** ¿Ya se le respondió antes a esta persona en esta empresa? */
 async function authorAlreadyHandled(brandId: string, authorId: string | null): Promise<boolean> {
   if (!authorId) return false;
@@ -399,10 +532,25 @@ export async function handleIncomingComment(
   let publicReply = false;
   let dm = false;
 
-  if (rules.auto_public_reply && rules.public_reply_texts.length > 0) {
-    const pick = rules.public_reply_texts[Math.floor(Math.random() * rules.public_reply_texts.length)];
-    const res = await replyPublicly(channel, stored.id, comment.commentId, renderCommentText(pick, vars), "auto");
-    publicReply = res.ok;
+  if (rules.auto_public_reply) {
+    if ((await publicRepliesLastHour(channel.brand_id)) >= rules.max_public_replies_per_hour) {
+      await createAdminClient("smarttalk")
+        .from("social_comments")
+        .update({
+          last_error: `Se alcanzó el tope de ${rules.max_public_replies_per_hour} respuestas públicas por hora; respóndelo a mano.`,
+        })
+        .eq("id", stored.id);
+    } else {
+      const composed = await composePublicReply(channel.brand_id, comment, rules, brandName);
+      const text = composed || renderCommentText(pickVariant(rules.public_reply_texts, await lastPublicReplyText(channel.brand_id)), vars);
+      if (text.trim()) {
+        // Pausa corta y variable: responder al instante y en ráfaga es lo que
+        // Meta lee como automatización agresiva.
+        await new Promise((r) => setTimeout(r, 3000 + Math.random() * 7000));
+        const res = await replyPublicly(channel, stored.id, comment.commentId, text, "auto");
+        publicReply = res.ok;
+      }
+    }
   }
   if (rules.auto_dm && rules.dm_text) {
     const res = await sendPrivateReply(

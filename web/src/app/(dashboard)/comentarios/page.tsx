@@ -15,6 +15,7 @@ import {
   Megaphone,
   Settings2,
   Check,
+  Lock,
 } from "lucide-react";
 import { useActiveBrand } from "@/hooks/useActiveBrand";
 import { BrandPicker } from "@/components/broadcasts/BrandPicker";
@@ -26,6 +27,9 @@ export const dynamic = "force-dynamic";
 type Rules = {
   enabled: boolean;
   auto_public_reply: boolean;
+  public_reply_mode: "ai" | "texts";
+  ai_reply_instructions: string;
+  max_public_replies_per_hour: number;
   public_reply_texts: string[];
   auto_dm: boolean;
   dm_text: string;
@@ -52,6 +56,8 @@ type Comment = {
   contact_id: string | null;
   handled_by: string | null;
   last_error: string | null;
+  dm_allowed: boolean;
+  dm_blocked_reason: string | null;
 };
 
 type ChannelInfo = { id: string; type: string; name: string; connected: boolean };
@@ -200,7 +206,7 @@ export default function CommentsPage() {
               </label>
               <span className="text-xs text-[#8b949e]">
                 {rules.enabled
-                  ? `${rules.auto_public_reply ? "Responde en público" : "No responde en público"} · ${rules.auto_dm ? "escribe al interno" : "no escribe al interno"}`
+                  ? `${rules.auto_public_reply ? (rules.public_reply_mode === "ai" ? "Responde en público (la IA redacta)" : "Responde en público (textos fijos)") : "No responde en público"} · ${rules.auto_dm ? "escribe al interno" : "no escribe al interno"}`
                   : "Apagado: los comentarios se guardan y los respondes tú desde aquí."}
               </span>
               <div className="ml-auto flex items-center gap-2 text-xs text-[#8b949e]">
@@ -223,7 +229,40 @@ export default function CommentsPage() {
                 <input type="checkbox" checked={rules.auto_public_reply} onChange={(e) => setRules({ ...rules, auto_public_reply: e.target.checked })} />
                 Responder el comentario en público
               </label>
-              <p className="text-[11px] text-[#6e7681] mb-2">Se elige uno de estos textos al azar. Usa {"{{nombre}}"} y {"{{empresa}}"}.</p>
+              <div className="my-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRules({ ...rules, public_reply_mode: "ai" })}
+                  className={`rounded-full border px-3 py-1 text-xs ${rules.public_reply_mode === "ai" ? "border-blue-500/50 bg-blue-500/20 text-blue-200" : "border-[#2d333b] text-[#8b949e]"}`}
+                >
+                  La IA la escribe leyendo el comentario
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRules({ ...rules, public_reply_mode: "texts" })}
+                  className={`rounded-full border px-3 py-1 text-xs ${rules.public_reply_mode === "texts" ? "border-blue-500/50 bg-blue-500/20 text-blue-200" : "border-[#2d333b] text-[#8b949e]"}`}
+                >
+                  Textos fijos que rotan
+                </button>
+              </div>
+              {rules.public_reply_mode === "ai" ? (
+                <div className="mb-3">
+                  <p className="text-[11px] text-[#6e7681] mb-1">
+                    Cada respuesta habla de lo que la persona preguntó y sale distinta, que es lo que evita que Meta la marque como spam.
+                    Nunca incluye precios ni enlaces. Si la IA falla, se usa uno de los textos de abajo.
+                  </p>
+                  <textarea
+                    rows={2}
+                    className={input}
+                    placeholder="Indicaciones para la IA (tono, qué no decir)"
+                    value={rules.ai_reply_instructions}
+                    onChange={(e) => setRules({ ...rules, ai_reply_instructions: e.target.value })}
+                  />
+                </div>
+              ) : null}
+              <p className="text-[11px] text-[#6e7681] mb-2">
+                {rules.public_reply_mode === "ai" ? "Textos de respaldo" : "Se elige uno de estos textos"}, sin repetir el anterior. Usa {"{{nombre}}"} y {"{{empresa}}"}.
+              </p>
               {rules.public_reply_texts.map((t, i) => (
                 <div key={i} className="mb-2 flex gap-2">
                   <input
@@ -281,6 +320,18 @@ export default function CommentsPage() {
               <input type="checkbox" checked={rules.only_first_per_author} onChange={(e) => setRules({ ...rules, only_first_per_author: e.target.checked })} />
               Sólo el primer comentario de cada persona (no responder cada comentario suyo)
             </label>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-[#8b949e]">
+              <span>Máximo</span>
+              <input
+                type="number"
+                min={1}
+                max={120}
+                className="w-20 rounded-md bg-[#0d1117] border border-[#2d333b] px-2 py-1 text-sm text-white"
+                value={rules.max_public_replies_per_hour}
+                onChange={(e) => setRules({ ...rules, max_public_replies_per_hour: Math.max(1, Number(e.target.value) || 1) })}
+              />
+              <span>respuestas públicas por hora. Pasado el tope se guardan para responderlas a mano, para que Meta no lo lea como spam.</span>
+            </div>
 
             <div className="flex justify-end">
               <button disabled={saving} onClick={() => void saveRules({})} className="rounded-md bg-blue-600 hover:bg-blue-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
@@ -357,24 +408,41 @@ export default function CommentsPage() {
                     <div className="mt-3 space-y-2">
                       <input
                         className={input}
-                        placeholder="Respuesta pública (vacío = el texto configurado)"
+                        placeholder={rules?.public_reply_mode === "ai" ? "Respuesta pública (vacío = la escribe la IA leyendo el comentario)" : "Respuesta pública (vacío = el texto configurado)"}
                         value={d.reply}
                         onChange={(e) => setDrafts((p) => ({ ...p, [c.id]: { ...d, reply: e.target.value } }))}
                       />
-                      <input
-                        className={input}
-                        placeholder="Mensaje al interno (vacío = el texto configurado)"
-                        value={d.dm}
-                        onChange={(e) => setDrafts((p) => ({ ...p, [c.id]: { ...d, dm: e.target.value } }))}
-                      />
+                      {c.dm_allowed ? (
+                        <input
+                          className={input}
+                          placeholder="Mensaje al interno (vacío = el texto configurado)"
+                          value={d.dm}
+                          onChange={(e) => setDrafts((p) => ({ ...p, [c.id]: { ...d, dm: e.target.value } }))}
+                        />
+                      ) : (
+                        <p className="flex items-start gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+                          <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          {c.dm_blocked_reason} Escríbele respondiendo su comentario o espera a que te escriba.
+                        </p>
+                      )}
                       <div className="flex flex-wrap gap-2">
-                        <button disabled={busy === c.id} onClick={() => act(c, "both")} className={`${btn} border-blue-500/40 bg-blue-600/20 text-blue-100`}>
+                        <button
+                          disabled={busy === c.id || !c.dm_allowed}
+                          title={c.dm_allowed ? undefined : c.dm_blocked_reason || ""}
+                          onClick={() => act(c, "both")}
+                          className={`${btn} border-blue-500/40 bg-blue-600/20 text-blue-100`}
+                        >
                           <Send className="h-3.5 w-3.5" /> Responder y escribir al interno
                         </button>
                         <button disabled={busy === c.id} onClick={() => act(c, "reply")} className={btn}>
                           Sólo responder
                         </button>
-                        <button disabled={busy === c.id} onClick={() => act(c, "dm")} className={btn}>
+                        <button
+                          disabled={busy === c.id || !c.dm_allowed}
+                          title={c.dm_allowed ? undefined : c.dm_blocked_reason || ""}
+                          onClick={() => act(c, "dm")}
+                          className={btn}
+                        >
                           Sólo al interno
                         </button>
                         <button disabled={busy === c.id} onClick={() => act(c, "ignore")} className={`${btn} text-[#8b949e]`}>

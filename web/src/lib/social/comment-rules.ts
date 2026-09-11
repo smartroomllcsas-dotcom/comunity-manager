@@ -12,8 +12,19 @@ export type CommentRules = {
   enabled: boolean;
   /** Responder el comentario en público automáticamente. */
   auto_public_reply: boolean;
+  /**
+   * Cómo se escribe la respuesta pública:
+   *  - "ai": el agente de la empresa la redacta leyendo el comentario (no es
+   *    genérica y cada una sale distinta, que es lo que evita el spam).
+   *  - "texts": rota entre los textos fijos configurados abajo.
+   */
+  public_reply_mode: "ai" | "texts";
+  /** Instrucciones extra para la respuesta de la IA (tono, qué no decir). */
+  ai_reply_instructions: string;
   /** Textos de respuesta pública; se va rotando para no repetir siempre igual. */
   public_reply_texts: string[];
+  /** Tope de respuestas públicas por hora (protección anti-spam de Meta). */
+  max_public_replies_per_hour: number;
   /** Escribirle al interno (mensaje privado) automáticamente. */
   auto_dm: boolean;
   /** Texto del mensaje al interno. */
@@ -29,6 +40,11 @@ export type CommentRules = {
 export const DEFAULT_COMMENT_RULES: CommentRules = {
   enabled: false,
   auto_public_reply: true,
+  public_reply_mode: "ai",
+  ai_reply_instructions:
+    "Responde en una o dos frases, con el nombre de la persona si lo sabes, mencionando lo que preguntó. " +
+    "No des precios ni enlaces. Cierra invitando a revisar el mensaje que le acabamos de enviar al interno.",
+  max_public_replies_per_hour: 20,
   public_reply_texts: [
     "¡Hola {{nombre}}! 😊 Gracias por comentar, te acabamos de escribir al interno con la información 💬",
     "¡Hola {{nombre}}! Con gusto te ayudamos, revisa tu bandeja de mensajes que ya te escribimos ✨",
@@ -59,6 +75,12 @@ export function sanitizeRules(input: unknown): CommentRules {
   return {
     enabled: typeof o.enabled === "boolean" ? o.enabled : d.enabled,
     auto_public_reply: typeof o.auto_public_reply === "boolean" ? o.auto_public_reply : d.auto_public_reply,
+    public_reply_mode: o.public_reply_mode === "texts" ? "texts" : d.public_reply_mode,
+    ai_reply_instructions:
+      typeof o.ai_reply_instructions === "string" && o.ai_reply_instructions.trim()
+        ? o.ai_reply_instructions.trim().slice(0, 900)
+        : d.ai_reply_instructions,
+    max_public_replies_per_hour: Math.max(1, Math.min(120, Number(o.max_public_replies_per_hour) || d.max_public_replies_per_hour)),
     public_reply_texts: texts.length ? texts : d.public_reply_texts,
     auto_dm: typeof o.auto_dm === "boolean" ? o.auto_dm : d.auto_dm,
     dm_text: (typeof o.dm_text === "string" && o.dm_text.trim() ? o.dm_text.trim() : d.dm_text).slice(0, 900),
