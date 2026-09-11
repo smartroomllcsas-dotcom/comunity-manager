@@ -50,3 +50,55 @@ Mientras tanto, el mensaje **al interno** sí funciona para cualquiera: usa
 - Respuestas públicas: las redacta la IA leyendo el comentario, no repite el
   texto anterior, espera unos segundos al azar y respeta un tope por hora
   configurable.
+
+## Permisos por solicitar en Revisión de la aplicación
+
+Hoy todo funciona con **tus** marcas porque eres administrador de la app. En el
+momento en que un cliente externo conecte su propia página o cuenta con su
+usuario, hará falta **acceso avanzado**. Esta es la lista, en orden de prioridad.
+
+### 1. Imprescindibles para el módulo Comentarios
+
+| Permiso | Qué desbloquea | Hoy |
+|---|---|---|
+| `pages_manage_engagement` | Responder, ocultar y borrar comentarios en la página | Estándar |
+| `instagram_manage_comments` | Responder y moderar comentarios de Instagram | Estándar |
+
+Sin acceso avanzado, con un cliente externo llegan los comentarios y se le puede
+escribir al interno, pero **no** se puede responder en público.
+
+### 2. Recomendado junto con los anteriores
+
+| Permiso | Qué desbloquea | Hoy |
+|---|---|---|
+| `pages_read_user_content` | Leer por API los comentarios que escriben los usuarios (traer los anteriores, no sólo los que llegan por webhook) | Sin activar |
+
+### 3. Sólo si se publica desde el CRM (Composer)
+
+| Permiso | Qué desbloquea | Hoy |
+|---|---|---|
+| `pages_manage_posts` | Crear, editar y borrar publicaciones de la página | Sin activar |
+| `instagram_content_publish` | Publicar en Instagram | Estándar |
+
+Nota: `pages_manage_posts` está fuera del código a propósito. Pedirlo antes de
+que Meta lo apruebe rompe el diálogo de conexión con *Invalid Scopes*.
+
+### 4. Para operar clientes externos en el resto del producto
+
+| Permiso | Qué desbloquea | Hoy |
+|---|---|---|
+| `business_management` | Leer y administrar activos del portfolio del cliente | Estándar |
+| `ads_management`, `ads_read` | Módulo de anuncios con cuentas publicitarias ajenas | Estándar |
+| `leads_retrieval`, `pages_manage_ads` | Leads de formularios de clientes externos (verificar estado en el caso de uso de clientes potenciales) | Verificar |
+
+Ya tienen acceso avanzado ("Lista para publicar") y no hay que pedirlos:
+`pages_messaging`, `pages_read_engagement`, `pages_show_list`,
+`pages_manage_metadata`, `instagram_basic`, `instagram_manage_messages`,
+`public_profile`.
+
+### Qué pide Meta en cada solicitud
+
+- Video de pantalla mostrando el flujo completo dentro del producto: conectar la
+  página, ver el comentario que llega y responderlo desde el CRM.
+- Explicación de por qué el negocio necesita el permiso.
+- Verificación del negocio y política de privacidad publicada.

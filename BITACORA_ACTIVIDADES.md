@@ -61,6 +61,7 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 ## Pendiente
 
 - **Variables en Vercel**: `OPENAI_API_KEY` (audios/videos).
+- **Revisión de la aplicación en Meta** (sólo hace falta cuando conecten clientes externos, no para las marcas propias): `pages_manage_engagement` e `instagram_manage_comments` con acceso avanzado; recomendado `pages_read_user_content`; opcionales `pages_manage_posts` e `instagram_content_publish` si se publica desde el CRM. Lista completa en `web/docs/COMENTARIOS_META.md`.
 - Contactos de Moda que entraron con id @lid como "número": se corrigen solos cuando WhatsApp mande el número; opcional una pasada consultando la agenda de WAHA.
 - Estado de la sesión WAHA en `waha_sessions` figura FAILED aunque funciona: sincronizar el estado.
 - Cuenta vieja `smartsends` y usuario admin antiguo: revisar. Contraseña del asesor smartroomllcsas@gmail.com la pone el usuario.
