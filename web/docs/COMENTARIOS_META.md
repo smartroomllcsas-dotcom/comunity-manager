@@ -27,6 +27,23 @@ ni *Whatsapp B* (`994300759657345`).
    *Atender comentarios automáticamente*. Eso suscribe esa página y esa cuenta
    de Instagram concretas (`subscribed_apps`).
 
+## Error "Invalid Scopes: pages_read_user_content" (resuelto el 11 sep)
+
+Al reconectar Instagram, el diálogo de Meta mostraba:
+
+> Este contenido no está disponible en este momento —
+> `Invalid Scopes: pages_read_user_content`
+
+Ese permiso **no se pide desde el código** (no aparece en `getOAuthUrl`). Lo
+añade Meta: dentro del caso de uso *Administrar todos los aspectos de tu página*,
+`pages_manage_engagement` lo arrastra como dependencia, y al activar el primero
+el diálogo empezó a pedir los dos. Como `pages_read_user_content` seguía en
+"Agregar a revisión de la app", Meta rechazaba el diálogo entero.
+
+**Solución aplicada**: activarlo en ese mismo caso de uso (queda en
+"Listo para la prueba", acceso estándar). Verificado abriendo el diálogo con la
+lista exacta de permisos que envía la aplicación: ya carga sin error.
+
 ## Límite importante: acceso estándar
 
 Los dos permisos de comentarios están en **acceso estándar**, no avanzado. Meta
@@ -71,7 +88,7 @@ escribir al interno, pero **no** se puede responder en público.
 
 | Permiso | Qué desbloquea | Hoy |
 |---|---|---|
-| `pages_read_user_content` | Leer por API los comentarios que escriben los usuarios (traer los anteriores, no sólo los que llegan por webhook) | Sin activar |
+| `pages_read_user_content` | Leer por API los comentarios que escriben los usuarios (traer los anteriores, no sólo los que llegan por webhook) | Activado, "Listo para la prueba" |
 
 ### 3. Sólo si se publica desde el CRM (Composer)
 
