@@ -191,12 +191,14 @@ export async function POST(request: NextRequest) {
   if (action === "reply" || action === "both") {
     const composed = text
       ? null
-      : await composePublicReply(
-          access.clientId,
-          { message: (row.message as string) || "", authorName: (row.author_name as string | null) || null },
-          rules,
-          vars.brandName
-        );
+      : (
+          await composePublicReply(
+            access.clientId,
+            { message: (row.message as string) || "", authorName: (row.author_name as string | null) || null },
+            rules,
+            vars.brandName
+          )
+        ).text;
     const message = composed || renderCommentText(text || pickVariant(rules.public_reply_texts, null), vars);
     if (!message.trim()) return NextResponse.json({ error: "Escribe la respuesta" }, { status: 422 });
     const res = await replyPublicly(channel, id, row.comment_id as string, message, "manual", access.cmUserId);

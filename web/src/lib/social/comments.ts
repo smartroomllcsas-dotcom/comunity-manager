@@ -440,16 +440,19 @@ export function trimToPublicReply(input: unknown, maxChars = 220): string {
  * Respuesta pública redactada por el agente de la empresa leyendo el comentario.
  * Así cada respuesta es distinta y habla de lo que la persona preguntó, que es
  * justo lo que evita que Meta la marque como spam.
- * Si no hay agente o falla, devuelve null y se usan los textos fijos.
+ * Si no hay agente o falla, devuelve `text: null` y se usan los textos fijos.
+ * Devuelve también el motivo: cuando la IA falla la respuesta sale genérica, y
+ * sin dejar rastro no hay forma de saber por qué días después (los logs de la
+ * función ya no están).
  */
 export async function composePublicReply(
   brandId: string,
   comment: { message: string; authorName: string | null },
   rules: CommentRules,
   brandName: string | null
-): Promise<string | null> {
-  if (rules.public_reply_mode !== "ai") return null;
-  if (!comment.message.trim()) return null;
+): Promise<{ text: string | null; error?: string }> {
+  if (rules.public_reply_mode !== "ai") return { text: null };
+  if (!comment.message.trim()) return { text: null };
   try {
     const admin = createAdminClient("smarttalk");
     const { data: agent } = await admin
@@ -494,11 +497,12 @@ export async function composePublicReply(
       maxTokens: 200,
     });
     const text = trimToPublicReply(raw);
-    if (!text || text.length < 3) return null;
-    return text;
+    if (!text || text.length < 3) return { text: null, error: "la IA devolvió una respuesta vacía" };
+    return { text };
   } catch (e) {
+    const error = e instanceof Error ? e.message : "la IA no respondió";
     console.warn("[comments] la IA no pudo redactar la respuesta pública:", e);
-    return null;
+    return { text: null, error };
   }
 }
 
@@ -589,7 +593,17 @@ export async function handleIncomingComment(
         .eq("id", stored.id);
     } else {
       const composed = await composePublicReply(channel.brand_id, comment, rules, brandName);
-      const text = composed || renderCommentText(pickVariant(rules.public_reply_texts, await lastPublicReplyText(channel.brand_id)), vars);
+      if (composed.error) {
+        // Queda escrito en la ficha del comentario: la respuesta salió con el
+        // texto fijo, no redactada, y aquí está el motivo.
+        await createAdminClient("smarttalk")
+          .from("social_comments")
+          .update({ last_error: `Respuesta fija (la IA no pudo redactarla): ${composed.error}` })
+          .eq("id", stored.id);
+      }
+      const text =
+        composed.text ||
+        renderCommentText(pickVariant(rules.public_reply_texts, await lastPublicReplyText(channel.brand_id)), vars);
       if (text.trim()) {
         // Pausa corta y variable: responder al instante y en ráfaga es lo que
         // Meta lee como automatización agresiva.
