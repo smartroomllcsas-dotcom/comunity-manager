@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 vi.mock("@/lib/supabase", () => ({ supabaseAdmin: {} }));
 vi.mock("@/lib/meta", () => ({ replyToComment: vi.fn(), sendPrivateReplyToComment: vi.fn() }));
-import { parseCommentChange, checkPrivateReplyAllowed, pickVariant } from "./comments";
+import { parseCommentChange, checkPrivateReplyAllowed, pickVariant, trimToPublicReply } from "./comments";
 import { renderCommentText, commentMatchesRules, DEFAULT_COMMENT_RULES } from "./comment-rules";
 
 const PAGE = "1004299339426464";
@@ -88,5 +88,47 @@ describe("anti-spam: no repetir el texto anterior", () => {
   });
   it("sin textos devuelve vacío", () => {
     expect(pickVariant([], null)).toBe("");
+  });
+});
+
+describe("respuesta pública: forma de comentario, no de chat", () => {
+  // Caso real del 11 sep: el prompt del agente se impuso y publicó bajo un
+  // reel un saludo de chat privado, con presentación y dos emojis.
+  const realOne =
+    "¡Hola! 👋 Qué bueno que nos escribes. Soy asesor de Smart Digital Media, ayudamos con " +
+    "páginas web, apps, tiendas online, CRM y campañas de marketing. Cuéntame, ¿qué tipo de " +
+    "proyecto tienes en mente? ¿Es para tu negocio o una idea nueva? 😊";
+
+  it("deja dos frases como máximo", () => {
+    const out = trimToPublicReply(realOne);
+    expect((out.match(/[.!?…]/g) || []).length).toBeLessThanOrEqual(2);
+    expect(out).toContain("¡Hola!");
+    expect(out).not.toContain("idea nueva");
+  });
+
+  it("deja un solo emoji", () => {
+    expect((trimToPublicReply(realOne).match(/\p{Extended_Pictographic}/gu) || []).length).toBe(1);
+  });
+
+  it("no pasa del tope de caracteres y corta en una frase entera", () => {
+    const out = trimToPublicReply(realOne);
+    expect(out.length).toBeLessThanOrEqual(220);
+    expect(out.trim().endsWith("…")).toBe(false);
+  });
+
+  it("respeta una respuesta que ya venía bien", () => {
+    const good = "¡Hola Juan! Ya te escribí por privado con todo el detalle 😊";
+    expect(trimToPublicReply(good)).toBe(good);
+  });
+
+  it("quita enlaces y saltos de línea", () => {
+    expect(trimToPublicReply("Mira aquí https://ejemplo.com\nte escribo al privado")).toBe(
+      "Mira aquí te escribo al privado"
+    );
+  });
+
+  it("con texto vacío devuelve vacío para que se usen los textos fijos", () => {
+    expect(trimToPublicReply(null)).toBe("");
+    expect(trimToPublicReply("   ")).toBe("");
   });
 });

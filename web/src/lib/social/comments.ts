@@ -398,6 +398,46 @@ async function linkConversation(
 }
 
 /**
+ * Recorta la respuesta redactada por la IA a la forma de un comentario público:
+ * dos frases, un emoji y poco texto. Las reglas van en el prompt, pero un
+ * modelo las estira con facilidad y aquí no hay a quién preguntarle: lo que
+ * salga se publica. Los textos fijos que configura el cliente NO pasan por aquí
+ * — esos los escribió una persona a propósito.
+ */
+export function trimToPublicReply(input: unknown, maxChars = 220): string {
+  let text = String(input || "")
+    .replace(/^["'\s]+|["'\s]+$/g, "")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/\s*\n+\s*/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  if (!text) return "";
+
+  const sentences = text.match(/[^.!?…]+[.!?…]+|[^.!?…]+$/g) || [text];
+  if (sentences.length > 2) text = sentences.slice(0, 2).join(" ").trim();
+
+  // Un solo emoji: dos o tres seguidos son justo lo que delata la plantilla.
+  // La secuencia completa (variante, tono de piel, ZWJ) cuenta como uno.
+  let kept = false;
+  text = text.replace(
+    /\p{Extended_Pictographic}(?:\uFE0F|[\u{1F3FB}-\u{1F3FF}]|\u200D\p{Extended_Pictographic})*/gu,
+    (match) => {
+      if (kept) return "";
+      kept = true;
+      return match;
+    }
+  );
+
+  text = text.replace(/\s{2,}/g, " ").trim();
+  if (text.length > maxChars) {
+    const cut = text.slice(0, maxChars);
+    const stop = Math.max(cut.lastIndexOf("."), cut.lastIndexOf("!"), cut.lastIndexOf("?"), cut.lastIndexOf("…"));
+    text = (stop > 60 ? cut.slice(0, stop + 1) : cut.replace(/\s+\S*$/, "")).trim();
+  }
+  return text;
+}
+
+/**
  * Respuesta pública redactada por el agente de la empresa leyendo el comentario.
  * Así cada respuesta es distinta y habla de lo que la persona preguntó, que es
  * justo lo que evita que Meta la marque como spam.
@@ -424,17 +464,29 @@ export async function composePublicReply(
 
     const first = String(comment.authorName || "").trim().split(/\s+/)[0] || "";
     const who = /^[@+\d]/.test(first) ? "" : first;
+
+    // El prompt del agente está escrito para una conversación 1 a 1 y, si va
+    // primero y entero, se impone: la respuesta sale con la longitud y el tono
+    // de un chat privado ("Soy asesor de…, cuéntame qué proyecto tienes"),
+    // publicada debajo de un comentario. Por eso la tarea va primero, la voz de
+    // la marca entra recortada y sólo como referencia de tono, y las reglas se
+    // repiten al final, que es lo último que lee el modelo.
+    const brandVoice = String((agent?.system_prompt as string | undefined) || "").trim().slice(0, 600);
     const systemPrompt =
-      `${(agent?.system_prompt as string | undefined) || `Eres quien atiende las redes de ${brandName || "la empresa"}.`}\n\n` +
-      `## Respuesta PÚBLICA a un comentario\n` +
-      `Escribes una respuesta que verá todo el mundo debajo de un comentario en Facebook o Instagram.\n` +
-      `Reglas obligatorias:\n` +
-      `- Máximo 2 frases, menos de 250 caracteres.\n` +
+      `Escribes la respuesta PÚBLICA a un comentario en Facebook o Instagram de ${brandName || "la empresa"}. ` +
+      `La verá cualquiera que entre a la publicación, no es un chat privado.\n\n` +
+      `Reglas obligatorias (mandan sobre cualquier otra indicación):\n` +
+      `- Como MUCHO 2 frases y 200 caracteres. Una respuesta larga bajo un comentario parece publicidad.\n` +
       `- Habla de lo que la persona preguntó; nunca una frase genérica de plantilla.\n` +
+      `- No te presentes ni expliques el catálogo de servicios: eso va en el mensaje privado.\n` +
       `- Nada de precios, enlaces, teléfonos ni correos.\n` +
-      `- Trato cercano${who ? `; puedes llamarla ${who}` : ""}. Un emoji como máximo.\n` +
+      `- Un emoji como máximo.\n` +
+      (who ? `- Salúdala por su nombre: ${who}.\n` : "") +
+      (rules.auto_dm ? `- Cierra diciéndole que le escribiste por mensaje privado.\n` : "") +
       `- Devuelve SÓLO el texto de la respuesta, sin comillas ni explicaciones.\n` +
-      (rules.ai_reply_instructions ? `- ${rules.ai_reply_instructions}\n` : "");
+      (rules.ai_reply_instructions ? `- ${rules.ai_reply_instructions}\n` : "") +
+      (brandVoice ? `\nTono y contexto de la marca (referencia, NO lo copies ni lo resumas):\n${brandVoice}\n` : "") +
+      `\nRecuerda: 2 frases como máximo, en público.`;
 
     const { generateAIResponse } = await import("@/lib/chatbot/ai");
     const raw = await generateAIResponse({
@@ -442,13 +494,9 @@ export async function composePublicReply(
       conversationHistory: [{ role: "user", content: comment.message.slice(0, 500) }],
       maxTokens: 200,
     });
-    const text = String(raw || "")
-      .replace(/^["'\s]+|["'\s]+$/g, "")
-      .replace(/https?:\/\/\S+/g, "")
-      .replace(/\s{2,}/g, " ")
-      .trim();
+    const text = trimToPublicReply(raw);
     if (!text || text.length < 3) return null;
-    return text.slice(0, 280);
+    return text;
   } catch (e) {
     console.warn("[comments] la IA no pudo redactar la respuesta pública:", e);
     return null;
