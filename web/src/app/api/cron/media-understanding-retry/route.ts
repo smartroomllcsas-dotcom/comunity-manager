@@ -6,6 +6,8 @@
  * respeta ai_paused y asesores humanos activos).
  *
  * GET /api/cron/media-understanding-retry?hours=96&limit=12&respond=1
+ * Con `respondFixed=1` no repara: dispara al chatbot en conversaciones cuyo
+ * último inbound ya tiene ai_text reparado (ai_text_source openai/provider_url).
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -40,21 +42,28 @@ export async function GET(request: NextRequest) {
   const hours = Math.min(Number(url.searchParams.get("hours")) || 96, 24 * 30);
   const limit = Math.min(Number(url.searchParams.get("limit")) || 12, 40);
   const respond = url.searchParams.get("respond") === "1";
+  // respondFixed=1: no repara nada; dispara al chatbot en conversaciones cuyo
+  // último inbound ya fue reparado en pasadas previas (ai_text via retry).
+  const respondFixed = url.searchParams.get("respondFixed") === "1";
 
   const admin = createAdminClient("smarttalk");
   const since = new Date(Date.now() - hours * 3_600_000).toISOString();
 
-  const { data, error } = await admin
+  let query = admin
     .from("messages")
     .select(
       "id, created_at, conversation_id, content, conversation:conversations!inner(id, organization_id, brand_id, channel_id, contact_id, contact:contacts(wa_id))",
     )
     .eq("direction", "inbound")
-    .not("content->>ai_text_error", "is", null)
-    .is("content->>ai_text", null)
     .gte("created_at", since)
     .order("created_at", { ascending: true })
     .limit(limit);
+  query = respondFixed
+    ? query
+        .in("content->>ai_text_source", ["openai", "provider_url"])
+        .not("content->>ai_text", "is", null)
+    : query.not("content->>ai_text_error", "is", null).is("content->>ai_text", null);
+  const { data, error } = await query;
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -68,26 +77,33 @@ export async function GET(request: NextRequest) {
     if (!conv) continue;
     const before = String(row.content?.ai_text_error || "");
 
-    const { understandInboundMedia } = await import("@/lib/chatbot/media-understanding");
-    const messageText = await understandInboundMedia({
-      messageId: row.id,
-      organizationId: conv.organization_id,
-      brandId: conv.brand_id,
-      channelId: conv.channel_id,
-      content: row.content as unknown as AttachmentContent,
-    });
+    let messageText: string;
+    let afterContent: Record<string, unknown>;
+    if (respondFixed) {
+      messageText = String(row.content?.ai_text || "");
+      afterContent = (row.content || {}) as Record<string, unknown>;
+    } else {
+      const { understandInboundMedia } = await import("@/lib/chatbot/media-understanding");
+      messageText = await understandInboundMedia({
+        messageId: row.id,
+        organizationId: conv.organization_id,
+        brandId: conv.brand_id,
+        channelId: conv.channel_id,
+        content: row.content as unknown as AttachmentContent,
+      });
 
-    const { data: after } = await admin
-      .from("messages")
-      .select("content")
-      .eq("id", row.id)
-      .single();
-    const afterContent = (after?.content || {}) as Record<string, unknown>;
+      const { data: after } = await admin
+        .from("messages")
+        .select("content")
+        .eq("id", row.id)
+        .single();
+      afterContent = (after?.content || {}) as Record<string, unknown>;
+    }
     const ok = typeof afterContent.ai_text === "string" && afterContent.ai_text;
-    if (ok) fixed += 1;
+    if (ok && !respondFixed) fixed += 1;
 
     let didRespond = false;
-    if (ok && respond) {
+    if (ok && (respond || respondFixed)) {
       // Solo si este sigue siendo el último mensaje entrante de la
       // conversación (si el cliente escribió después, ese flujo ya respondió).
       const { data: newer } = await admin
