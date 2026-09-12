@@ -49,21 +49,21 @@ export async function GET(request: NextRequest) {
   const admin = createAdminClient("smarttalk");
   const since = new Date(Date.now() - hours * 3_600_000).toISOString();
 
-  let query = admin
-    .from("messages")
-    .select(
-      "id, created_at, conversation_id, content, conversation:conversations!inner(id, organization_id, brand_id, channel_id, contact_id, contact:contacts(wa_id))",
-    )
-    .eq("direction", "inbound")
-    .gte("created_at", since)
-    .order("created_at", { ascending: true })
-    .limit(limit);
-  query = respondFixed
-    ? query
+  const baseQuery = () =>
+    admin
+      .from("messages")
+      .select(
+        "id, created_at, conversation_id, content, conversation:conversations!inner(id, organization_id, brand_id, channel_id, contact_id, contact:contacts(wa_id))",
+      )
+      .eq("direction", "inbound")
+      .gte("created_at", since)
+      .order("created_at", { ascending: true })
+      .limit(limit);
+  const { data, error } = respondFixed
+    ? await baseQuery()
         .in("content->>ai_text_source", ["openai", "provider_url"])
         .not("content->>ai_text", "is", null)
-    : query.not("content->>ai_text_error", "is", null).is("content->>ai_text", null);
-  const { data, error } = await query;
+    : await baseQuery().not("content->>ai_text_error", "is", null).is("content->>ai_text", null);
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
