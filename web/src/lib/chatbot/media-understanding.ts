@@ -419,7 +419,10 @@ export async function understandInboundMedia(input: {
     if (!stored?.storage_path) {
       // Reels/posts compartidos de IG o FB no traen archivo descargable, solo el
       // enlace público. Se lo pasamos al agente como texto en vez de fallar.
-      const shareUrl = (content.provider_url || "").trim();
+      // Sanitizado: la URL viene del payload del webhook (controlable por el
+      // cliente); sin saltos de línea ni longitud libre para que no pueda
+      // inyectar instrucciones al agente.
+      const shareUrl = (content.provider_url || "").trim().replace(/[\r\n\s]+/g, " ").slice(0, 300);
       if (/^https?:\/\/(www\.)?(instagram\.com|facebook\.com|fb\.watch)\//i.test(shareUrl)) {
         const aiText = `El cliente compartió una publicación: ${shareUrl}`;
         await persistAiText(input.messageId, content, {
