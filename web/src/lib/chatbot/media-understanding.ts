@@ -36,6 +36,14 @@ import type { MessageContent } from "@/types/database";
 // redeploy (mismo criterio que CHATBOT_AI_MODEL).
 const MEDIA_MODEL = process.env.CHATBOT_MEDIA_MODEL || "claude-opus-5";
 const TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-transcribe";
+// Endpoint de transcripción compatible con la API de OpenAI. Permite apuntar a
+// un Whisper self-hosted (speaches) sin tocar código: TRANSCRIBE_BASE_URL +
+// TRANSCRIBE_API_KEY, con fallback al OpenAI oficial.
+const TRANSCRIBE_BASE_URL = (process.env.TRANSCRIBE_BASE_URL || "https://api.openai.com/v1").replace(
+  /\/+$/,
+  "",
+);
+const TRANSCRIBE_API_KEY = process.env.TRANSCRIBE_API_KEY || process.env.OPENAI_API_KEY;
 
 // Límites de los proveedores: Claude acepta imágenes hasta 10 MB (API directa)
 // y PDF hasta 32 MB; OpenAI transcribe archivos hasta 25 MB. Por encima no se
@@ -295,9 +303,9 @@ async function transcribeWithOpenAI(input: {
   extension: string;
   data: Buffer;
 }): Promise<string | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = TRANSCRIBE_API_KEY;
   if (!apiKey) {
-    log("sin_openai_api_key", { kind: input.kind });
+    log("sin_transcribe_api_key", { kind: input.kind });
     return null;
   }
 
@@ -316,7 +324,7 @@ async function transcribeWithOpenAI(input: {
       "software (páginas web, apps, CRM, tiendas online, anuncios). Mayormente en español.",
   );
 
-  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+  const response = await fetch(`${TRANSCRIBE_BASE_URL}/audio/transcriptions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
@@ -409,6 +417,21 @@ export async function understandInboundMedia(input: {
   try {
     const stored = await ensureStored(input);
     if (!stored?.storage_path) {
+      // Reels/posts compartidos de IG o FB no traen archivo descargable, solo el
+      // enlace público. Se lo pasamos al agente como texto en vez de fallar.
+      const shareUrl = (content.provider_url || "").trim();
+      if (/^https?:\/\/(www\.)?(instagram\.com|facebook\.com|fb\.watch)\//i.test(shareUrl)) {
+        const aiText = `El cliente compartió una publicación: ${shareUrl}`;
+        await persistAiText(input.messageId, content, {
+          ai_text: aiText,
+          ai_text_source: "provider_url",
+        }).catch(() => undefined);
+        return inboundContentToText({
+          ...content,
+          ai_text: aiText,
+          ai_text_source: "provider_url",
+        } as unknown as MessageContent);
+      }
       await persistAiText(input.messageId, content, { ai_text_error: "sin_archivo" }).catch(
         () => undefined,
       );
@@ -427,14 +450,23 @@ export async function understandInboundMedia(input: {
     let source: string | null = null;
     let error: string | null = null;
 
-    if (stored.type === "image" || stored.type === "sticker") {
+    // Algunos proveedores marcan como "document" archivos que en realidad son
+    // imágenes/audio/video (el mime real lo delata). Se rutea por contenido.
+    let effectiveType: string = stored.type;
+    if (effectiveType === "document") {
+      if (CLAUDE_IMAGE_TYPES.has(mimeType)) effectiveType = "image";
+      else if (OPENAI_VIDEO_EXT[mimeType]) effectiveType = "video";
+      else if (OPENAI_AUDIO_EXT[mimeType]) effectiveType = "audio";
+    }
+
+    if (effectiveType === "image" || effectiveType === "sticker") {
       if (!CLAUDE_IMAGE_TYPES.has(mimeType)) error = `formato_no_soportado:${mimeType}`;
       else if (file.buffer.byteLength > CLAUDE_IMAGE_MAX_BYTES) error = "imagen_demasiado_grande";
       else {
         aiText = await describeWithClaude({ kind: "image", mimeType, data: file.buffer });
         source = "claude";
       }
-    } else if (stored.type === "document") {
+    } else if (effectiveType === "document") {
       const filename = stored.filename || null;
       const office = OFFICE_TYPES[mimeType];
       if (mimeType === "application/pdf") {
@@ -464,14 +496,14 @@ export async function understandInboundMedia(input: {
       } else {
         error = `formato_no_soportado:${mimeType}`;
       }
-    } else if (stored.type === "audio" || stored.type === "video") {
-      const extension = (stored.type === "audio" ? OPENAI_AUDIO_EXT : OPENAI_VIDEO_EXT)[mimeType];
-      if (!process.env.OPENAI_API_KEY) error = "sin_openai_api_key";
+    } else if (effectiveType === "audio" || effectiveType === "video") {
+      const extension = (effectiveType === "audio" ? OPENAI_AUDIO_EXT : OPENAI_VIDEO_EXT)[mimeType];
+      if (!TRANSCRIBE_API_KEY) error = "sin_transcribe_api_key";
       else if (!extension) error = `formato_no_soportado:${mimeType}`;
       else if (file.buffer.byteLength > OPENAI_AUDIO_MAX_BYTES) error = "archivo_demasiado_grande";
       else {
         aiText = await transcribeWithOpenAI({
-          kind: stored.type,
+          kind: effectiveType === "audio" ? "audio" : "video",
           mimeType,
           extension,
           data: file.buffer,
@@ -479,7 +511,7 @@ export async function understandInboundMedia(input: {
         source = "openai";
       }
     } else {
-      error = `tipo_no_analizable:${stored.type}`;
+      error = `tipo_no_analizable:${effectiveType}`;
     }
 
     if (aiText && source) {
