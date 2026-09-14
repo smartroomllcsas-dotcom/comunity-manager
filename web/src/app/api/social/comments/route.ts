@@ -1,7 +1,8 @@
 /**
  * Comentarios de publicaciones y pautas — SIEMPRE por empresa (clientId = marca).
  *
- * GET  ?clientId=&status=       → { comments, rules, channels }
+ * GET  ?clientId=&status=       → { comments, rules, channels, summary }
+ *       status "atencion" = los que esperan a una persona (reclamos, negativos).
  * PUT  { clientId, rules }      → guarda las reglas y, si se activa, suscribe
  *                                 la página de Facebook y la cuenta de Instagram
  *                                 al aviso de comentarios.
@@ -15,6 +16,7 @@ import { getCmClientAccess } from "@/lib/cm-client-access";
 import { resolveToken } from "@/lib/auth/token-crypto";
 import { subscribePageToApp, subscribeInstagramAccountToApp } from "@/lib/meta";
 import { getCommentRules, setCommentRules, renderCommentText } from "@/lib/social/comment-rules";
+import { commentsSummary } from "@/lib/social/analysis";
 import {
   channelSelfId,
   checkPrivateReplyAllowed,
@@ -53,13 +55,19 @@ export async function GET(request: NextRequest) {
     .eq("brand_id", access.clientId)
     .order("commented_at", { ascending: false })
     .limit(200);
-  if (status && status !== "all") query = query.eq("status", status);
+  if (status === "atencion") query = query.eq("needs_human", true).neq("status", "ignorado");
+  else if (status && status !== "all") query = query.eq("status", status);
 
-  const [{ data: comments }, rules, channels] = await Promise.all([
+  const rulesForSummary = await getCommentRules(access.clientId);
+  const [{ data: comments }, channels, summary] = await Promise.all([
     query,
-    getCommentRules(access.clientId),
     loadChannels(access.organizationId, access.clientId),
+    commentsSummary(access.organizationId, access.clientId, {
+      crisisMinComments: rulesForSummary.crisis_min_comments,
+      crisisNegativePct: rulesForSummary.crisis_negative_pct,
+    }),
   ]);
+  const rules = rulesForSummary;
 
   const annotated = ((comments || []) as Array<Record<string, unknown>>).map((c) => {
     const check = checkPrivateReplyAllowed({
@@ -72,6 +80,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     comments: annotated,
     rules,
+    summary,
     channels: channels.map((c) => ({
       id: c.id,
       type: c.type,
@@ -95,6 +104,11 @@ const rulesSchema = z.object({
     only_first_per_author: z.boolean().optional(),
     ignore_keywords: z.array(z.string().max(60)).max(20).optional(),
     only_keywords: z.array(z.string().max(60)).max(20).optional(),
+    analyze: z.boolean().optional(),
+    hold_negative: z.boolean().optional(),
+    urgency_threshold: z.number().int().min(10).max(100).optional(),
+    crisis_negative_pct: z.number().int().min(10).max(100).optional(),
+    crisis_min_comments: z.number().int().min(2).max(100).optional(),
   }),
 });
 
@@ -161,7 +175,13 @@ export async function POST(request: NextRequest) {
   if (action === "ignore") {
     await admin
       .from("social_comments")
-      .update({ status: "ignorado", handled_by: "manual", replied_by: access.cmUserId, updated_at: new Date().toISOString() })
+      .update({
+        status: "ignorado",
+        handled_by: "manual",
+        replied_by: access.cmUserId,
+        needs_human: false,
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", id);
     return NextResponse.json({ ok: true, status: "ignorado" });
   }
@@ -224,6 +244,10 @@ export async function POST(request: NextRequest) {
 
   if (errors.length > 0 && results.length === 0) {
     return NextResponse.json({ error: errors.join(" · ") }, { status: 502 });
+  }
+  // Ya lo atendió una persona: deja de aparecer en "Esperan a una persona".
+  if (row.needs_human) {
+    await admin.from("social_comments").update({ needs_human: false }).eq("id", id);
   }
   return NextResponse.json({ ok: true, detail: results.join(" · "), warning: errors.join(" · ") || null });
 }

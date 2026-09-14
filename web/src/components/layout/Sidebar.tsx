@@ -37,7 +37,6 @@ import {
   Star,
   DollarSign,
   Building2,
-  Radio,
   PenTool,
   Wand2,
   CreditCard,
@@ -87,7 +86,6 @@ const CM_SECTIONS: NavSection[] = [
       { href: "/comentarios", label: "Comentarios", icon: MessageCircle },
       { href: "/chatbot", label: "Chatbot", icon: Bot },
       { href: "/composer", label: "Composer", icon: PenTool },
-      { href: "/listening", label: "Escucha social", icon: Radio },
     ],
   },
   {
@@ -161,7 +159,6 @@ const UNIFIED_SECTIONS: NavSection[] = [
     items: [
       { href: "/composer", label: "Composer", icon: PenTool },
       { href: "/whatsapp/templates", label: "Plantillas WhatsApp", icon: FileText },
-      { href: "/listening", label: "Escucha social", icon: Radio },
     ],
   },
   {

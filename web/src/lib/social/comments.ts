@@ -579,6 +579,40 @@ export async function handleIncomingComment(
     return { stored: true, publicReply: false, dm: false, skipped: "ya se le respondió antes" };
   }
 
+  // Sentimiento, intención y urgencia antes de decidir nada: si es un reclamo,
+  // contestarlo con el saludo de siempre lo empeora delante de todo el mundo.
+  if (rules.analyze) {
+    const { analyzeComment, needsHumanReason } = await import("@/lib/social/analysis");
+    const analysis = await analyzeComment(comment.message, brandName);
+    const reason = needsHumanReason(analysis, {
+      holdNegative: rules.hold_negative,
+      urgencyThreshold: rules.urgency_threshold,
+    });
+    if (analysis || reason) {
+      await createAdminClient("smarttalk")
+        .from("social_comments")
+        .update({
+          ...(analysis
+            ? {
+                sentiment: analysis.sentiment,
+                sentiment_score: analysis.sentiment_score,
+                intent: analysis.intent,
+                urgency: analysis.urgency,
+                analyzed_at: new Date().toISOString(),
+              }
+            : {}),
+          needs_human: Boolean(reason),
+          needs_human_reason: reason,
+        })
+        .eq("id", stored.id);
+    }
+    if (reason) {
+      // Se queda como "nuevo" y marcado: el asesor lo ve arriba del todo y
+      // decide él. No se responde ni se escribe al interno.
+      return { stored: true, publicReply: false, dm: false, skipped: reason };
+    }
+  }
+
   const vars = { authorName: comment.authorName, brandName };
   let publicReply = false;
   let dm = false;

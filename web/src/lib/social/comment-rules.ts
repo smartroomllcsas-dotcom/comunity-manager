@@ -35,6 +35,20 @@ export type CommentRules = {
   ignore_keywords: string[];
   /** Sólo actuar si el comentario contiene alguna de estas palabras (vacío = todos). */
   only_keywords: string[];
+  /** Clasificar cada comentario: sentimiento, intención y urgencia. */
+  analyze: boolean;
+  /**
+   * No dejar que el agente conteste solo un reclamo o un comentario negativo:
+   * queda marcado para que lo vea una persona. Responder solo a una queja en
+   * público es peor que tardar diez minutos en contestarla bien.
+   */
+  hold_negative: boolean;
+  /** A partir de esta urgencia (0-100) también se retiene para una persona. */
+  urgency_threshold: number;
+  /** Aviso de crisis: % de negativos en 24 h a partir del cual se avisa. */
+  crisis_negative_pct: number;
+  /** …y mínimo de comentarios en esas 24 h para que el aviso tenga sentido. */
+  crisis_min_comments: number;
 };
 
 export const DEFAULT_COMMENT_RULES: CommentRules = {
@@ -55,6 +69,11 @@ export const DEFAULT_COMMENT_RULES: CommentRules = {
   only_first_per_author: true,
   ignore_keywords: [],
   only_keywords: [],
+  analyze: true,
+  hold_negative: true,
+  urgency_threshold: 70,
+  crisis_negative_pct: 40,
+  crisis_min_comments: 5,
 };
 
 const KEY_PREFIX = "lead_agent_comment_rules:";
@@ -88,6 +107,11 @@ export function sanitizeRules(input: unknown): CommentRules {
       typeof o.only_first_per_author === "boolean" ? o.only_first_per_author : d.only_first_per_author,
     ignore_keywords: cleanList(o.ignore_keywords).map((k) => k.toLowerCase()),
     only_keywords: cleanList(o.only_keywords).map((k) => k.toLowerCase()),
+    analyze: typeof o.analyze === "boolean" ? o.analyze : d.analyze,
+    hold_negative: typeof o.hold_negative === "boolean" ? o.hold_negative : d.hold_negative,
+    urgency_threshold: Math.max(10, Math.min(100, Number(o.urgency_threshold) || d.urgency_threshold)),
+    crisis_negative_pct: Math.max(10, Math.min(100, Number(o.crisis_negative_pct) || d.crisis_negative_pct)),
+    crisis_min_comments: Math.max(2, Math.min(100, Number(o.crisis_min_comments) || d.crisis_min_comments)),
   };
 }
 

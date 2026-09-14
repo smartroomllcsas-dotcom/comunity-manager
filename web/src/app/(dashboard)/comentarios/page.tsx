@@ -16,6 +16,8 @@ import {
   Settings2,
   Check,
   Lock,
+  AlertTriangle,
+  Flame,
 } from "lucide-react";
 import { useActiveBrand } from "@/hooks/useActiveBrand";
 import { BrandPicker } from "@/components/broadcasts/BrandPicker";
@@ -34,6 +36,11 @@ type Rules = {
   auto_dm: boolean;
   dm_text: string;
   only_first_per_author: boolean;
+  analyze: boolean;
+  hold_negative: boolean;
+  urgency_threshold: number;
+  crisis_negative_pct: number;
+  crisis_min_comments: number;
   ignore_keywords: string[];
   only_keywords: string[];
 };
@@ -58,6 +65,23 @@ type Comment = {
   last_error: string | null;
   dm_allowed: boolean;
   dm_blocked_reason: string | null;
+  sentiment: "positivo" | "neutral" | "negativo" | null;
+  sentiment_score: number | null;
+  intent: string | null;
+  urgency: number | null;
+  needs_human: boolean | null;
+  needs_human_reason: string | null;
+};
+
+type Summary = {
+  total24h: number;
+  positivos: number;
+  neutrales: number;
+  negativos: number;
+  sinAnalizar: number;
+  negativosPct: number;
+  pendientesPersona: number;
+  crisis: boolean;
 };
 
 type ChannelInfo = { id: string; type: string; name: string; connected: boolean };
@@ -69,7 +93,23 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   fallido: { label: "Falló", cls: "bg-red-500/20 text-red-300" },
 };
 
+const SENTIMENT: Record<string, { label: string; cls: string }> = {
+  positivo: { label: "Positivo", cls: "bg-green-500/15 text-green-300" },
+  neutral: { label: "Neutral", cls: "bg-zinc-500/15 text-zinc-300" },
+  negativo: { label: "Negativo", cls: "bg-red-500/15 text-red-300" },
+};
+
+const INTENT: Record<string, string> = {
+  pregunta: "Pregunta",
+  compra: "Quiere comprar",
+  queja: "Reclamo",
+  elogio: "Elogio",
+  spam: "Spam",
+  otro: "Otro",
+};
+
 const FILTERS = [
+  { id: "atencion", label: "Esperan a una persona" },
   { id: "nuevo", label: "Sin responder" },
   { id: "respondido", label: "Respondidos" },
   { id: "ignorado", label: "Ignorados" },
@@ -90,6 +130,7 @@ export default function CommentsPage() {
   const [saving, setSaving] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [summary, setSummary] = useState<Summary | null>(null);
   const [drafts, setDrafts] = useState<Record<string, { reply: string; dm: string }>>({});
 
   const load = useCallback(async () => {
@@ -102,6 +143,7 @@ export default function CommentsPage() {
       setComments(data.comments || []);
       setRules(data.rules);
       setChannels(data.channels || []);
+      setSummary(data.summary || null);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -333,10 +375,94 @@ export default function CommentsPage() {
               <span>respuestas públicas por hora. Pasado el tope se guardan para responderlas a mano, para que Meta no lo lea como spam.</span>
             </div>
 
+            <div className="rounded-lg border border-[#2d333b] bg-[#0d1117] p-3 space-y-3">
+              <label className="flex items-center gap-2 text-sm text-white">
+                <input type="checkbox" checked={rules.analyze} onChange={(e) => setRules({ ...rules, analyze: e.target.checked })} />
+                Analizar cada comentario (sentimiento, intención y urgencia)
+              </label>
+              <p className="text-[11px] text-[#8b949e]">
+                Cada comentario se clasifica al llegar y se muestra etiquetado. Arriba verás el resumen de las
+                últimas 24 horas y un aviso si se dispara lo negativo.
+              </p>
+              <label className="flex items-center gap-2 text-xs text-[#8b949e]">
+                <input
+                  type="checkbox"
+                  checked={rules.hold_negative}
+                  disabled={!rules.analyze}
+                  onChange={(e) => setRules({ ...rules, hold_negative: e.target.checked })}
+                />
+                No dejar que el agente conteste solo los reclamos y los comentarios negativos
+              </label>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-[#8b949e]">
+                <span>Retener también a partir de una urgencia de</span>
+                <input
+                  type="number"
+                  min={10}
+                  max={100}
+                  disabled={!rules.analyze || !rules.hold_negative}
+                  className="w-20 rounded-md bg-[#0d1117] border border-[#2d333b] px-2 py-1 text-sm text-white disabled:opacity-50"
+                  value={rules.urgency_threshold}
+                  onChange={(e) => setRules({ ...rules, urgency_threshold: Math.max(10, Number(e.target.value) || 10) })}
+                />
+                <span>sobre 100.</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-[#8b949e]">
+                <span>Avisar de crisis si el</span>
+                <input
+                  type="number"
+                  min={10}
+                  max={100}
+                  disabled={!rules.analyze}
+                  className="w-20 rounded-md bg-[#0d1117] border border-[#2d333b] px-2 py-1 text-sm text-white disabled:opacity-50"
+                  value={rules.crisis_negative_pct}
+                  onChange={(e) => setRules({ ...rules, crisis_negative_pct: Math.max(10, Number(e.target.value) || 10) })}
+                />
+                <span>% de los comentarios de 24 h es negativo, habiendo al menos</span>
+                <input
+                  type="number"
+                  min={2}
+                  max={100}
+                  disabled={!rules.analyze}
+                  className="w-20 rounded-md bg-[#0d1117] border border-[#2d333b] px-2 py-1 text-sm text-white disabled:opacity-50"
+                  value={rules.crisis_min_comments}
+                  onChange={(e) => setRules({ ...rules, crisis_min_comments: Math.max(2, Number(e.target.value) || 2) })}
+                />
+                <span>comentarios.</span>
+              </div>
+            </div>
+
             <div className="flex justify-end">
               <button disabled={saving} onClick={() => void saveRules({})} className="rounded-md bg-blue-600 hover:bg-blue-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
                 {saving ? "Guardando…" : "Guardar configuración"}
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Últimas 24 h: lo que antes prometía "Escucha social", aquí y por empresa */}
+        {summary && summary.total24h > 0 && (
+          <div className="space-y-3">
+            {summary.crisis && (
+              <div className="flex items-start gap-2 rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-200">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  <strong>Atención:</strong> el {summary.negativosPct}% de los {summary.total24h} comentarios de las
+                  últimas 24 horas son negativos. Conviene revisarlos antes de seguir publicando.
+                </span>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {[
+                { label: "Comentarios 24 h", value: summary.total24h, cls: "text-white" },
+                { label: "Positivos", value: summary.positivos, cls: "text-green-300" },
+                { label: "Negativos", value: summary.negativos, cls: "text-red-300" },
+                { label: "Esperan a una persona", value: summary.pendientesPersona, cls: "text-amber-300" },
+              ].map((card) => (
+                <div key={card.label} className="rounded-xl border border-[#2d333b] bg-[#161b22] p-3">
+                  <p className={`text-xl font-semibold ${card.cls}`}>{card.value}</p>
+                  <p className="text-[11px] text-[#8b949e]">{card.label}</p>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -383,6 +509,21 @@ export default function CommentsPage() {
                     )}
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${st.cls}`}>{st.label}</span>
                     {c.handled_by === "auto" && <span className="text-[10px] text-[#6e7681]">automático</span>}
+                    {c.sentiment && SENTIMENT[c.sentiment] && (
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] ${SENTIMENT[c.sentiment].cls}`}>
+                        {SENTIMENT[c.sentiment].label}
+                      </span>
+                    )}
+                    {c.intent && INTENT[c.intent] && c.intent !== "otro" && (
+                      <span className="rounded-full bg-[#21262d] px-2 py-0.5 text-[10px] text-[#8b949e]">
+                        {INTENT[c.intent]}
+                      </span>
+                    )}
+                    {typeof c.urgency === "number" && c.urgency >= 70 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/15 px-2 py-0.5 text-[10px] text-orange-300">
+                        <Flame className="h-3 w-3" /> Urgente {c.urgency}
+                      </span>
+                    )}
                     <span className="ml-auto text-[11px] text-[#8b949e]">{c.commented_at ? formatBogotaDateTime(c.commented_at) : ""}</span>
                   </div>
 
@@ -401,6 +542,12 @@ export default function CommentsPage() {
                         </p>
                       )}
                     </div>
+                  )}
+                  {c.needs_human && c.needs_human_reason && (
+                    <p className="mt-2 flex items-start gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      {c.needs_human_reason} El agente no respondió solo; decide tú qué contestar.
+                    </p>
                   )}
                   {c.last_error && <p className="mt-1 text-[11px] text-red-300">{c.last_error}</p>}
 
