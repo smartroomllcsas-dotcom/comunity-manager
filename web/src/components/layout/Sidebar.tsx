@@ -150,13 +150,13 @@ const UNIFIED_SECTIONS: NavSection[] = [
       { href: "/inbox", label: "Bandeja de Entrada", icon: MessageSquare, badge: true },
       { href: "/broadcasts", label: "Difusiones", icon: Send },
       { href: "/agenda", label: "Agenda", icon: CalendarDays },
-      { href: "/comentarios", label: "Comentarios", icon: MessageCircle },
       { href: "/contacts", label: "Contactos", icon: Users },
     ],
   },
   {
     label: "Contenido",
     items: [
+      { href: "/comentarios", label: "Comentarios", icon: MessageCircle },
       { href: "/composer", label: "Composer", icon: PenTool },
       { href: "/whatsapp/templates", label: "Plantillas WhatsApp", icon: FileText },
     ],
