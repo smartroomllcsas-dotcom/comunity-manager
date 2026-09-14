@@ -3,17 +3,14 @@
 // interactivo con los 3 tabs.
 
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { resolvePageIdentity } from "@/lib/auth/page-identity";
 import AIToolsClient from "./AIToolsClient";
 
 export const dynamic = "force-dynamic";
 
 export default async function AIToolsPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  // Sirve cualquiera de los dos logins de la plataforma.
+  if (!(await resolvePageIdentity())) redirect("/login");
 
   return (
     <div className="p-6 max-w-7xl mx-auto">

@@ -7,6 +7,7 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { resolvePageIdentity } from "@/lib/auth/page-identity";
 import PostEditor, { type ClientOption } from "@/components/post-editor/PostEditor";
 
 export const dynamic = "force-dynamic";
@@ -37,11 +38,9 @@ async function loadClientsForUser(): Promise<ClientOption[]> {
 }
 
 export default async function ComposerPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  // Sirve cualquiera de los dos logins de la plataforma. Antes sólo miraba el
+  // de Supabase y expulsaba a quien entra por el propio.
+  if (!(await resolvePageIdentity())) redirect("/login");
 
   const clients = await loadClientsForUser();
 

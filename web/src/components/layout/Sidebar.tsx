@@ -26,7 +26,6 @@ import {
   Target,
   Sparkles,
   FileText,
-  Share2,
   Workflow,
   CheckSquare,
   Users2,
@@ -46,7 +45,6 @@ import {
   Key,
   ClipboardList,
   Cpu,
-  ServerCog,
 } from "lucide-react";
 import {
   Tooltip,
@@ -187,33 +185,17 @@ const UNIFIED_SECTIONS: NavSection[] = [
     items: [
       { href: "/analytics", label: "Analytics", icon: TrendingUp },
       { href: "/reports-cm", label: "Reportes CM", icon: BarChart3 },
-      { href: "/es/os/observability", label: "Observability", icon: Activity },
     ],
   },
+  // Los doce accesos de "Ajustes" salieron del menú: /settings ya es el índice
+  // que los lista todos agrupados (perfil, organización, seguridad, canales,
+  // WhatsApp, plantillas, respuestas rápidas, equipo, equipos, etiquetas,
+  // ciclo de vida, notas de cierre, campos de contacto, facturación y API).
+  // Estaban dos veces y hacían el menú el doble de largo. Canales se queda
+  // suelto aquí porque se entra a diario a conectar y reconectar marcas.
   {
-    label: "Sistema & Conexiones",
-    items: [
-      { href: "/settings/channels", label: "Canales", icon: Plug },
-      { href: "/es/os/integrations", label: "Conectores", icon: Share2 },
-      { href: "/es/os/system", label: "System", icon: ServerCog },
-    ],
-  },
-  {
-    label: "Ajustes",
-    items: [
-      { href: "/settings/agents", label: "Equipo", icon: UserRoundCog },
-      { href: "/settings/tags", label: "Etiquetas", icon: Tag },
-      { href: "/settings/contact-fields", label: "Campos custom", icon: ClipboardList },
-      { href: "/settings/whatsapp", label: "WhatsApp", icon: MessageSquare },
-      { href: "/settings/quick-replies", label: "Respuestas rápidas", icon: Reply },
-      { href: "/settings/lifecycle", label: "Lifecycle", icon: Activity },
-      { href: "/settings/closing-notes", label: "Notas de cierre", icon: FileText },
-      { href: "/settings/teams", label: "Equipos", icon: Users2 },
-      { href: "/settings/organization", label: "Organización", icon: Building2 },
-      { href: "/settings/billing", label: "Facturación", icon: CreditCard },
-      { href: "/settings/api", label: "API Keys", icon: Key },
-      { href: "/settings/security", label: "Seguridad", icon: Lock },
-    ],
+    label: "Sistema",
+    items: [{ href: "/settings/channels", label: "Canales", icon: Plug }],
   },
 ];
 
