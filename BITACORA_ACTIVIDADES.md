@@ -11,6 +11,11 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 
 ## Aplicado
 
+### 15 sep 2026
+- **`pages_manage_posts` activado y verificado**: estaba en "Agregar a revisión de la app" y por eso el código no lo pedía (pedirlo rompía el diálogo con *Invalid Scopes*). Un clic lo dejó en "Listo para la prueba", igual que pasó con `pages_read_user_content`. Comprobado abriendo el diálogo de Meta con él en la lista: **carga sin error**. Es decir, **publicar en Facebook ya es posible** para las marcas propias, sin esperar revisión de la app.
+- **Acordado: publicar y pautar irán por una conexión aparte de la del chat.** Hoy `/api/auth/meta/callback` escribe a la vez en `channels` y en `cm_social_accounts`, así que un permiso nuevo arriesga Messenger e Instagram de todas las marcas. Plan: botón **"Conectar publicación y anuncios"** por empresa, con ruta, configuración y fila propias. Maqueta: https://claude.ai/artifact/UZrFXxQL9GowakSbPLn3vZ
+- Revisado el estado del caso de uso de anuncios: `ads_management` y `ads_read` listos; `catalog_management` sin activar; nivel de la API de marketing en acceso limitado (60 puntos), con 2 de 4 requisitos cumplidos para subir a estándar.
+
 ### 14 sep 2026
 - **Menú revisado acceso por acceso** (de 37 a 22). Fuera los **12 accesos de "Ajustes"**: `/settings` ya es el índice que los lista todos agrupados, estaban dos veces y hacían el menú el doble de largo (Canales se queda suelto porque se usa a diario). Fuera también **Observability, System y Conectores**, paneles técnicos. **Comentarios** pasó a *Contenido*.
 - **Arregladas las páginas que expulsaban al login**: Composer, AI Tools y Reportes CM comprobaban la sesión sólo por Supabase Auth y echaban a quien entra por el login propio de la plataforma — el mismo fallo de Escucha social. Ahora las tres usan `resolvePageIdentity()` (`web/src/lib/auth/page-identity.ts`), que acepta los dos logins. Se quedan en el menú: se van a usar con las funciones de MCP de Meta.

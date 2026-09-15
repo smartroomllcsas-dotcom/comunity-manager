@@ -94,11 +94,37 @@ escribir al interno, pero **no** se puede responder en público.
 
 | Permiso | Qué desbloquea | Hoy |
 |---|---|---|
-| `pages_manage_posts` | Crear, editar y borrar publicaciones de la página | Sin activar |
+| `pages_manage_posts` | Crear, editar y borrar publicaciones de la página | Activado 15 sep, "Listo para la prueba" |
 | `instagram_content_publish` | Publicar en Instagram | Estándar |
 
-Nota: `pages_manage_posts` está fuera del código a propósito. Pedirlo antes de
-que Meta lo apruebe rompe el diálogo de conexión con *Invalid Scopes*.
+Nota (15 sep 2026): `pages_manage_posts` estuvo fuera del código porque pedirlo
+sin activar rompía el diálogo con *Invalid Scopes*. Ya está activado en el caso
+de uso *Administrar todos los aspectos de tu página* y **verificado**: el
+diálogo carga con él en la lista de permisos. Sigue en acceso estándar, así que
+vale para las marcas propias, no para páginas de clientes externos.
+
+Aun así **no se ha añadido a `getOAuthUrl`**: publicar debe ir por una conexión
+separada de la del chat (ver abajo), para que un permiso rechazado ahí no vuelva
+a tumbar la conexión de Messenger e Instagram de todas las marcas.
+
+## Publicar y pautar: conexión aparte
+
+Hoy `/api/auth/meta/callback` escribe a la vez en `channels` (chats) y en
+`cm_social_accounts` (publicación y anuncios): una sola conexión alimenta las
+dos cosas, y por eso cualquier permiso nuevo arriesga el chat.
+
+El plan acordado es un segundo botón por empresa, **"Conectar publicación y
+anuncios"**, con su propia ruta, su propia configuración de Login for Business y
+su propia fila. Permisos: `pages_manage_posts`, `instagram_content_publish`,
+`ads_management`, `ads_read`, `business_management` (y `catalog_management` si
+se activa). Maqueta del flujo: https://claude.ai/artifact/UZrFXxQL9GowakSbPLn3vZ
+
+Estado del caso de uso de anuncios (15 sep): `ads_management`, `ads_read`,
+`business_management` y `pages_manage_ads` en "Listo para la prueba";
+`catalog_management` sin activar; nivel de la API de marketing en **acceso
+limitado** (60 puntos). Para subir a estándar faltan dos de cuatro requisitos:
+la revisión de la app y el cuestionario de tratamiento de datos (la verificación
+del negocio y las 500 llamadas ya están cumplidas).
 
 ### 4. Para operar clientes externos en el resto del producto
 
