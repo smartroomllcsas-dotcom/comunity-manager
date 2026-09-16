@@ -19,11 +19,23 @@ type ContactRow = {
   id: string;
   name: string | null;
   wa_id: string | null;
-  phone: string | null;
   brand_id: string | null;
   organization_id: string;
   custom_fields: Record<string, unknown> | null;
 };
+
+/**
+ * `smarttalk.contacts` no tiene columna `phone`: el número llega del formulario
+ * y queda en `custom_fields.phone`. `wa_id` es el de WhatsApp cuando existe.
+ */
+function phoneOf(contact: ContactRow): string {
+  const cf = (contact.custom_fields || {}) as Record<string, unknown>;
+  const raw =
+    contact.wa_id ||
+    (typeof cf.phone === "string" ? cf.phone : "") ||
+    (typeof cf.phone_number === "string" ? cf.phone_number : "");
+  return String(raw || "").replace(/[^\d]/g, "");
+}
 
 async function authorize(contactId: string) {
   const supabase = await createClient();
@@ -42,7 +54,7 @@ async function authorize(contactId: string) {
 
   const { data: contact } = await admin
     .from("contacts")
-    .select("id, name, wa_id, phone, brand_id, organization_id, custom_fields")
+    .select("id, name, wa_id, brand_id, organization_id, custom_fields")
     .eq("id", contactId)
     .eq("organization_id", agent.organization_id)
     .maybeSingle();
@@ -60,7 +72,7 @@ async function describe(contact: ContactRow) {
   const cf = (contact.custom_fields || {}) as Record<string, unknown>;
   const firstTouch = typeof cf.wa_first_touch === "string" ? cf.wa_first_touch : null;
   const failed = Boolean(firstTouch && /fallid/i.test(firstTouch));
-  const phone = (contact.wa_id || contact.phone || "").replace(/[^\d]/g, "");
+  const phone = phoneOf(contact);
 
   if (!contact.brand_id) return { available: false, reason: "El contacto no tiene empresa asignada.", failed, firstTouch };
   if (!phone || phone.length < 7) return { available: false, reason: "El contacto no tiene un número válido.", failed, firstTouch };
@@ -107,7 +119,7 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
   const state = await describe(contact);
   if (!state.available) return NextResponse.json({ error: state.reason }, { status: 422 });
 
-  const phone = (contact.wa_id || contact.phone || "").replace(/[^\d]/g, "");
+  const phone = phoneOf(contact);
   const { retryFirstTouchWithUtility } = await import("@/lib/whatsapp/cloud/lead-engagement");
   const result = await retryFirstTouchWithUtility({
     clientId: contact.brand_id as string,
