@@ -8,14 +8,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getCmClientAccess } from "@/lib/cm-client-access";
-import { getAdsConnection, selectAdAccount, disconnectAds } from "@/lib/meta/ads-connection";
+import { getAdsConnection, selectAdAccount, disconnectAds, suggestAccountFor } from "@/lib/meta/ads-connection";
+import { brandName } from "@/lib/smarttalk/lead-alerts";
 
 export async function GET(request: NextRequest) {
   const clientId = request.nextUrl.searchParams.get("clientId");
   if (!clientId) return NextResponse.json({ error: "clientId requerido" }, { status: 400 });
   const access = await getCmClientAccess(request, clientId);
   if (!access) return NextResponse.json({ error: "No autorizado para esta empresa" }, { status: 403 });
-  return NextResponse.json({ connection: await getAdsConnection(access.clientId) });
+  const connection = await getAdsConnection(access.clientId);
+  if (connection && !connection.ad_account_id) {
+    // Todavía no eligió: se propone la que más se parece al nombre de la marca.
+    connection.suggested_account_id = suggestAccountFor(
+      await brandName(access.clientId),
+      connection.available_accounts
+    );
+  }
+  return NextResponse.json({ connection });
 }
 
 const patchSchema = z.object({ clientId: z.string().uuid(), adAccountId: z.string().min(1).max(40) });

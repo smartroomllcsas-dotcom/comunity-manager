@@ -37,9 +37,106 @@ export type AdAccount = {
   business_name?: string | null;
 };
 
+/**
+ * Estado de la cuenta según Meta. Sólo la 1 sirve para trabajar; el resto se
+ * muestra pero advertido, porque elegir una cerrada y descubrirlo tres días
+ * después es peor que no poder elegirla.
+ */
+export const AD_ACCOUNT_STATUS: Record<number, string> = {
+  1: "Activa",
+  2: "Inhabilitada",
+  3: "Sin método de pago",
+  7: "En revisión",
+  9: "En periodo de gracia",
+  100: "Cerrada temporalmente",
+  101: "Cerrada",
+};
+
+export function isUsableAccount(a: AdAccount): boolean {
+  return a.account_status === 1;
+}
+
+/** Sólo lectura: sirve para informes, no para crear campañas. */
+export function isReadOnly(a: AdAccount): boolean {
+  return /\(read-only\)/i.test(a.name);
+}
+
+function normalize(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\(read-only\)/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+/** Palabras útiles del nombre, sin tildes ni "(Read-Only)" ni sufijos sueltos. */
+function words(text: string): string[] {
+  return (text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\(read-only\)/g, " ")
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 1);
+}
+
+/**
+ * Cuánto se parecen dos nombres, de 0 a 100. Se miran de dos formas porque los
+ * nombres reales del portfolio fallan cada uno por su lado:
+ *   - pegados: "Smart Digital Media 5.0" contra "SmartDigitalMedia", que sin
+ *     espacios es la misma cadena pero no comparte ni una palabra;
+ *   - por palabras: "Moda Style Cg" contra "cg moda", que comparte todas las
+ *     palabras pero en otro orden, así que pegados no coinciden en nada.
+ */
+function similarity(brand: string, candidate: string): number {
+  const a = normalize(brand);
+  const b = normalize(candidate);
+  if (!a || !b) return 0;
+  if (a === b) return 100;
+
+  let pegados = 0;
+  if (a.includes(b) || b.includes(a)) pegados = 80;
+
+  const wa = words(brand);
+  const wb = words(candidate);
+  let porPalabras = 0;
+  if (wa.length && wb.length) {
+    const shared = wb.filter((w) => wa.includes(w)).length;
+    if (shared > 0) porPalabras = Math.round((shared / Math.min(wa.length, wb.length)) * 80);
+  }
+  return Math.max(pegados, porPalabras);
+}
+
+/**
+ * Con 25 cuentas en el portfolio, elegir "la primera que devuelve Meta" es
+ * elegir mal. Esto propone la que más se parece al nombre de la marca, y la
+ * propone nada más: la decisión sigue siendo de quien conecta.
+ */
+export function suggestAccountFor(brandName: string | null, accounts: AdAccount[]): string | null {
+  if (!brandName || accounts.length === 0) return null;
+
+  const scored = accounts
+    .map((a) => {
+      let score = similarity(brandName, a.name);
+      // El negocio dueño de la cuenta ayuda, pero menos que su propio nombre.
+      if (a.business_name) score = Math.max(score, Math.round(similarity(brandName, a.business_name) * 0.7));
+      // Entre dos parecidas, gana la que se puede usar de verdad.
+      if (score > 0 && isUsableAccount(a)) score += 5;
+      if (score > 0 && !isReadOnly(a)) score += 3;
+      return { id: a.account_id, score };
+    })
+    .filter((x) => x.score >= 40)
+    .sort((a, b) => b.score - a.score);
+
+  return scored[0]?.id ?? null;
+}
+
 export type AdsConnection = {
   id: string;
   brand_id: string;
+  /** Cuenta que proponemos cuando todavía no se ha elegido ninguna. */
+  suggested_account_id?: string | null;
   ad_account_id: string | null;
   ad_account_name: string | null;
   business_id: string | null;
@@ -100,12 +197,18 @@ export async function saveAdsConnection(input: {
   const admin = createAdminClient("smarttalk");
   const previous = await getAdsConnection(input.brandId);
 
-  // Al reconectar se respeta la cuenta ya elegida si sigue disponible; si no,
-  // se deja la primera. Nadie quiere volver a elegir en cada reconexión.
+  // Al reconectar se respeta la cuenta ya elegida si sigue disponible: nadie
+  // quiere volver a elegir en cada reconexión.
+  //
+  // Si no hay elección previa, sólo se elige sola cuando hay UNA cuenta. Con
+  // varias se deja sin elegir a propósito y la tarjeta la pide: en un portfolio
+  // de agencia hay decenas de cuentas y "la primera que devuelve Meta" es casi
+  // siempre la equivocada — la primera prueba conectó Smart Digital Media a la
+  // cuenta de SMART Sends.
   const keep = previous?.ad_account_id
     ? input.accounts.find((a) => a.account_id === previous.ad_account_id)
     : undefined;
-  const chosen = keep || input.accounts[0] || null;
+  const chosen = keep || (input.accounts.length === 1 ? input.accounts[0] : null);
 
   const { data, error } = await admin
     .from("brand_ad_accounts")
