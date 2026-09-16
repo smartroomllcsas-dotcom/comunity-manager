@@ -9,6 +9,7 @@ import { es } from "date-fns/locale";
 import { ArrowLeft, Phone, Mail, Tag, MessageSquare, Clock, Trash2, CalendarCheck, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { FollowupControl } from "@/components/inbox/FollowupControl";
+import { FirstTouchUtilityButton } from "@/components/inbox/FirstTouchUtilityButton";
 
 /** Estado de la cita guardada por el webhook de Cal.com (custom_fields.cita_*). */
 const citaConfig: Record<string, { label: string; bg: string; text: string; border: string }> = {
@@ -180,7 +181,8 @@ export default function ContactDetailPage() {
 
         {/* Seguimiento automático: detenerlo cuando lo atiende un asesor */}
         {contact.visibility_status !== "restricted" && (
-          <div className="mb-6">
+          <div className="mb-6 space-y-3">
+            <FirstTouchUtilityButton contactId={contactId} />
             <FollowupControl contactId={contactId} />
           </div>
         )}

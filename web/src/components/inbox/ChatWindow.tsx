@@ -10,6 +10,7 @@ import { MessageInput } from "./MessageInput";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InternalNotes } from "./InternalNotes";
 import { FollowupControl } from "./FollowupControl";
+import { FirstTouchUtilityButton } from "./FirstTouchUtilityButton";
 import { SnoozeDropdown } from "./SnoozeDropdown";
 import { ClosingDialog } from "./ClosingDialog";
 import { ChannelBadge } from "./ChannelBadge";
@@ -424,7 +425,8 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
       ) : (
         <div className="flex h-full flex-col">
           {conversation.contact_id && (
-            <div className="px-4 pt-3">
+            <div className="space-y-2 px-4 pt-3">
+              <FirstTouchUtilityButton contactId={conversation.contact_id} />
               <FollowupControl contactId={conversation.contact_id} compact />
             </div>
           )}
