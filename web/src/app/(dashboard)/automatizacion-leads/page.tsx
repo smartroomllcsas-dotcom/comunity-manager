@@ -47,6 +47,12 @@ function reasonLabel(reason: string): string {
 interface Settings {
   enabled: boolean;
   first_touch_template_id: string | null;
+  first_touch_utility?: {
+    enabled: boolean;
+    template_id: string | null;
+    country_codes: string[];
+    always_retry: boolean;
+  } | null;
   reengage_template_id: string | null;
   reengage_after_hours: number;
   agent_role: string | null;
@@ -119,6 +125,7 @@ Reglas:
 const emptySettings: Settings = {
   enabled: false,
   first_touch_template_id: null,
+  first_touch_utility: { enabled: false, template_id: null, country_codes: ["1"], always_retry: true },
   reengage_template_id: null,
   reengage_after_hours: 24,
   agent_role: "asesor_ventas",
@@ -397,6 +404,92 @@ export default function LeadAutomationPage() {
                   ))}
                 </select>
               </div>
+
+              {/* Respaldo cuando Meta bloquea el marketing (131049 y parecidos) */}
+              <div className="rounded-md border border-amber-500/25 bg-amber-500/5 p-3 space-y-3">
+                <label className="flex items-start gap-2 text-sm text-white">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 accent-amber-500"
+                    checked={settings.first_touch_utility?.enabled ?? false}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        first_touch_utility: {
+                          ...(s.first_touch_utility || { template_id: null, country_codes: ["1"], always_retry: true }),
+                          enabled: e.target.checked,
+                        },
+                      }))
+                    }
+                  />
+                  <span>
+                    Si Meta bloquea la plantilla de marketing, reintentar con una Utility
+                    <span className="block text-[11px] text-[#8b949e] font-normal">
+                      Pasa con el error 131049 y parecidos: Meta acepta el mensaje y avisa después de que no
+                      lo entregó. Sin esto, el lead se queda sin primer contacto y solo te llega el correo.
+                    </span>
+                  </span>
+                </label>
+
+                <div>
+                  <label className="block text-xs text-[#8b949e] mb-1">Plantilla de respaldo</label>
+                  <select
+                    className={selectCls}
+                    disabled={!settings.first_touch_utility?.enabled}
+                    value={settings.first_touch_utility?.template_id ?? ""}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        first_touch_utility: {
+                          ...(s.first_touch_utility || { enabled: true, country_codes: ["1"], always_retry: true }),
+                          template_id: e.target.value || null,
+                        },
+                      }))
+                    }
+                  >
+                    <option value="">— elige una plantilla Utility aprobada —</option>
+                    {approved
+                      .filter((t) => t.category === "UTILITY")
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {templateLabel(t)}
+                        </option>
+                      ))}
+                  </select>
+                  {approved.filter((t) => t.category === "UTILITY").length === 0 && (
+                    <p className="mt-1 text-[11px] text-amber-300">
+                      Esta empresa no tiene ninguna plantilla Utility aprobada. Créala en Plantillas: Meta
+                      entrega las Utility aunque haya limitado las de marketing.
+                    </p>
+                  )}
+                </div>
+
+                <label className="flex items-start gap-2 text-xs text-[#8b949e]">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 accent-amber-500"
+                    disabled={!settings.first_touch_utility?.enabled}
+                    checked={settings.first_touch_utility?.always_retry ?? true}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        first_touch_utility: {
+                          ...(s.first_touch_utility || { enabled: true, template_id: null, country_codes: ["1"] }),
+                          always_retry: e.target.checked,
+                        },
+                      }))
+                    }
+                  />
+                  <span>
+                    Reintentar con cualquier número, no solo con los de{" "}
+                    {(settings.first_touch_utility?.country_codes || ["1"]).map((c) => `+${c}`).join(", ")}.
+                    <span className="block text-[11px] text-[#6e7681]">
+                      Sin esto, un lead colombiano bloqueado por Meta no se reintenta.
+                    </span>
+                  </span>
+                </label>
+              </div>
+
               <div>
                 <label className="block text-xs text-[#8b949e] mb-1">
                   Plantilla de RETOMAR CONVERSACIÓN

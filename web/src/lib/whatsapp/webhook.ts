@@ -9,6 +9,7 @@ import { BILLING_FEATURES } from "@/lib/billing/features";
 import { upsertRestrictedContact } from "@/lib/smarttalk/contact-privacy";
 import { recordContactOverageEvent } from "@/lib/smarttalk/contact-overage";
 import { understandInboundMedia, inboundContentToText } from "@/lib/chatbot/media-understanding";
+import { isMarketingRestrictedError } from "@/lib/whatsapp/cloud/first-touch-utility";
 
 export async function processIncomingMessage(
   message: WebhookMessage,
@@ -344,22 +345,55 @@ async function markFirstTouchFailed(
 
     const { data: contact } = await admin
       .from("contacts")
-      .select("custom_fields")
+      .select("custom_fields, name, wa_id, phone")
       .eq("id", msg.contact_id)
       .maybeSingle();
-    const cf = { ...((contact?.custom_fields as Record<string, unknown> | null) || {}) };
-    if (cf.wa_first_touch !== undefined) {
-      cf.wa_first_touch = `fallido (${reason})`;
-      cf.wa_first_touch_failed_at = new Date().toISOString();
-      await admin.from("contacts").update({ custom_fields: cf }).eq("id", msg.contact_id);
-    }
 
-    // Aviso a los asesores de la marca (una sola vez por lead) + nota en el chat.
     const { data: conv } = await admin
       .from("conversations")
       .select("brand_id")
       .eq("id", msg.conversation_id)
       .maybeSingle();
+
+    // Antes de dar el lead por perdido: si Meta bloqueó el marketing, se
+    // reintenta con la plantilla Utility de la marca. Meta aceptó el envío y
+    // avisó del fallo por webhook, así que el reintento de sendFirstTouchTemplate
+    // no llegó a correr — sin esto el lead se quedaba sin primer contacto
+    // teniendo la marca una Utility aprobada.
+    let rescued: { sent: boolean; reason?: string } | null = null;
+    if (conv?.brand_id && err && isMarketingRestrictedError(String(err.code))) {
+      const phone = (contact?.wa_id as string | null) || (contact?.phone as string | null) || "";
+      if (phone) {
+        const { retryFirstTouchWithUtility } = await import("@/lib/whatsapp/cloud/lead-engagement");
+        rescued = await retryFirstTouchWithUtility({
+          clientId: conv.brand_id as string,
+          phone,
+          leadName: (contact?.name as string | null) || null,
+        });
+      }
+    }
+
+    const cf = { ...((contact?.custom_fields as Record<string, unknown> | null) || {}) };
+    if (cf.wa_first_touch !== undefined) {
+      cf.wa_first_touch = rescued?.sent
+        ? `enviado con plantilla Utility (la de marketing falló: ${reason})`
+        : `fallido (${reason})`;
+      if (!rescued?.sent) cf.wa_first_touch_failed_at = new Date().toISOString();
+      await admin.from("contacts").update({ custom_fields: cf }).eq("id", msg.contact_id);
+    }
+
+    // El lead quedó atendido: nota en el chat y NI UN correo de más.
+    if (rescued?.sent) {
+      const { addSystemNote } = await import("@/lib/smarttalk/internal-notes");
+      await addSystemNote({
+        conversationId: msg.conversation_id as string,
+        prefix: "[IA]",
+        content: `Meta bloqueó la plantilla de marketing (${reason}). El primer contacto salió con la plantilla Utility.`,
+      });
+      return;
+    }
+
+    // Aviso a los asesores de la marca (una sola vez por lead) + nota en el chat.
     if (conv?.brand_id) {
       const { notifyLeadNeedsManualContact } = await import("@/lib/smarttalk/lead-alerts");
       await notifyLeadNeedsManualContact({
@@ -367,7 +401,9 @@ async function markFirstTouchFailed(
         brandId: conv.brand_id as string,
         conversationId: msg.conversation_id as string,
         cause: "whatsapp_failed",
-        detail: reason,
+        detail: rescued
+          ? `${reason}. También se intentó la plantilla Utility y no salió (${rescued.reason || "sin motivo"}).`
+          : reason,
       });
     }
   } catch (e) {

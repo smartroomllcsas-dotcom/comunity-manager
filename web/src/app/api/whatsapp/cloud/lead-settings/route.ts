@@ -94,14 +94,26 @@ const putSchema = z.object({
     .optional(),
   /** Crear en Meta la plantilla de recordatorio si la marca no la tiene. */
   create_reminder_template: z.boolean().optional(),
+  /** Plantilla Utility con la que reintentar cuando Meta bloquea el marketing. */
+  first_touch_utility: z
+    .object({
+      enabled: z.boolean().optional(),
+      template_id: z.string().uuid().nullable().optional(),
+      country_codes: z.array(z.string().max(4)).max(20).optional(),
+      always_retry: z.boolean().optional(),
+    })
+    .nullable()
+    .optional(),
 });
 
 async function loadPayload(clientId: string) {
-  const [channel_instructions, booking_reminder, fixed_replies, followup] = await Promise.all([
+  const { getFirstTouchUtilitySettings } = await import("@/lib/whatsapp/cloud/first-touch-utility");
+  const [channel_instructions, booking_reminder, fixed_replies, followup, first_touch_utility] = await Promise.all([
     getChannelInstructions(clientId),
     getBookingReminderSettings(clientId),
     getFixedReplies(clientId),
     getFollowupSettings(clientId),
+    getFirstTouchUtilitySettings(clientId),
   ]);
   const [{ data: settings }, { data: templates }] = await Promise.all([
     supabaseAdmin
@@ -117,7 +129,14 @@ async function loadPayload(clientId: string) {
   ]);
   return {
     settings: settings
-      ? { ...(settings as Record<string, unknown>), channel_instructions, booking_reminder, fixed_replies, followup }
+      ? {
+          ...(settings as Record<string, unknown>),
+          channel_instructions,
+          booking_reminder,
+          fixed_replies,
+          followup,
+          first_touch_utility,
+        }
       : null,
     templates: templates ?? [],
   };
@@ -142,8 +161,16 @@ export async function PUT(request: NextRequest) {
       { status: 422 }
     );
   }
-  const { clientId, channel_instructions, booking_reminder, fixed_replies, followup, create_reminder_template, ...fields } =
-    parsed.data;
+  const {
+    clientId,
+    channel_instructions,
+    booking_reminder,
+    fixed_replies,
+    followup,
+    create_reminder_template,
+    first_touch_utility,
+    ...fields
+  } = parsed.data;
 
   const access = await getCmClientAccess(request, clientId);
   if (!access) return NextResponse.json({ error: "No autorizado para esta marca" }, { status: 403 });
@@ -160,6 +187,36 @@ export async function PUT(request: NextRequest) {
   if (followup !== undefined) {
     const current = await getFollowupSettings(access.clientId);
     const saved = await setFollowupSettings(access.clientId, { ...current, ...followup });
+    if (!saved.ok) return NextResponse.json({ error: saved.error }, { status: 500 });
+  }
+  if (first_touch_utility) {
+    const { getFirstTouchUtilitySettings, setFirstTouchUtilitySettings } = await import(
+      "@/lib/whatsapp/cloud/first-touch-utility"
+    );
+    // La plantilla tiene que ser de esta marca, estar aprobada y ser Utility:
+    // una de marketing aquí repetiría el bloqueo que intentamos esquivar.
+    if (first_touch_utility.template_id) {
+      const { data: tpl } = await supabaseAdmin
+        .from("cm_wa_templates")
+        .select("id, category, status")
+        .eq("id", first_touch_utility.template_id)
+        .eq("client_id", access.clientId)
+        .maybeSingle();
+      if (!tpl) {
+        return NextResponse.json({ error: "Esa plantilla no pertenece a esta empresa" }, { status: 422 });
+      }
+      if (tpl.status !== "APPROVED") {
+        return NextResponse.json({ error: "La plantilla todavía no está aprobada por Meta" }, { status: 422 });
+      }
+      if (tpl.category !== "UTILITY") {
+        return NextResponse.json(
+          { error: "Tiene que ser de categoría Utility; una de marketing volvería a quedar bloqueada" },
+          { status: 422 }
+        );
+      }
+    }
+    const current = await getFirstTouchUtilitySettings(access.clientId);
+    const saved = await setFirstTouchUtilitySettings(access.clientId, { ...current, ...first_touch_utility });
     if (!saved.ok) return NextResponse.json({ error: saved.error }, { status: 500 });
   }
 

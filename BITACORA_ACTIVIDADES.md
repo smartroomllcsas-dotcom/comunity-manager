@@ -11,6 +11,10 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 
 ## Aplicado
 
+### 16 sep 2026
+- **Plantilla Utility de respaldo cuando Meta bloquea el marketing.** El reintento con Utility sólo corría si Meta rechazaba el envío en el momento; con el error **131049** Meta acepta el mensaje y avisa del fallo por webhook segundos después, y ese camino iba directo al correo "contáctalo por otro medio" sin reintentar nada (caso de Lin Gutiérrez, Smart Digital). Ahora, al llegar ese aviso, la plataforma **intenta la plantilla Utility antes de avisar**: si sale, queda nota en el chat y **no se manda correo**; si también falla, el correo explica que se intentaron las dos.
+- **Configurable desde la plataforma** (Automatización de leads → Plantillas): casilla *"Si Meta bloquea la plantilla de marketing, reintentar con una Utility"*, selector de la plantilla de respaldo (sólo Utility **aprobadas** de esa empresa; la API rechaza una de marketing) y casilla *"Reintentar con cualquier número"* — antes sólo aplicaba a los prefijos +1, así que un lead colombiano bloqueado no se reintentaba nunca. Antes esta configuración existía en la base pero no se podía tocar desde ninguna pantalla.
+
 ### 15 sep 2026
 - **`pages_manage_posts` activado y verificado**: estaba en "Agregar a revisión de la app" y por eso el código no lo pedía (pedirlo rompía el diálogo con *Invalid Scopes*). Un clic lo dejó en "Listo para la prueba", igual que pasó con `pages_read_user_content`. Comprobado abriendo el diálogo de Meta con él en la lista: **carga sin error**. Es decir, **publicar en Facebook ya es posible** para las marcas propias, sin esperar revisión de la app.
 - **Acordado: publicar y pautar irán por una conexión aparte de la del chat.** Hoy `/api/auth/meta/callback` escribe a la vez en `channels` y en `cm_social_accounts`, así que un permiso nuevo arriesga Messenger e Instagram de todas las marcas. Plan: botón **"Conectar publicación y anuncios"** por empresa, con ruta, configuración y fila propias. Maqueta: https://claude.ai/artifact/UZrFXxQL9GowakSbPLn3vZ

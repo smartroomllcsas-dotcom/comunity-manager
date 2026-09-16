@@ -5,10 +5,15 @@
  * Meta acepta como Utility un mensaje que confirma algo que el cliente pidió
  * — aquí, la solicitud del formulario — sin promoción. Se usa:
  *   - siempre, para números cuyo prefijo esté en `country_codes` (por defecto ["1"]);
- *   - como reintento, si Meta rechaza la de marketing por restricción.
+ *   - como reintento, si Meta rechaza la de marketing por restricción. Ese
+ *     rechazo llega por dos caminos: en la respuesta del envío (lo atiende
+ *     `sendFirstTouchTemplate`) o segundos después por webhook, con Meta
+ *     habiendo aceptado el mensaje (lo atiende `retryFirstTouchWithUtility`).
+ *     El segundo es el habitual con el error 131049.
  *
  * Configuración por marca en `public.settings`:
- *   lead_agent_first_touch_utility:<brandId> → { enabled, template_id, country_codes }
+ *   lead_agent_first_touch_utility:<brandId>
+ *     → { enabled, template_id, country_codes, always_retry }
  * La plantilla `confirmacion_solicitud_lead` se crea sola en Meta la primera vez.
  */
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -20,6 +25,13 @@ export interface FirstTouchUtilitySettings {
   template_id: string | null;
   /** Prefijos telefónicos (sin +) que usan la plantilla Utility de entrada. */
   country_codes: string[];
+  /**
+   * Reintentar con la Utility ante CUALQUIER número que Meta bloquee por
+   * marketing, no sólo los de `country_codes`. Sin esto, un lead colombiano
+   * bloqueado por el error 131049 se quedaba sin primer contacto aunque la
+   * marca tuviera una Utility aprobada.
+   */
+  always_retry: boolean;
 }
 
 export const UTILITY_FIRST_TOUCH_TEMPLATE_NAME = "confirmacion_solicitud_lead";
@@ -35,6 +47,7 @@ function sanitize(input: unknown): FirstTouchUtilitySettings {
     enabled: v.enabled === true,
     template_id: typeof v.template_id === "string" && v.template_id ? v.template_id : null,
     country_codes: codes.length ? codes : DEFAULT_CODES,
+    always_retry: v.always_retry !== false,
   };
 }
 

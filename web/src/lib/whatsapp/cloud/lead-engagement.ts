@@ -362,3 +362,50 @@ export async function sendFirstTouchTemplate(
     };
   }
 }
+
+/**
+ * Reintento del primer contacto cuando Meta bloquea el marketing DESPUÉS de
+ * aceptar el mensaje (llega por webhook como `failed`, normalmente 131049).
+ *
+ * En ese camino `sendFirstTouchTemplate` ya devolvió `sent: true` y su reintento
+ * no llegó a correr: el lead se quedaba sin primer contacto y al asesor le caía
+ * un correo pidiéndole que lo contactara a mano, aunque la marca tuviera una
+ * plantilla Utility aprobada sin usar.
+ *
+ * Devuelve `sent: false` con el motivo cuando no hay nada que intentar, para que
+ * quien llama siga con el aviso de siempre.
+ */
+export async function retryFirstTouchWithUtility(input: {
+  clientId: string;
+  phone: string;
+  leadName?: string | null;
+  topic?: string | null;
+}): Promise<FirstTouchResult> {
+  try {
+    const utility = await getFirstTouchUtilitySettings(input.clientId);
+    if (!utility.enabled || !utility.template_id) {
+      return { sent: false, reason: "utility_not_configured" };
+    }
+    const to = input.phone.replace(/[^\d]/g, "");
+    if (to.length < 7) return { sent: false, reason: "invalid_phone" };
+    // Si la marca limitó la Utility a ciertos prefijos y este no está, sólo se
+    // usa cuando "reintentar siempre" está activo.
+    if (!utility.always_retry && !phoneNeedsUtility(to, utility.country_codes)) {
+      return { sent: false, reason: "utility_restricted_to_country_codes" };
+    }
+
+    const settings = await getLeadAgentSettings(input.clientId);
+    const firstName = (input.leadName || "").trim().split(/\s+/)[0] || "Hola";
+    const topic = (input.topic || "").trim() || "tu proyecto";
+
+    return await sendBrandTemplate({
+      clientId: input.clientId,
+      templateId: utility.template_id,
+      phone: to,
+      values: { nombre: firstName, tema: topic },
+      maxSendsPerHour: settings?.max_sends_per_hour,
+    });
+  } catch (e) {
+    return { sent: false, reason: e instanceof Error ? e.message.slice(0, 200) : "unknown_error" };
+  }
+}
