@@ -15,6 +15,7 @@ import {
   BRAND_INACTIVE_NOTICE,
   isPausedBrandStatus,
 } from '@/lib/smarttalk/brand-status'
+import { AdsConnectionCard } from '@/components/channels/AdsConnectionCard'
 import {
   ACTIVATION_PENDING_HINT,
   ACTIVATION_PENDING_LABEL,
@@ -227,6 +228,27 @@ export default function ClientsPage() {
       if (user) {
         loadData()
       }
+    }
+
+    // Conexión de publicación y anuncios: vuelve por su propio callback, con
+    // sus propios parámetros, para no mezclarse con los avisos del chat.
+    const adsOk = searchParams.get('ads_ok')
+    const adsError = searchParams.get('ads_error')
+    if (adsOk) {
+      const count = Number(searchParams.get('ads_count') || '1')
+      setNotification({
+        type: 'success',
+        message:
+          count > 1
+            ? `Publicación y anuncios conectados con «${decodeURIComponent(adsOk)}». Encontramos ${count} cuentas publicitarias: elige la de esta empresa en su tarjeta.`
+            : `Publicación y anuncios conectados con «${decodeURIComponent(adsOk)}».`,
+      })
+      window.history.replaceState({}, '', '/clients')
+      if (user) loadData()
+    }
+    if (adsError) {
+      setNotification({ type: 'error', message: decodeURIComponent(adsError) })
+      window.history.replaceState({}, '', '/clients')
     }
   }, [searchParams, user])
 
@@ -1079,6 +1101,11 @@ export default function ClientsPage() {
                       />
                     </div>
                   )}
+
+                  {/* Publicación y anuncios: conexión aparte, con su propio
+                      diálogo de Meta. Un permiso rechazado aquí no toca los
+                      canales de chat de arriba. */}
+                  <AdsConnectionCard clientId={client.id} />
                   </>
                 )}
 
