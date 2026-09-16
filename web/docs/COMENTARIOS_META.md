@@ -109,6 +109,14 @@ a tumbar la conexión de Messenger e Instagram de todas las marcas.
 
 ## Publicar y pautar: conexión aparte
 
+URI de redireccionamiento declarados en *Inicio de sesión con Facebook para
+empresas → Configurar* (modo estricto activo, tienen que coincidir exactos):
+
+- `…/api/auth/meta/callback` — canales de chat
+- `…/api/auth/instagram/callback` — Instagram
+- `…/api/auth/meta-ads/callback` — publicación y anuncios (agregado 16 sep)
+
+
 Hoy `/api/auth/meta/callback` escribe a la vez en `channels` (chats) y en
 `cm_social_accounts` (publicación y anuncios): una sola conexión alimenta las
 dos cosas, y por eso cualquier permiso nuevo arriesga el chat.
