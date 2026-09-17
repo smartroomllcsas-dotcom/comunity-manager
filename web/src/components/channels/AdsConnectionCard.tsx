@@ -146,15 +146,33 @@ export function AdsConnectionCard({ clientId }: { clientId: string }) {
             </span>
           </span>
         </p>
+        {/*
+          El selector va SIN preseleccionar. Antes mostraba de entrada la cuenta
+          sugerida, así que elegir "la que ya se veía" no disparaba ningún
+          cambio y no se guardaba nada: parecía que la pantalla ignoraba la
+          elección. La sugerida se marca en la lista y tiene su propio botón.
+        */}
+        {suggested && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void changeAccount(suggested.account_id)}
+            className="mb-2 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-violet-500/40 bg-violet-500/15 px-3 py-2 text-[11px] font-medium text-violet-100 transition hover:bg-violet-500/25 disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+            Usar «{suggested.name.replace(/\s*\(read-only\)\s*/i, "")}»
+          </button>
+        )}
         <select
           disabled={busy}
-          defaultValue={conn.suggested_account_id ?? ""}
+          value=""
           onChange={(e) => e.target.value && void changeAccount(e.target.value)}
           className="w-full rounded-md border border-[#2d333b] bg-[#0d1117] px-2 py-1.5 text-[11px] text-white disabled:opacity-50"
         >
-          <option value="">— elige la cuenta —</option>
+          <option value="">{suggested ? "— o elige otra —" : "— elige la cuenta —"}</option>
           {accounts.map((a) => (
             <option key={a.account_id} value={a.account_id}>
+              {a.account_id === conn.suggested_account_id ? "★ " : ""}
               {label(a)}
             </option>
           ))}
