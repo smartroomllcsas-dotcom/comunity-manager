@@ -1,43 +1,51 @@
+/**
+ * Campañas de la cuenta publicitaria de UNA empresa.
+ *
+ * Antes, cuando no había cuenta ni token, devolvía campañas de ejemplo con
+ * `source: 'mock'` y la pantalla las pintaba igual que las de verdad: números
+ * inventados presentados como reales. Ahora devuelve la lista vacía y el
+ * motivo, para que la pantalla diga qué falta.
+ */
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdCampaigns } from '@/lib/meta'
-import { DEFAULT_CAMPAIGNS } from '@/lib/meta-fallbacks'
-import { supabase } from '@/lib/supabase'
 import { getCmClientAccess } from '@/lib/cm-client-access'
+import { resolveAdsSource } from '@/lib/meta/ads-source'
 
 export async function GET(request: NextRequest) {
   const clientId = request.nextUrl.searchParams.get('clientId')
   if (!clientId) {
     return NextResponse.json({ error: 'clientId requerido' }, { status: 400 })
   }
-  if (!(await getCmClientAccess(request, clientId))) {
+  const access = await getCmClientAccess(request, clientId)
+  if (!access) {
     return NextResponse.json({ error: 'No autorizado para este cliente' }, { status: 403 })
   }
 
-  const { data: social } = await supabase
-    .from('cm_social_accounts')
-    .select('ad_account_id, access_token')
-    .eq('client_id', clientId)
-    .maybeSingle()
-
-  if (!social?.ad_account_id || !social.access_token) {
-    return NextResponse.json({ source: 'mock', campaigns: DEFAULT_CAMPAIGNS })
+  const source = await resolveAdsSource(access.clientId)
+  if (!source.ok) {
+    return NextResponse.json({
+      source: 'none',
+      campaigns: [],
+      reason: source.reason,
+      needsConnect: source.needsConnect,
+    })
   }
 
   try {
-    const campaigns = await getAdCampaigns(social.ad_account_id, social.access_token)
-    const items = campaigns.data ?? []
+    const campaigns = await getAdCampaigns(source.adAccountId, source.token)
     return NextResponse.json({
-      source: items.length > 0 ? 'meta' : 'mock',
-      campaigns: items.length > 0 ? items : DEFAULT_CAMPAIGNS,
+      source: source.origin,
+      campaigns: campaigns.data ?? [],
+      reason:
+        (campaigns.data ?? []).length === 0
+          ? 'Esta cuenta publicitaria no tiene campañas.'
+          : null,
     })
   } catch (error) {
-    return NextResponse.json(
-      {
-        source: 'mock',
-        error: error instanceof Error ? error.message : 'Meta error',
-        campaigns: DEFAULT_CAMPAIGNS,
-      },
-      { status: 200 }
-    )
+    return NextResponse.json({
+      source: 'error',
+      campaigns: [],
+      reason: error instanceof Error ? error.message : 'Meta no respondió',
+    })
   }
 }

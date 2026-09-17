@@ -40,6 +40,9 @@ export default function MetaDetailPage() {
   const [social, setSocial] = useState<SocialAccount | null>(null)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [insights, setInsights] = useState<InsightItem[]>([])
+  // Por qué no hay datos. Antes se rellenaba con cifras de ejemplo y nadie
+  // podía saber que lo que veía era inventado.
+  const [reason, setReason] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -72,21 +75,6 @@ export default function MetaDetailPage() {
       const socialData = socialRes.data ?? null
       setSocial(socialData)
 
-      if (!socialData?.ad_account_id) {
-        try {
-          const insightRes = await fetch(`/api/meta/insights?clientId=${clientId}`)
-          const insightData = await insightRes.json().catch(() => null)
-          if (!mounted) return
-          setCampaigns([])
-          setInsights(Array.isArray(insightData?.insights) ? insightData.insights : [])
-        } catch (fetchError) {
-          setError(fetchError instanceof Error ? fetchError.message : 'No se pudieron cargar los datos de Meta')
-        } finally {
-          if (mounted) setLoading(false)
-        }
-        return
-      }
-
       try {
         const [campaignRes, insightRes] = await Promise.all([
           fetch(`/api/meta/campaigns?clientId=${clientId}`),
@@ -97,6 +85,7 @@ export default function MetaDetailPage() {
         if (!mounted) return
         setCampaigns(Array.isArray(campaignData?.campaigns) ? campaignData.campaigns : [])
         setInsights(Array.isArray(insightData?.insights) ? insightData.insights : [])
+        setReason(insightData?.reason || campaignData?.reason || null)
       } catch (fetchError) {
         setError(fetchError instanceof Error ? fetchError.message : 'No se pudieron cargar los datos de Meta')
       } finally {
@@ -151,6 +140,15 @@ export default function MetaDetailPage() {
       {error && (
         <div className="mb-4 rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-200">
           {error}
+        </div>
+      )}
+
+      {reason && (
+        <div className="mb-4 rounded-2xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+          {reason}
+          <a href="/clients" className="ml-2 underline underline-offset-2 hover:text-white">
+            Ir a Clientes
+          </a>
         </div>
       )}
 
