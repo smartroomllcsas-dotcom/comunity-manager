@@ -319,6 +319,128 @@ export async function getAdInsights(
   return metaFetch(`${META_GRAPH_URL}/act_${adAccountId}/insights?${params}`)
 }
 
+type MetaInsightLevel = 'campaign' | 'adset' | 'ad'
+
+/**
+ * Obtiene el detalle de una campaña sin exponer el token al navegador.
+ *
+ * La lista de campañas es deliberadamente liviana. Este método se llama sólo
+ * cuando la persona pulsa «Ver más» y resuelve la jerarquía campaña → conjunto
+ * de anuncios → anuncio/creativo, además de las métricas del mismo periodo.
+ */
+export async function getAdCampaignDetails(
+  campaignId: string,
+  accessToken: string,
+  range: AdInsightsRange = { preset: 'last_30d' },
+) {
+  const campaignFields = [
+    'id',
+    'account_id',
+    'name',
+    'status',
+    'effective_status',
+    'configured_status',
+    'objective',
+    'buying_type',
+    'special_ad_categories',
+    'daily_budget',
+    'lifetime_budget',
+    'start_time',
+    'stop_time',
+    'created_time',
+    'updated_time',
+  ].join(',')
+  const adSetFields = [
+    'id',
+    'name',
+    'status',
+    'effective_status',
+    'configured_status',
+    'targeting',
+    'daily_budget',
+    'lifetime_budget',
+    'start_time',
+    'end_time',
+  ].join(',')
+  const adFields = [
+    'id',
+    'name',
+    'status',
+    'effective_status',
+    'configured_status',
+    'creative{id,name,object_story_spec,asset_feed_spec,thumbnail_url,image_url,video_id,object_type,preview_shareable_link}',
+  ].join(',')
+
+  const campaignUrl = `${META_GRAPH_URL}/${encodeURIComponent(campaignId)}?${new URLSearchParams({
+    fields: campaignFields,
+    access_token: accessToken,
+  })}`
+  const adSetsUrl = `${META_GRAPH_URL}/${encodeURIComponent(campaignId)}/adsets?${new URLSearchParams({
+    fields: adSetFields,
+    limit: '100',
+    access_token: accessToken,
+  })}`
+
+  const [campaign, adSets, campaignInsights, adSetInsights, adInsights] = await Promise.all([
+    metaFetch(campaignUrl),
+    metaFetch(adSetsUrl),
+    getMetaObjectInsights(campaignId, accessToken, range, 'campaign'),
+    getMetaObjectInsights(campaignId, accessToken, range, 'adset'),
+    getMetaObjectInsights(campaignId, accessToken, range, 'ad'),
+  ])
+
+  // Los anuncios se piden de la campaña entera en UNA llamada y se agrupan
+  // aquí. Pedirlos por conjunto era una llamada por conjunto: con la app en
+  // acceso limitado (60 puntos, cada lectura cuenta 1) una campaña de veinte
+  // conjuntos gastaba el cupo de golpe y Meta bloqueaba cinco minutos.
+  const adSetRows = Array.isArray(adSets?.data) ? adSets.data : []
+  const allAds = await metaFetch(
+    `${META_GRAPH_URL}/${encodeURIComponent(campaignId)}/ads?${new URLSearchParams({
+      fields: `adset_id,${adFields}`,
+      limit: '250',
+      access_token: accessToken,
+    })}`,
+  )
+  const adsByAdSet = new Map<string, Array<Record<string, unknown>>>()
+  for (const ad of Array.isArray(allAds?.data) ? allAds.data : []) {
+    const key = String((ad as Record<string, unknown>).adset_id ?? '')
+    if (!key) continue
+    const list = adsByAdSet.get(key)
+    if (list) list.push(ad as Record<string, unknown>)
+    else adsByAdSet.set(key, [ad as Record<string, unknown>])
+  }
+  const adSetDetails = adSetRows.map((adSet: Record<string, unknown>) => ({
+    ...adSet,
+    ads: adsByAdSet.get(String(adSet.id)) ?? [],
+  }))
+
+  return {
+    campaign,
+    adsets: adSetDetails,
+    insights: {
+      campaign: Array.isArray(campaignInsights?.data) ? campaignInsights.data[0] ?? null : null,
+      adsets: Array.isArray(adSetInsights?.data) ? adSetInsights.data : [],
+      ads: Array.isArray(adInsights?.data) ? adInsights.data : [],
+    },
+  }
+}
+
+async function getMetaObjectInsights(
+  objectId: string,
+  accessToken: string,
+  range: AdInsightsRange,
+  level: MetaInsightLevel,
+) {
+  const params = new URLSearchParams({
+    fields: 'spend,impressions,reach,clicks,ctr,cpc,frequency,actions,date_start,date_stop,ad_id,adset_id,ad_name,adset_name',
+    level,
+    access_token: accessToken,
+  })
+  if ('preset' in range) params.set('date_preset', range.preset)
+  else params.set('time_range', JSON.stringify({ since: range.since, until: range.until }))
+  return metaFetch(`${META_GRAPH_URL}/${encodeURIComponent(objectId)}/insights?${params}`)
+}
+
 export async function getPageInsights(
   pageId: string,
   pageToken: string,

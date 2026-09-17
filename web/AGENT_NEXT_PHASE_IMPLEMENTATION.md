@@ -7033,6 +7033,67 @@ webhooks ni la asignación página/canal/marca.
 
 **No se hizo commit, push ni despliegue.** Queda listo para revisión de Codex.
 
+## 198. Detalle de campañas, audiencia y anuncios
+
+### Alcance implementado
+
+La pantalla `/anuncios` ahora mantiene la tabla liviana y agrega un botón
+**Ver más** por campaña. El detalle se carga bajo demanda para la marca activa
+e incluye:
+
+- estado efectivo y configurado, objetivo, tipo de compra, presupuesto y fechas;
+- inversión, alcance, impresiones, clics, CTR, CPC, frecuencia y acciones del
+  periodo seleccionado;
+- conjuntos de anuncios asociados;
+- audiencia por conjunto: edad, género, ubicación, intereses, comportamientos,
+  demografía, exclusiones, dispositivos y ubicaciones de publicación;
+- anuncios y creativos asociados, con texto principal, titular, formato,
+  imagen/miniatura cuando Meta entrega una URL segura, destino y enlace para
+  abrir el anuncio en Meta Ads Manager.
+
+### Aislamiento y seguridad
+
+El nuevo endpoint `GET /api/meta/campaigns/[campaignId]` exige `clientId` y
+autoriza mediante `getCmClientAccess()`. La cuenta publicitaria y el token se
+resuelven en backend con `resolveAdsSource()`; nunca se envían credenciales al
+navegador. Además, la campaña sólo se devuelve cuando el `account_id` entregado
+por Meta coincide con la cuenta publicitaria de la marca activa, normalizando el
+prefijo opcional `act_`. Al cambiar de marca se cierra el detalle anterior para
+evitar conservar datos de otra marca en pantalla.
+
+No se consulta Supabase desde el navegador ni se usan valores fijos de
+organización, marca, cuenta, campaña o token. Las imágenes se muestran sólo si
+pertenecen a dominios CDN permitidos; si no, se conserva el enlace seguro a
+Ads Manager.
+
+### Archivos
+
+| Archivo | Cambio |
+|---|---|
+| `src/app/(dashboard)/anuncios/page.tsx` | Botón **Ver más**, modal accesible, métricas, segmentación, conjuntos y anuncios/creativos |
+| `src/app/api/meta/campaigns/[campaignId]/route.ts` | Endpoint autorizado, respuesta de lista blanca y verificación de cuenta publicitaria |
+| `src/lib/meta.ts` | Lectura backend de campaña, conjuntos, anuncios, creativos e insights por nivel |
+
+No se creó ni ejecutó migración. No se modificaron OAuth, webhooks, conexión de
+canales, recepción de mensajes, facturación ni asignación de marcas.
+
+### Verificación
+
+```text
+npx tsc --noEmit                         OK
+npx eslint [archivos de esta iteración]  OK — 0 errores; advertencias existentes
+npm run build                            OK — Next.js compiló y registró la ruta nueva
+git diff --check                         OK
+npm test                                 1275 pasan, 7 omitidas, 4 fallan previamente
+```
+
+Los cuatro fallos globales no pertenecen a esta iteración: una expectativa
+antigua del sidebar, dos módulos existentes sin `AbortSignal.timeout` y dos
+pruebas de WAHA con un mock incompleto. No se alteraron esos flujos.
+
+**No se hizo commit, push ni despliegue.** El cambio queda local para revisión,
+integración y publicación por Codex.
+
 ---
 
 # Aislamiento de WhatsApp por organización, marca y asesor

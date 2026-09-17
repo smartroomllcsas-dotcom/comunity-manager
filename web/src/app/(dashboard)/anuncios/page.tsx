@@ -8,7 +8,8 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Megaphone, RefreshCw, AlertTriangle, ExternalLink, Plug, CalendarRange } from "lucide-react";
+import Image from "next/image";
+import { Megaphone, RefreshCw, AlertTriangle, ExternalLink, Plug, CalendarRange, Eye, X } from "lucide-react";
 import { useActiveBrand } from "@/hooks/useActiveBrand";
 import { BrandPicker } from "@/components/broadcasts/BrandPicker";
 
@@ -17,6 +18,87 @@ export const dynamic = "force-dynamic";
 type Metric = { name: string; value: string | number };
 type Campaign = { id: string; name: string; status?: string; objective?: string; updated_time?: string };
 type PageMetric = { name: string; values?: Array<{ value: number }> };
+type DetailInsight = {
+  spend?: string | number | null;
+  impressions?: string | number | null;
+  reach?: string | number | null;
+  clicks?: string | number | null;
+  ctr?: string | number | null;
+  cpc?: string | number | null;
+  frequency?: string | number | null;
+  dateStart?: string | null;
+  dateStop?: string | null;
+  actions?: Array<{ type: string | null; value: string | number | null }>;
+} | null;
+type Targeting = {
+  ageMin?: number | null;
+  ageMax?: number | null;
+  genders?: string[];
+  locations?: string[];
+  interests?: string[];
+  behaviors?: string[];
+  demographics?: string[];
+  exclusions?: string[];
+  devicePlatforms?: string[];
+  publisherPlatforms?: string[];
+  facebookPositions?: string[];
+  instagramPositions?: string[];
+  locales?: string[];
+} | null;
+type Creative = {
+  id?: string | null;
+  name?: string | null;
+  format?: string | null;
+  primaryText?: string | null;
+  headline?: string | null;
+  description?: string | null;
+  destinationUrl?: string | null;
+  imageUrl?: string | null;
+  thumbnailUrl?: string | null;
+  videoId?: string | null;
+  previewUrl?: string | null;
+} | null;
+type CampaignDetail = {
+  adAccountId: string;
+  range: string;
+  campaign: {
+    id?: string | null;
+    name?: string | null;
+    status?: string | null;
+    effectiveStatus?: string | null;
+    configuredStatus?: string | null;
+    objective?: string | null;
+    buyingType?: string | null;
+    specialAdCategories?: string[];
+    dailyBudget?: string | number | null;
+    lifetimeBudget?: string | number | null;
+    startTime?: string | null;
+    stopTime?: string | null;
+    createdTime?: string | null;
+    updatedTime?: string | null;
+  };
+  insights: { campaign: DetailInsight };
+  adsets: Array<{
+    id?: string | null;
+    name?: string | null;
+    status?: string | null;
+    effectiveStatus?: string | null;
+    targeting: Targeting;
+    dailyBudget?: string | number | null;
+    lifetimeBudget?: string | number | null;
+    startTime?: string | null;
+    endTime?: string | null;
+    insights: DetailInsight;
+    ads: Array<{
+      id?: string | null;
+      name?: string | null;
+      status?: string | null;
+      effectiveStatus?: string | null;
+      insights: DetailInsight;
+      creative: Creative;
+    }>;
+  }>;
+};
 
 const MONEY = new Set(["Inversión", "Costo por clic"]);
 
@@ -41,6 +123,285 @@ function show(metric: Metric): string {
   }
   if (metric.name === "CTR") return `${n.toFixed(2)} %`;
   return n.toLocaleString("es-CO", { maximumFractionDigits: 0 });
+}
+
+function CampaignDetailDialog({
+  target,
+  detail,
+  loading,
+  error,
+  onClose,
+}: {
+  target: Campaign;
+  detail: CampaignDetail | null;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+}) {
+  const campaignInsight = detail?.insights.campaign;
+  const campaign = detail?.campaign;
+  const totalAds = detail?.adsets.reduce((total, adSet) => total + adSet.ads.length, 0) ?? 0;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/75 p-4 sm:p-8"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="mx-auto max-w-6xl overflow-hidden rounded-2xl border border-[#30363d] bg-[#0d1117] shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="campaign-detail-title"
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-[#30363d] bg-[#161b22] px-5 py-4 sm:px-6">
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-[0.18em] text-violet-300">Detalle de campaña</p>
+            <h2 id="campaign-detail-title" className="mt-1 truncate text-lg font-semibold text-white">
+              {campaign?.name || target.name}
+            </h2>
+            <p className="mt-1 text-xs text-[#8b949e]">
+              Audiencia, segmentación, resultados y anuncios asociados
+              {detail?.range ? ` · periodo ${detail.range}` : ""}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-2 text-[#8b949e] transition hover:bg-white/10 hover:text-white"
+            aria-label="Cerrar detalle de campaña"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </header>
+
+        {loading && (
+          <div className="flex min-h-[280px] items-center justify-center px-6 py-10 text-sm text-[#8b949e]">
+            <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Cargando detalle desde Meta…
+          </div>
+        )}
+
+        {!loading && error && (
+          <div className="m-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {error}
+          </div>
+        )}
+
+        {!loading && !error && detail && campaign && (
+          <div className="max-h-[calc(100vh-9rem)] space-y-6 overflow-y-auto p-5 sm:p-6">
+            <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+              <DetailStat label="Estado" value={displayStatus(campaign.effectiveStatus || campaign.status)} />
+              <DetailStat label="Objetivo" value={campaign.objective || "—"} />
+              <DetailStat label="Inversión" value={showDetailMoney(campaignInsight?.spend)} />
+              <DetailStat label="Alcance" value={showDetailNumber(campaignInsight?.reach)} />
+              <DetailStat label="Impresiones" value={showDetailNumber(campaignInsight?.impressions)} />
+              <DetailStat label="Clics" value={showDetailNumber(campaignInsight?.clicks)} />
+            </section>
+
+            <section className="rounded-xl border border-[#30363d] bg-[#161b22] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-white">Qué se configuró</h3>
+                  <p className="mt-1 text-xs text-[#8b949e]">
+                    Estado efectivo, presupuesto y fechas informadas por Meta.
+                  </p>
+                </div>
+                <span className="rounded-full bg-violet-500/15 px-2.5 py-1 text-[11px] text-violet-200">
+                  {detail.adsets.length} conjuntos · {totalAds} anuncios
+                </span>
+              </div>
+              <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                <InfoPair label="Estado configurado" value={displayStatus(campaign.configuredStatus)} />
+                <InfoPair label="Tipo de compra" value={campaign.buyingType || "—"} />
+                <InfoPair label="Inicio" value={campaign.startTime || "—"} />
+                <InfoPair label="Fin" value={campaign.stopTime || "Sin fecha de fin"} />
+              </div>
+              {campaign.specialAdCategories && campaign.specialAdCategories.length > 0 && (
+                <p className="mt-3 text-xs text-[#8b949e]">
+                  Categorías especiales: <span className="text-slate-200">{campaign.specialAdCategories.join(", ")}</span>
+                </p>
+              )}
+            </section>
+
+            <section>
+              <div className="mb-3 flex items-end justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-white">Audiencia y segmentación</h3>
+                  <p className="mt-1 text-xs text-[#8b949e]">
+                    Meta guarda la segmentación por conjunto de anuncios, no como una sola audiencia global.
+                  </p>
+                </div>
+              </div>
+              {detail.adsets.length === 0 ? (
+                <EmptyDetail text="Meta no devolvió conjuntos de anuncios para esta campaña." />
+              ) : (
+                <div className="space-y-4">
+                  {detail.adsets.map((adSet, index) => (
+                    <article key={adSet.id || `adset-${index}`} className="rounded-xl border border-[#30363d] bg-[#161b22] p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h4 className="text-sm font-semibold text-white">{adSet.name || "Conjunto sin nombre"}</h4>
+                          <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#8b949e]">
+                            {displayStatus(adSet.effectiveStatus || adSet.status)}
+                          </p>
+                        </div>
+                        <div className="text-right text-xs text-[#8b949e]">
+                          <div>{showDetailNumber(adSet.insights?.reach)} alcanzadas</div>
+                          <div>{showDetailNumber(adSet.insights?.impressions)} impresiones</div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        <AudienceField label="Edad" value={adSet.targeting ? `${adSet.targeting.ageMin ?? "—"} a ${adSet.targeting.ageMax ?? "—"} años` : "No disponible"} />
+                        <AudienceField label="Género" value={showList(adSet.targeting?.genders)} />
+                        <AudienceField label="Ubicación" value={showList(adSet.targeting?.locations)} />
+                        <AudienceField label="Intereses" value={showList(adSet.targeting?.interests)} />
+                        <AudienceField label="Comportamientos" value={showList(adSet.targeting?.behaviors)} />
+                        <AudienceField label="Demografía" value={showList(adSet.targeting?.demographics)} />
+                        <AudienceField label="Ubicaciones del anuncio" value={showList([...(adSet.targeting?.publisherPlatforms || []), ...(adSet.targeting?.facebookPositions || []), ...(adSet.targeting?.instagramPositions || [])])} />
+                        <AudienceField label="Dispositivos" value={showList(adSet.targeting?.devicePlatforms)} />
+                        <AudienceField label="Exclusiones" value={showList(adSet.targeting?.exclusions, "Sin exclusiones informadas")} />
+                      </div>
+
+                      <div className="mt-5 border-t border-[#30363d] pt-4">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <h5 className="text-xs font-semibold uppercase tracking-[0.14em] text-[#8b949e]">Anuncios de este conjunto</h5>
+                          <span className="text-xs text-[#6e7681]">{adSet.ads.length}</span>
+                        </div>
+                        {adSet.ads.length === 0 ? (
+                          <p className="text-xs text-[#8b949e]">No hay anuncios devueltos por Meta.</p>
+                        ) : (
+                          <div className="grid gap-3 md:grid-cols-2">
+                            {adSet.ads.map((ad, adIndex) => (
+                              <AdPreviewCard key={ad.id || `ad-${adIndex}`} ad={ad} adAccountId={detail.adAccountId} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DetailStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-[#30363d] bg-[#161b22] p-3">
+      <p className="text-[10px] uppercase tracking-[0.14em] text-[#6e7681]">{label}</p>
+      <p className="mt-1 truncate text-sm font-semibold text-white" title={value}>{value}</p>
+    </div>
+  );
+}
+
+function InfoPair({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-[0.14em] text-[#6e7681]">{label}</p>
+      <p className="mt-1 break-words text-xs text-slate-200">{value}</p>
+    </div>
+  );
+}
+
+function AudienceField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-[#30363d] bg-[#0d1117] p-3">
+      <p className="text-[10px] uppercase tracking-[0.12em] text-[#6e7681]">{label}</p>
+      <p className="mt-1 break-words text-xs leading-relaxed text-slate-200">{value}</p>
+    </div>
+  );
+}
+
+function EmptyDetail({ text }: { text: string }) {
+  return <div className="rounded-xl border border-dashed border-[#30363d] p-5 text-center text-xs text-[#8b949e]">{text}</div>;
+}
+
+function AdPreviewCard({
+  ad,
+  adAccountId,
+}: {
+  ad: CampaignDetail["adsets"][number]["ads"][number];
+  adAccountId: string;
+}) {
+  const creative = ad.creative;
+  const imageCandidate = creative?.imageUrl || creative?.thumbnailUrl;
+  const imageUrl = isMetaImageUrl(imageCandidate) ? imageCandidate : null;
+  const normalizedAdAccountId = adAccountId.replace(/^act_/, "");
+  const adManagerUrl = ad.id
+    ? `https://www.facebook.com/adsmanager/manage/ads?act=${encodeURIComponent(normalizedAdAccountId)}&selected_ad_ids=${encodeURIComponent(ad.id)}`
+    : "https://adsmanager.facebook.com/adsmanager";
+  const previewUrl = creative?.previewUrl || adManagerUrl;
+
+  return (
+    <article className="overflow-hidden rounded-xl border border-[#30363d] bg-[#0d1117]">
+      {imageUrl && (
+        <div className="relative aspect-[16/8] border-b border-[#30363d] bg-black">
+          <Image src={imageUrl} alt={creative?.name || ad.name || "Creativo del anuncio"} fill sizes="(max-width: 768px) 100vw, 50vw" className="object-contain" unoptimized />
+        </div>
+      )}
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h6 className="truncate text-sm font-medium text-white">{ad.name || "Anuncio sin nombre"}</h6>
+            <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[#8b949e]">
+              {creative?.format || "CREATIVO"} · {displayStatus(ad.effectiveStatus || ad.status)}
+            </p>
+          </div>
+          <span className="shrink-0 text-xs text-[#8b949e]">{showDetailNumber(ad.insights?.impressions)} imp.</span>
+        </div>
+        {creative?.primaryText && <p className="mt-3 line-clamp-3 text-xs leading-relaxed text-slate-300">{creative.primaryText}</p>}
+        {creative?.headline && <p className="mt-2 text-xs font-medium text-white">{creative.headline}</p>}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <a href={previewUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-md bg-violet-500/20 px-3 py-1.5 text-xs font-medium text-violet-100 transition hover:bg-violet-500/30">
+            <ExternalLink className="h-3.5 w-3.5" /> Ver anuncio en Meta
+          </a>
+          {creative?.destinationUrl && (
+            <a href={creative.destinationUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-md border border-[#30363d] px-3 py-1.5 text-xs text-[#8b949e] transition hover:text-white">
+              Abrir destino
+            </a>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function showDetailNumber(value: string | number | null | undefined): string {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toLocaleString("es-CO", { maximumFractionDigits: 2 }) : "—";
+}
+
+function showDetailMoney(value: string | number | null | undefined): string {
+  const number = Number(value);
+  return Number.isFinite(number)
+    ? number.toLocaleString("es-CO", { style: "currency", currency: "USD", maximumFractionDigits: 2 })
+    : "—";
+}
+
+function showList(values: string[] | undefined, empty = "No definido por Meta"): string {
+  return values && values.length > 0 ? values.join(", ") : empty;
+}
+
+function displayStatus(status: string | null | undefined): string {
+  if (!status) return "Sin estado";
+  return STATUS_LABEL[status] || status.replaceAll("_", " ").toLowerCase();
+}
+
+function isMetaImageUrl(value: string | null | undefined): value is string {
+  if (!value || !value.startsWith("https://")) return false;
+  try {
+    const hostname = new URL(value).hostname;
+    return hostname.endsWith(".fbcdn.net") || hostname.endsWith(".cdninstagram.com") || hostname.endsWith(".respond.io");
+  } catch {
+    return false;
+  }
 }
 
 const HINT: Record<string, string> = {
@@ -86,6 +447,10 @@ export default function AnunciosPage() {
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
   const custom = Boolean(desde && hasta && desde <= hasta);
+  const [detailTarget, setDetailTarget] = useState<Campaign | null>(null);
+  const [detail, setDetail] = useState<CampaignDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!activeClientId) return;
@@ -114,6 +479,61 @@ export default function AnunciosPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!detailTarget) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setDetailTarget(null);
+        setDetail(null);
+        setDetailError(null);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [detailTarget]);
+
+  useEffect(() => {
+    // Cambiar de marca no debe dejar abierto un detalle perteneciente a la
+    // marca anterior, aunque ambas marcas estén dentro de la misma agencia.
+    setDetailTarget(null);
+    setDetail(null);
+    setDetailError(null);
+  }, [activeClientId]);
+
+  const openCampaignDetail = useCallback(async (campaign: Campaign) => {
+    if (!activeClientId) return;
+    setDetailTarget(campaign);
+    setDetail(null);
+    setDetailError(null);
+    setDetailLoading(true);
+    try {
+      const params = new URLSearchParams({ clientId: activeClientId });
+      if (custom) {
+        params.set("since", desde);
+        params.set("until", hasta);
+      } else {
+        params.set("range", periodo);
+      }
+      const response = await fetch(
+        `/api/meta/campaigns/${encodeURIComponent(campaign.id)}?${params.toString()}`,
+        { cache: "no-store" },
+      );
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || "No se pudo cargar el detalle de la campaña");
+      setDetail(data as CampaignDetail);
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : "No se pudo cargar el detalle de la campaña");
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [activeClientId, custom, desde, hasta, periodo]);
+
+  const closeCampaignDetail = () => {
+    setDetailTarget(null);
+    setDetail(null);
+    setDetailError(null);
+  };
 
   return (
     <div className="min-h-full bg-[#0d1117]">
@@ -261,6 +681,7 @@ export default function AnunciosPage() {
                     <th className="px-4 py-2.5 font-medium">Campaña</th>
                     <th className="px-4 py-2.5 font-medium">Estado</th>
                     <th className="hidden px-4 py-2.5 font-medium sm:table-cell">Objetivo</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Detalle</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -278,6 +699,15 @@ export default function AnunciosPage() {
                       </td>
                       <td className="hidden px-4 py-3 text-[#8b949e] sm:table-cell">
                         {(c.objective || "").replace(/^OUTCOME_/, "").toLowerCase() || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => void openCampaignDetail(c)}
+                          className="inline-flex items-center gap-1.5 rounded-md border border-violet-500/40 bg-violet-500/15 px-3 py-1.5 text-xs font-medium text-violet-100 transition hover:bg-violet-500/25"
+                        >
+                          <Eye className="h-3.5 w-3.5" /> Ver más
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -319,6 +749,16 @@ export default function AnunciosPage() {
           </a>
         </p>
       </div>
+
+      {detailTarget && (
+        <CampaignDetailDialog
+          target={detailTarget}
+          detail={detail}
+          loading={detailLoading}
+          error={detailError}
+          onClose={closeCampaignDetail}
+        />
+      )}
     </div>
   );
 }
