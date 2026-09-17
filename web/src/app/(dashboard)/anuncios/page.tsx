@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Megaphone, RefreshCw, AlertTriangle, ExternalLink, Plug } from "lucide-react";
+import { Megaphone, RefreshCw, AlertTriangle, ExternalLink, Plug, CalendarRange } from "lucide-react";
 import { useActiveBrand } from "@/hooks/useActiveBrand";
 import { BrandPicker } from "@/components/broadcasts/BrandPicker";
 
@@ -19,6 +19,18 @@ type Campaign = { id: string; name: string; status?: string; objective?: string;
 type PageMetric = { name: string; values?: Array<{ value: number }> };
 
 const MONEY = new Set(["Inversión", "Costo por clic"]);
+
+const PERIODOS = [
+  { id: "today", label: "Hoy" },
+  { id: "yesterday", label: "Ayer" },
+  { id: "last_7d", label: "Últimos 7 días" },
+  { id: "last_14d", label: "Últimos 14 días" },
+  { id: "last_30d", label: "Últimos 30 días" },
+  { id: "last_90d", label: "Últimos 90 días" },
+  { id: "this_month", label: "Este mes" },
+  { id: "last_month", label: "Mes pasado" },
+  { id: "maximum", label: "Todo el historial" },
+] as const;
 
 /** Formato colombiano: los miles con punto y la plata con su símbolo. */
 function show(metric: Metric): string {
@@ -32,11 +44,12 @@ function show(metric: Metric): string {
 }
 
 const HINT: Record<string, string> = {
-  "Inversión": "Lo gastado en los últimos 7 días",
+  "Inversión": "Lo gastado en el periodo",
   "Impresiones": "Veces que se mostró",
   "Clics": "Personas que hicieron clic",
   "CTR": "De cada 100 que lo vieron, cuántas hicieron clic",
   "Costo por clic": "Lo que costó cada clic",
+  "Personas alcanzadas": "Personas distintas que lo vieron",
 };
 
 const PAGE_LABEL: Record<string, string> = {
@@ -68,13 +81,21 @@ export default function AnunciosPage() {
   const [reason, setReason] = useState<string | null>(null);
   const [needsConnect, setNeedsConnect] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [periodo, setPeriodo] = useState<string>("last_7d");
+  // Fechas propias: sólo se aplican cuando las dos están puestas.
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const custom = Boolean(desde && hasta && desde <= hasta);
 
   const load = useCallback(async () => {
     if (!activeClientId) return;
     setLoading(true);
     try {
+      const rango = custom
+        ? `since=${desde}&until=${hasta}`
+        : `range=${periodo}`;
       const [insightRes, campaignRes] = await Promise.all([
-        fetch(`/api/meta/insights?clientId=${activeClientId}`, { cache: "no-store" }),
+        fetch(`/api/meta/insights?clientId=${activeClientId}&${rango}`, { cache: "no-store" }),
         fetch(`/api/meta/campaigns?clientId=${activeClientId}`, { cache: "no-store" }),
       ]);
       const insight = await insightRes.json().catch(() => null);
@@ -88,7 +109,7 @@ export default function AnunciosPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeClientId]);
+  }, [activeClientId, periodo, desde, hasta, custom]);
 
   useEffect(() => {
     void load();
@@ -117,6 +138,62 @@ export default function AnunciosPage() {
       </header>
 
       <div className="space-y-6 p-6">
+        {/* Periodo: preajustes para el día a día, fechas propias para un informe */}
+        <div className="flex flex-wrap items-center gap-2">
+          <CalendarRange className="h-4 w-4 text-[#6e7681]" />
+          <div className="flex flex-wrap gap-1">
+            {PERIODOS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => {
+                  setPeriodo(p.id);
+                  setDesde("");
+                  setHasta("");
+                }}
+                className={`rounded-full px-3 py-1 text-xs transition ${
+                  !custom && periodo === p.id
+                    ? "bg-violet-500/20 text-violet-200"
+                    : "text-[#8b949e] hover:text-white"
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="ml-auto flex flex-wrap items-center gap-2 text-xs text-[#6e7681]">
+            <span>o entre</span>
+            <input
+              type="date"
+              value={desde}
+              max={hasta || undefined}
+              onChange={(e) => setDesde(e.target.value)}
+              className="rounded-md border border-[#2d333b] bg-[#0d1117] px-2 py-1 text-xs text-white"
+            />
+            <span>y</span>
+            <input
+              type="date"
+              value={hasta}
+              min={desde || undefined}
+              onChange={(e) => setHasta(e.target.value)}
+              className="rounded-md border border-[#2d333b] bg-[#0d1117] px-2 py-1 text-xs text-white"
+            />
+            {(desde || hasta) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDesde("");
+                  setHasta("");
+                }}
+                className="text-[#8b949e] underline-offset-2 hover:text-white hover:underline"
+              >
+                Quitar
+              </button>
+            )}
+          </div>
+        </div>
+
         {reason && (
           <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-100">
             <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -134,7 +211,11 @@ export default function AnunciosPage() {
 
         {/* Últimos 7 días */}
         <section>
-          <h2 className="mb-3 text-xs uppercase tracking-[0.14em] text-[#6e7681]">Últimos 7 días</h2>
+          <h2 className="mb-3 text-xs uppercase tracking-[0.14em] text-[#6e7681]">
+            {custom
+              ? `Del ${desde} al ${hasta}`
+              : PERIODOS.find((p) => p.id === periodo)?.label || "Periodo"}
+          </h2>
           {metrics.length === 0 ? (
             <div className="rounded-xl border border-dashed border-[#2d333b] p-10 text-center">
               <Megaphone className="mx-auto h-7 w-7 text-[#2d333b]" />
@@ -142,11 +223,11 @@ export default function AnunciosPage() {
                 {loading ? "Cargando…" : "Sin datos de inversión"}
               </p>
               {!loading && !reason && (
-                <p className="text-xs text-[#8b949e]">Esta cuenta no registró actividad en la última semana.</p>
+                <p className="text-xs text-[#8b949e]">Esta cuenta no registró actividad en el periodo elegido.</p>
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
               {metrics.map((m) => (
                 <div key={m.name} className="rounded-xl border border-[#2d333b] bg-[#161b22] p-4">
                   <p className="text-2xl font-semibold tabular-nums text-white">{show(m)}</p>

@@ -6,13 +6,32 @@
  * que puede hacer un informe. Ahora, si no hay datos, se dice por qué.
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { getAdInsights, getPageInsights } from '@/lib/meta'
+import { getAdInsights, getPageInsights, AD_DATE_PRESETS, type AdInsightsRange, type AdDatePreset } from '@/lib/meta'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveToken } from '@/lib/auth/token-crypto'
 import { getCmClientAccess } from '@/lib/cm-client-access'
 import { resolveAdsSource } from '@/lib/meta/ads-source'
 
 type Metric = { name: string; value: string | number }
+
+const YMD = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * Periodo pedido por la pantalla. Se valida aquí porque va directo a Meta:
+ * `?range=last_30d`, o `?since=2026-08-01&until=2026-08-31`.
+ */
+function readRange(params: URLSearchParams): { range: AdInsightsRange; label: string } {
+  const since = params.get('since')
+  const until = params.get('until')
+  if (since && until && YMD.test(since) && YMD.test(until) && since <= until) {
+    return { range: { since, until }, label: `${since} a ${until}` }
+  }
+  const preset = params.get('range') as AdDatePreset | null
+  if (preset && (AD_DATE_PRESETS as readonly string[]).includes(preset)) {
+    return { range: { preset }, label: preset }
+  }
+  return { range: { preset: 'last_7d' }, label: 'last_7d' }
+}
 
 export async function GET(request: NextRequest) {
   const clientId = request.nextUrl.searchParams.get('clientId')
@@ -24,8 +43,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'No autorizado para este cliente' }, { status: 403 })
   }
 
+  const { range, label } = readRange(request.nextUrl.searchParams)
   const insights: Metric[] = []
-  const response: Record<string, unknown> = {}
+  const response: Record<string, unknown> = { range: label }
   const notes: string[] = []
 
   // ── Anuncios ───────────────────────────────────────────────────────────────
@@ -35,7 +55,7 @@ export async function GET(request: NextRequest) {
     response.needsConnect = source.needsConnect
   } else {
     try {
-      const adsInsights = await getAdInsights(source.adAccountId, source.token)
+      const adsInsights = await getAdInsights(source.adAccountId, source.token, range)
       const row = adsInsights.data?.[0]
       if (row) {
         if (row.spend != null) insights.push({ name: 'Inversión', value: Number(row.spend) || 0 })
@@ -43,8 +63,9 @@ export async function GET(request: NextRequest) {
         if (row.clicks != null) insights.push({ name: 'Clics', value: Number(row.clicks) || 0 })
         if (row.ctr != null) insights.push({ name: 'CTR', value: Number(row.ctr) || 0 })
         if (row.cpc != null) insights.push({ name: 'Costo por clic', value: Number(row.cpc) || 0 })
+        if (row.reach != null) insights.push({ name: 'Personas alcanzadas', value: Number(row.reach) || 0 })
       } else {
-        notes.push('La cuenta publicitaria no registró actividad en los últimos 7 días.')
+        notes.push('La cuenta publicitaria no registró actividad en el periodo elegido.')
       }
       response.ads = adsInsights.data ?? []
       response.adAccountId = source.adAccountId
@@ -69,7 +90,7 @@ export async function GET(request: NextRequest) {
         )
       : null
     if (row?.page_id && pageToken) {
-      response.page = (await getPageInsights(row.page_id as string, pageToken)).data ?? []
+      response.page = (await getPageInsights(row.page_id as string, pageToken, range)).data ?? []
     }
   } catch {
     response.page = []

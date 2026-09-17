@@ -282,16 +282,102 @@ export async function getAdCampaigns(adAccountId: string, accessToken: string) {
   )
 }
 
-export async function getAdInsights(adAccountId: string, accessToken: string) {
-  return metaFetch(
-    `${META_GRAPH_URL}/act_${adAccountId}/insights?date_preset=last_7d&fields=spend,impressions,clicks,ctr,cpc&access_token=${accessToken}`
-  )
+/**
+ * Periodos que acepta Meta tal cual. `maximum` es todo el historial de la
+ * cuenta; los demás se explican solos.
+ */
+export const AD_DATE_PRESETS = [
+  'today',
+  'yesterday',
+  'last_7d',
+  'last_14d',
+  'last_30d',
+  'last_90d',
+  'this_month',
+  'last_month',
+  'maximum',
+] as const
+export type AdDatePreset = (typeof AD_DATE_PRESETS)[number]
+
+export type AdInsightsRange =
+  | { preset: AdDatePreset }
+  /** Fechas propias, en YYYY-MM-DD. Meta las trata como inclusivas. */
+  | { since: string; until: string }
+
+export async function getAdInsights(
+  adAccountId: string,
+  accessToken: string,
+  range: AdInsightsRange = { preset: 'last_7d' },
+) {
+  const params = new URLSearchParams({
+    fields: 'spend,impressions,clicks,ctr,cpc,reach,frequency',
+    access_token: accessToken,
+  })
+  if ('preset' in range) params.set('date_preset', range.preset)
+  else params.set('time_range', JSON.stringify({ since: range.since, until: range.until }))
+
+  return metaFetch(`${META_GRAPH_URL}/act_${adAccountId}/insights?${params}`)
 }
 
-export async function getPageInsights(pageId: string, pageToken: string) {
-  return metaFetch(
-    `${META_GRAPH_URL}/${pageId}/insights?metric=page_impressions,page_engaged_users,page_post_engagements&access_token=${pageToken}`
-  )
+export async function getPageInsights(
+  pageId: string,
+  pageToken: string,
+  range: AdInsightsRange = { preset: 'last_7d' },
+) {
+  const params = new URLSearchParams({
+    metric: 'page_impressions,page_engaged_users,page_post_engagements',
+    access_token: pageToken,
+  })
+  // La API de la página no entiende date_preset: siempre quiere fechas.
+  const { since, until } = 'preset' in range ? presetToDates(range.preset) : range
+  params.set('since', since)
+  params.set('until', until)
+  params.set('period', 'day')
+
+  return metaFetch(`${META_GRAPH_URL}/${pageId}/insights?${params}`)
+}
+
+function ymd(date: Date): string {
+  return date.toISOString().slice(0, 10)
+}
+
+/** Traduce un periodo de Meta a fechas, para las APIs que no aceptan presets. */
+export function presetToDates(preset: AdDatePreset): { since: string; until: string } {
+  const now = new Date()
+  const start = new Date(now)
+  switch (preset) {
+    case 'today':
+      break
+    case 'yesterday':
+      start.setDate(now.getDate() - 1)
+      now.setDate(now.getDate() - 1)
+      break
+    case 'last_14d':
+      start.setDate(now.getDate() - 14)
+      break
+    case 'last_30d':
+      start.setDate(now.getDate() - 30)
+      break
+    case 'last_90d':
+      start.setDate(now.getDate() - 90)
+      break
+    case 'this_month':
+      start.setDate(1)
+      break
+    case 'last_month': {
+      start.setMonth(now.getMonth() - 1, 1)
+      const end = new Date(now.getFullYear(), now.getMonth(), 0)
+      return { since: ymd(start), until: ymd(end) }
+    }
+    case 'maximum':
+      // La API de páginas no da más de dos años hacia atrás.
+      start.setFullYear(now.getFullYear() - 2)
+      break
+    case 'last_7d':
+    default:
+      start.setDate(now.getDate() - 7)
+  }
+  return { since: ymd(start), until: ymd(now) }
 }
 
 // -----------------------------------------------------------------------------
