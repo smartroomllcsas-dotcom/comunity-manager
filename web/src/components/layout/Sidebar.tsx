@@ -33,6 +33,7 @@ import {
   Plug,
   Activity,
   TrendingUp,
+  Megaphone,
   Star,
   DollarSign,
   Building2,
@@ -183,6 +184,7 @@ const UNIFIED_SECTIONS: NavSection[] = [
   {
     label: "Analítica",
     items: [
+      { href: "/anuncios", label: "Anuncios", icon: Megaphone },
       { href: "/analytics", label: "Analytics", icon: TrendingUp },
       { href: "/reports-cm", label: "Reportes CM", icon: BarChart3 },
     ],
