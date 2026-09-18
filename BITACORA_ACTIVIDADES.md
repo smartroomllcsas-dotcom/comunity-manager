@@ -12,6 +12,7 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 ## Aplicado
 
 ### 18 sep 2026
+- **Los leads y el costo por lead, también dentro de cada campaña**: al abrir «Ver más» hay tres cifras de la campaña (leads, costo por lead, calificados) y **cada tarjeta de anuncio muestra su gasto, sus leads y su costo por lead**, junto al creativo. Ahí es donde se decide qué anuncio apagar, mirando el creativo y su resultado a la vez. La tabla general se queda: sirve para lo otro, comparar entre campañas y mover presupuesto.
 - **«Qué anuncio conviene» en Anuncios**: el gasto de Meta cruzado con los leads que trajo cada anuncio. Tabla por anuncio con gasto, leads, **costo por lead**, calificados, **costo por lead calificado**, CTR y CPC, ordenada del lead más barato al más caro y respetando el filtro de periodo. Endpoint `GET /api/meta/performance`.
 - El cruce va **por nombre**, no por id: los leads de formulario guardan `lead_campaign` y `lead_ad` (nombres), no identificadores. Verificado contra la cuenta real que Meta devuelve los mismos ("ad1", "ad2", "Funnel form a meet - Software V1"). Los leads que no casan con ningún anuncio con gasto se cuentan aparte y se dicen, para que el número cuadre.
 - **Aviso honesto sobre la calidad del dato**: hoy 53 de 70 leads no tienen etapa, así que el costo por lead calificado se queda corto. La pantalla lo advierte en vez de dar un número que engaña.

@@ -198,16 +198,29 @@ function CampaignDetailDialog({
   loading,
   error,
   onClose,
+  perf,
 }: {
   target: Campaign;
   detail: CampaignDetail | null;
   loading: boolean;
   error: string | null;
   onClose: () => void;
+  /** Leads y costo por lead del periodo, para cruzarlos con cada anuncio. */
+  perf: Performance | null;
 }) {
   const campaignInsight = detail?.insights.campaign;
   const campaign = detail?.campaign;
   const totalAds = detail?.adsets.reduce((total, adSet) => total + adSet.ads.length, 0) ?? 0;
+
+  // Los leads se cruzan por nombre de anuncio dentro de ESTA campaña: es como
+  // vienen guardados (lead_campaign + lead_ad), no por id.
+  const nombreCampana = campaign?.name || target.name;
+  const perfPorAnuncio = new Map<string, AdPerf>();
+  for (const fila of perf?.ads || []) {
+    if (fila.campaignName === nombreCampana) perfPorAnuncio.set(fila.adName, fila);
+  }
+  const leadsCampana = [...perfPorAnuncio.values()].reduce((n, a) => n + a.leads, 0);
+  const gastoCampana = [...perfPorAnuncio.values()].reduce((n, a) => n + a.spend, 0);
 
   return (
     <div
@@ -266,6 +279,28 @@ function CampaignDetailDialog({
               <DetailStat label="Impresiones" value={showDetailNumber(campaignInsight?.impressions)} />
               <DetailStat label="Clics" value={showDetailNumber(campaignInsight?.clicks)} />
             </section>
+
+            {/* Lo que de verdad decide: qué trajo esta campaña y a qué precio */}
+            {perfPorAnuncio.size > 0 && (
+              <section className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-xl border border-[#30363d] bg-[#161b22] p-4">
+                  <p className="text-2xl font-semibold tabular-nums text-white">{leadsCampana}</p>
+                  <p className="mt-1 text-xs text-[#8b949e]">Leads de esta campaña</p>
+                </div>
+                <div className="rounded-xl border border-[#30363d] bg-[#161b22] p-4">
+                  <p className="text-2xl font-semibold tabular-nums text-white">
+                    {leadsCampana > 0 ? usd(gastoCampana / leadsCampana) : "—"}
+                  </p>
+                  <p className="mt-1 text-xs text-[#8b949e]">Costo por lead</p>
+                </div>
+                <div className="rounded-xl border border-[#30363d] bg-[#161b22] p-4">
+                  <p className="text-2xl font-semibold tabular-nums text-white">
+                    {[...perfPorAnuncio.values()].reduce((n, a) => n + a.calificados, 0)}
+                  </p>
+                  <p className="mt-1 text-xs text-[#8b949e]">Calificados</p>
+                </div>
+              </section>
+            )}
 
             <section className="rounded-xl border border-[#30363d] bg-[#161b22] p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -342,7 +377,12 @@ function CampaignDetailDialog({
                         ) : (
                           <div className="grid gap-3 md:grid-cols-2">
                             {adSet.ads.map((ad, adIndex) => (
-                              <AdPreviewCard key={ad.id || `ad-${adIndex}`} ad={ad} adAccountId={detail.adAccountId} />
+                              <AdPreviewCard
+                                key={ad.id || `ad-${adIndex}`}
+                                ad={ad}
+                                adAccountId={detail.adAccountId}
+                                perf={ad.name ? perfPorAnuncio.get(ad.name) ?? null : null}
+                              />
                             ))}
                           </div>
                         )}
@@ -393,9 +433,11 @@ function EmptyDetail({ text }: { text: string }) {
 function AdPreviewCard({
   ad,
   adAccountId,
+  perf,
 }: {
   ad: CampaignDetail["adsets"][number]["ads"][number];
   adAccountId: string;
+  perf?: AdPerf | null;
 }) {
   const creative = ad.creative;
   const imageCandidate = creative?.imageUrl || creative?.thumbnailUrl;
@@ -423,6 +465,30 @@ function AdPreviewCard({
           </div>
           <span className="shrink-0 text-xs text-[#8b949e]">{showDetailNumber(ad.insights?.impressions)} imp.</span>
         </div>
+        {/* Lo que este anuncio trajo, no sólo lo que se ve. Un creativo bonito
+            con cero leads es una decisión que tomar, no una foto que mirar. */}
+        {perf && (
+          <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg border border-[#30363d] bg-[#161b22] p-2.5">
+            <div>
+              <p className="text-sm font-semibold tabular-nums text-white">{usd(perf.spend)}</p>
+              <p className="text-[10px] text-[#6e7681]">Gasto</p>
+            </div>
+            <div>
+              <p className="text-sm font-semibold tabular-nums text-white">{perf.leads}</p>
+              <p className="text-[10px] text-[#6e7681]">Leads</p>
+            </div>
+            <div>
+              <p
+                className={`text-sm font-semibold tabular-nums ${
+                  perf.costoPorLead === null ? "text-[#6e7681]" : "text-green-300"
+                }`}
+              >
+                {perf.costoPorLead === null ? "—" : usd(perf.costoPorLead)}
+              </p>
+              <p className="text-[10px] text-[#6e7681]">Por lead</p>
+            </div>
+          </div>
+        )}
         {creative?.primaryText && <p className="mt-3 line-clamp-3 text-xs leading-relaxed text-slate-300">{creative.primaryText}</p>}
         {creative?.headline && <p className="mt-2 text-xs font-medium text-white">{creative.headline}</p>}
         <div className="mt-4 flex flex-wrap gap-2">
@@ -909,6 +975,7 @@ export default function AnunciosPage() {
           loading={detailLoading}
           error={detailError}
           onClose={closeCampaignDetail}
+          perf={perf}
         />
       )}
     </div>
