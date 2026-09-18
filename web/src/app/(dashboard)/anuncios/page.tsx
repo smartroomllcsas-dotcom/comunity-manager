@@ -102,6 +102,39 @@ type CampaignDetail = {
 
 const MONEY = new Set(["Inversión", "Costo por clic"]);
 
+/** Los objetivos llegan como OUTCOME_ENGAGEMENT: ilegibles y además se cortan. */
+const OBJETIVO: Record<string, string> = {
+  OUTCOME_ENGAGEMENT: "Interacción",
+  OUTCOME_LEADS: "Clientes potenciales",
+  OUTCOME_SALES: "Ventas",
+  OUTCOME_TRAFFIC: "Tráfico",
+  OUTCOME_AWARENESS: "Reconocimiento",
+  OUTCOME_APP_PROMOTION: "Promoción de la app",
+  ENGAGEMENT: "Interacción",
+  LEAD_GENERATION: "Clientes potenciales",
+  CONVERSIONS: "Conversiones",
+  LINK_CLICKS: "Clics en el enlace",
+  MESSAGES: "Mensajes",
+};
+
+function objetivo(raw?: string | null): string {
+  if (!raw) return "—";
+  return OBJETIVO[raw] || raw.replace(/^OUTCOME_/, "").replace(/_/g, " ").toLowerCase();
+}
+
+const COMPRA: Record<string, string> = {
+  AUCTION: "Subasta",
+  RESERVED: "Reserva",
+};
+
+/** "2026-09-08T16:24:25-0500" no se lee. Esto sí. */
+function fecha(raw?: string | null): string | null {
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  return d.toLocaleDateString("es-CO", { day: "numeric", month: "long", year: "numeric" });
+}
+
 const PERIODOS = [
   { id: "today", label: "Hoy" },
   { id: "yesterday", label: "Ayer" },
@@ -193,7 +226,7 @@ function CampaignDetailDialog({
           <div className="max-h-[calc(100vh-9rem)] space-y-6 overflow-y-auto p-5 sm:p-6">
             <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
               <DetailStat label="Estado" value={displayStatus(campaign.effectiveStatus || campaign.status)} />
-              <DetailStat label="Objetivo" value={campaign.objective || "—"} />
+              <DetailStat label="Objetivo" value={objetivo(campaign.objective)} />
               <DetailStat label="Inversión" value={showDetailMoney(campaignInsight?.spend)} />
               <DetailStat label="Alcance" value={showDetailNumber(campaignInsight?.reach)} />
               <DetailStat label="Impresiones" value={showDetailNumber(campaignInsight?.impressions)} />
@@ -214,9 +247,9 @@ function CampaignDetailDialog({
               </div>
               <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
                 <InfoPair label="Estado configurado" value={displayStatus(campaign.configuredStatus)} />
-                <InfoPair label="Tipo de compra" value={campaign.buyingType || "—"} />
-                <InfoPair label="Inicio" value={campaign.startTime || "—"} />
-                <InfoPair label="Fin" value={campaign.stopTime || "Sin fecha de fin"} />
+                <InfoPair label="Tipo de compra" value={COMPRA[campaign.buyingType || ""] || campaign.buyingType || "—"} />
+                <InfoPair label="Inicio" value={fecha(campaign.startTime) || "—"} />
+                <InfoPair label="Fin" value={fecha(campaign.stopTime) || "Sin fecha de fin"} />
               </div>
               {campaign.specialAdCategories && campaign.specialAdCategories.length > 0 && (
                 <p className="mt-3 text-xs text-[#8b949e]">
@@ -698,7 +731,7 @@ export default function AnunciosPage() {
                         </span>
                       </td>
                       <td className="hidden px-4 py-3 text-[#8b949e] sm:table-cell">
-                        {(c.objective || "").replace(/^OUTCOME_/, "").toLowerCase() || "—"}
+                        {objetivo(c.objective)}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <button
