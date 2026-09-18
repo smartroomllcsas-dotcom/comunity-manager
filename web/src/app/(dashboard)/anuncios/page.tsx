@@ -135,6 +135,40 @@ function fecha(raw?: string | null): string | null {
   return d.toLocaleDateString("es-CO", { day: "numeric", month: "long", year: "numeric" });
 }
 
+type AdPerf = {
+  adId: string | null;
+  adName: string;
+  campaignName: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  cpc: number;
+  leads: number;
+  calificados: number;
+  perdidos: number;
+  sinClasificar: number;
+  costoPorLead: number | null;
+  costoPorCalificado: number | null;
+};
+
+type Performance = {
+  ads: AdPerf[];
+  totals: {
+    spend: number;
+    leads: number;
+    calificados: number;
+    sinClasificar: number;
+    costoPorLead: number | null;
+    costoPorCalificado: number | null;
+  };
+  leadsSinAnuncio: number;
+  avisoSinClasificar: string | null;
+};
+
+const usd = (n: number | null) =>
+  n === null ? "—" : n.toLocaleString("es-CO", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+
 const PERIODOS = [
   { id: "today", label: "Hoy" },
   { id: "yesterday", label: "Ayer" },
@@ -476,6 +510,7 @@ export default function AnunciosPage() {
   const [needsConnect, setNeedsConnect] = useState(false);
   const [loading, setLoading] = useState(true);
   const [periodo, setPeriodo] = useState<string>("last_7d");
+  const [perf, setPerf] = useState<Performance | null>(null);
   // Fechas propias: sólo se aplican cuando las dos están puestas.
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
@@ -492,12 +527,15 @@ export default function AnunciosPage() {
       const rango = custom
         ? `since=${desde}&until=${hasta}`
         : `range=${periodo}`;
-      const [insightRes, campaignRes] = await Promise.all([
+      const [insightRes, campaignRes, perfRes] = await Promise.all([
         fetch(`/api/meta/insights?clientId=${activeClientId}&${rango}`, { cache: "no-store" }),
         fetch(`/api/meta/campaigns?clientId=${activeClientId}`, { cache: "no-store" }),
+        fetch(`/api/meta/performance?clientId=${activeClientId}&${rango}`, { cache: "no-store" }),
       ]);
       const insight = await insightRes.json().catch(() => null);
       const campaign = await campaignRes.json().catch(() => null);
+      const rendimiento = await perfRes.json().catch(() => null);
+      setPerf(rendimiento && Array.isArray(rendimiento.ads) ? rendimiento : null);
       setMetrics(Array.isArray(insight?.insights) ? insight.insights : []);
       setPageMetrics(Array.isArray(insight?.page) ? insight.page : []);
       setCampaigns(Array.isArray(campaign?.campaigns) ? campaign.campaigns : []);
@@ -691,6 +729,87 @@ export default function AnunciosPage() {
             </div>
           )}
         </section>
+
+        {/* Qué anuncio conviene: gasto cruzado con los leads que trajo */}
+        {perf && perf.ads.length > 0 && (
+          <section>
+            <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="text-xs uppercase tracking-[0.14em] text-[#6e7681]">Qué anuncio conviene</h2>
+              <p className="text-xs text-[#6e7681]">
+                {usd(perf.totals.costoPorLead)} por lead
+                {perf.totals.calificados > 0 && <> · {usd(perf.totals.costoPorCalificado)} por lead calificado</>}
+              </p>
+            </div>
+
+            {perf.avisoSinClasificar && (
+              <p className="mb-3 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-100">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                {perf.avisoSinClasificar}
+              </p>
+            )}
+
+            <div className="overflow-x-auto rounded-xl border border-[#2d333b] bg-[#161b22]">
+              <table className="w-full min-w-[820px] text-sm">
+                <thead>
+                  <tr className="border-b border-[#2d333b] text-left text-[11px] uppercase tracking-wider text-[#6e7681]">
+                    <th className="px-4 py-2.5 font-medium">Anuncio</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Gasto</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Leads</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Por lead</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Calificados</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Por calificado</th>
+                    <th className="px-4 py-2.5 text-right font-medium">CTR</th>
+                    <th className="px-4 py-2.5 text-right font-medium">CPC</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {perf.ads.map((a, i) => (
+                    <tr
+                      key={`${a.campaignName}-${a.adName}-${i}`}
+                      className="border-b border-[#2d333b] last:border-0"
+                    >
+                      <td className="px-4 py-3">
+                        <span className="text-white">{a.adName}</span>
+                        <span className="block text-[11px] text-[#6e7681]">{a.campaignName}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-[#8b949e]">{usd(a.spend)}</td>
+                      <td className="px-4 py-3 text-right tabular-nums text-white">{a.leads}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {a.costoPorLead === null ? (
+                          <span className="text-[#6e7681]">sin leads</span>
+                        ) : (
+                          <span className={i === 0 ? "font-semibold text-green-300" : "text-white"}>
+                            {usd(a.costoPorLead)}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-[#8b949e]">
+                        {a.calificados}
+                        {a.sinClasificar > 0 && (
+                          <span className="block text-[10px] text-[#6e7681]">{a.sinClasificar} sin clasificar</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-[#8b949e]">
+                        {usd(a.costoPorCalificado)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-[#8b949e]">{a.ctr.toFixed(2)} %</td>
+                      <td className="px-4 py-3 text-right tabular-nums text-[#8b949e]">{usd(a.cpc)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <p className="mt-2 text-[11px] text-[#6e7681]">
+              Ordenado por lo que cuesta cada lead, de más barato a más caro. El CTR dice quién llama la atención;
+              el costo por lead calificado dice quién trae clientes.
+              {perf.leadsSinAnuncio > 0 && (
+                <> {perf.leadsSinAnuncio} lead{perf.leadsSinAnuncio === 1 ? "" : "s"} del periodo no se pudo atribuir a
+                  ningún anuncio con gasto.</>
+              )}
+            </p>
+          </section>
+        )}
 
         {/* Campañas */}
         <section>

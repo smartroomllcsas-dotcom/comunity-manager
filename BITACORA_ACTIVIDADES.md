@@ -11,6 +11,12 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 
 ## Aplicado
 
+### 18 sep 2026
+- **«Qué anuncio conviene» en Anuncios**: el gasto de Meta cruzado con los leads que trajo cada anuncio. Tabla por anuncio con gasto, leads, **costo por lead**, calificados, **costo por lead calificado**, CTR y CPC, ordenada del lead más barato al más caro y respetando el filtro de periodo. Endpoint `GET /api/meta/performance`.
+- El cruce va **por nombre**, no por id: los leads de formulario guardan `lead_campaign` y `lead_ad` (nombres), no identificadores. Verificado contra la cuenta real que Meta devuelve los mismos ("ad1", "ad2", "Funnel form a meet - Software V1"). Los leads que no casan con ningún anuncio con gasto se cuentan aparte y se dicen, para que el número cuadre.
+- **Aviso honesto sobre la calidad del dato**: hoy 53 de 70 leads no tienen etapa, así que el costo por lead calificado se queda corto. La pantalla lo advierte en vez de dar un número que engaña.
+- Primer resultado real (90 días, Smart Digital): US$ 1.045,96 invertidos, US$ 14,13 por lead. El mejor es `ad3` de *Funnel form a meet - Software V1 - Copia* con **US$ 5,12 por lead**; el de mejor CTR (`ad1` de la misma campaña, 2,24 %) cuesta **US$ 11,32 por lead**, más del doble.
+
 ### 17 sep 2026
 - Probado en vivo el detalle de campaña y corregido: `creative{…preview_shareable_link}` **no existe** en la API de anuncios v21, Meta devolvía error 100 y con eso se caía la consulta entera — «Ver más» no mostraba nada nunca. Quitado; el enlace a la publicación se arma con `effective_object_story_id`. Verificado con la campaña *CTWA - Apps y autom*: 1 conjunto, 3 anuncios, US$40,44 en 30 días, audiencia 18-65, hombres, MX/PA/PE/CO/CR. Además el objetivo y el tipo de compra ya no salen en crudo (*OUTCOME_ENGAGEMENT* → «Interacción», *AUCTION* → «Subasta») y las fechas se muestran legibles.
 - **Detalle de campaña en Anuncios** (trabajo de otra sesión, revisado y desplegado): botón «Ver más» por campaña con presupuesto, fechas, métricas del periodo, la **audiencia de cada conjunto** (edad, género, ubicación, intereses, comportamientos, dispositivos, ubicaciones de publicación y exclusiones) y los anuncios con su texto, titular, imagen y enlace a Meta. Endpoint `GET /api/meta/campaigns/[campaignId]` validado por empresa, con comprobación de que la campaña pertenece a la cuenta publicitaria de esa marca.

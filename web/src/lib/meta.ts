@@ -308,11 +308,23 @@ export async function getAdInsights(
   adAccountId: string,
   accessToken: string,
   range: AdInsightsRange = { preset: 'last_7d' },
+  /**
+   * Por defecto devuelve una sola fila con el total de la cuenta. Con
+   * `level: 'ad'` devuelve una fila por anuncio, que es lo que hace falta para
+   * comparar anuncios entre sí.
+   */
+  options: { level?: 'account' | 'campaign' | 'adset' | 'ad'; extraFields?: string[] } = {},
 ) {
+  const fields = ['spend', 'impressions', 'clicks', 'ctr', 'cpc', 'reach', 'frequency', ...(options.extraFields || [])]
   const params = new URLSearchParams({
-    fields: 'spend,impressions,clicks,ctr,cpc,reach,frequency',
+    fields: fields.join(','),
     access_token: accessToken,
   })
+  if (options.level && options.level !== 'account') {
+    params.set('level', options.level)
+    // Una cuenta con muchos anuncios pagina; 500 cubre de sobra un periodo.
+    params.set('limit', '500')
+  }
   if ('preset' in range) params.set('date_preset', range.preset)
   else params.set('time_range', JSON.stringify({ since: range.since, until: range.until }))
 
