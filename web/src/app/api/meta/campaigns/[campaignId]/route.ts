@@ -155,7 +155,12 @@ function normalizeCreative(value: unknown) {
       asString(creative.thumbnail_url),
     thumbnailUrl: asString(creative.thumbnail_url),
     videoId: asString(videoData?.video_id) || asString(creative.video_id),
-    previewUrl: asString(creative.preview_shareable_link),
+    // El enlace a la publicación se arma con el id de la historia, que es lo
+    // que devuelve Meta; no existe un campo con la URL ya hecha.
+    previewUrl: (() => {
+      const storyId = asString(creative.effective_object_story_id)
+      return storyId ? `https://www.facebook.com/${storyId.replace('_', '/posts/')}` : null
+    })(),
   }
 }
 

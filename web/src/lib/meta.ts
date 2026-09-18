@@ -368,7 +368,11 @@ export async function getAdCampaignDetails(
     'status',
     'effective_status',
     'configured_status',
-    'creative{id,name,object_story_spec,asset_feed_spec,thumbnail_url,image_url,video_id,object_type,preview_shareable_link}',
+        // OJO: `preview_shareable_link` NO existe en la API de anuncios (v21).
+    // Pedirlo hacía fallar la consulta entera con el error 100 y el detalle
+    // no abría nunca. Para enlazar a la publicación se usa
+    // `effective_object_story_id`, que sí existe.
+    'creative{id,name,object_story_spec,asset_feed_spec,thumbnail_url,image_url,video_id,object_type,effective_object_story_id}',
   ].join(',')
 
   const campaignUrl = `${META_GRAPH_URL}/${encodeURIComponent(campaignId)}?${new URLSearchParams({
