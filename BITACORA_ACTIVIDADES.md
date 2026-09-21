@@ -11,6 +11,12 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 
 ## Aplicado
 
+### 21 sep 2026
+- **Pausar y reactivar campañas desde el CRM** (botón dentro del detalle de cada campaña). Es la **única escritura** que la plataforma hace sobre la pauta y es la más reversible que existe: cambia un estado, no crea nada ni mueve presupuesto.
+- Tres candados, con pruebas que los vigilan: acceso a la empresa; **un asesor acotado a una marca no puede** (atiende chats, no decide presupuesto); y la campaña tiene que pertenecer a la cuenta publicitaria de esa marca — el token ve las 25 cuentas del portfolio, así que sin esa comprobación se podría pausar la pauta de otro cliente cambiando un id.
+- La confirmación **dice lo que está en juego** («Vas a pausar *ad1*. Lleva US$ 227,73 gastados y 18 leads»), no un «¿seguro?» a secas. Cada cambio queda registrado en `cm_activity_log` con quién y qué.
+- Y no se fía del `success` de Meta: **relee el estado efectivo** después. Meta acepta ACTIVE aunque la campaña no vaya a correr (cuenta sin método de pago, conjunto padre en pausa) y en ese caso la pantalla avisa del motivo en vez de decir que quedó activa.
+
 ### 18 sep 2026
 - **Los leads y el costo por lead, también dentro de cada campaña**: al abrir «Ver más» hay tres cifras de la campaña (leads, costo por lead, calificados) y **cada tarjeta de anuncio muestra su gasto, sus leads y su costo por lead**, junto al creativo. Ahí es donde se decide qué anuncio apagar, mirando el creativo y su resultado a la vez. La tabla general se queda: sirve para lo otro, comparar entre campañas y mover presupuesto.
 - **«Qué anuncio conviene» en Anuncios**: el gasto de Meta cruzado con los leads que trajo cada anuncio. Tabla por anuncio con gasto, leads, **costo por lead**, calificados, **costo por lead calificado**, CTR y CPC, ordenada del lead más barato al más caro y respetando el filtro de periodo. Endpoint `GET /api/meta/performance`.

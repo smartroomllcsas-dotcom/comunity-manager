@@ -744,3 +744,27 @@ export async function getCommentPermalink(
     return null
   }
 }
+
+/**
+ * Pausar o reactivar una campaña, un conjunto o un anuncio.
+ *
+ * Es la única escritura que la plataforma hace sobre la pauta, y es
+ * deliberadamente la más reversible que existe: cambia un estado, no crea nada
+ * ni mueve presupuesto. Meta responde `{ success: true }`.
+ *
+ * ACTIVE no garantiza que empiece a correr: si la cuenta no tiene método de
+ * pago o el conjunto padre está en pausa, Meta acepta el cambio y el estado
+ * efectivo sigue detenido. Por eso quien llama debe leer `effective_status`
+ * después, no fiarse del `success`.
+ */
+export async function updateAdObjectStatus(
+  objectId: string,
+  accessToken: string,
+  status: 'ACTIVE' | 'PAUSED',
+): Promise<{ success?: boolean }> {
+  return metaFetch(`${META_GRAPH_URL}/${encodeURIComponent(objectId)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ status, access_token: accessToken }),
+  })
+}

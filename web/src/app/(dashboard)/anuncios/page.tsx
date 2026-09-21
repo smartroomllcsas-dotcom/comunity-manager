@@ -12,6 +12,7 @@ import Image from "next/image";
 import { Megaphone, RefreshCw, AlertTriangle, ExternalLink, Plug, CalendarRange, Eye, X } from "lucide-react";
 import { useActiveBrand } from "@/hooks/useActiveBrand";
 import { BrandPicker } from "@/components/broadcasts/BrandPicker";
+import { CampaignStatusButton } from "@/components/ads/CampaignStatusButton";
 
 export const dynamic = "force-dynamic";
 
@@ -199,6 +200,8 @@ function CampaignDetailDialog({
   error,
   onClose,
   perf,
+  clientId,
+  onChanged,
 }: {
   target: Campaign;
   detail: CampaignDetail | null;
@@ -207,6 +210,8 @@ function CampaignDetailDialog({
   onClose: () => void;
   /** Leads y costo por lead del periodo, para cruzarlos con cada anuncio. */
   perf: Performance | null;
+  clientId: string | null;
+  onChanged: () => void;
 }) {
   const campaignInsight = detail?.insights.campaign;
   const campaign = detail?.campaign;
@@ -299,6 +304,21 @@ function CampaignDetailDialog({
                   </p>
                   <p className="mt-1 text-xs text-[#8b949e]">Calificados</p>
                 </div>
+              </section>
+            )}
+
+            {/* La decisión, al lado de los números que la justifican */}
+            {clientId && campaign?.id && (
+              <section>
+                <CampaignStatusButton
+                  clientId={clientId}
+                  campaignId={campaign.id}
+                  campaignName={campaign.name || target.name}
+                  status={campaign.effectiveStatus || campaign.status}
+                  spend={gastoCampana || Number(campaignInsight?.spend) || 0}
+                  leads={leadsCampana}
+                  onDone={onChanged}
+                />
               </section>
             )}
 
@@ -976,6 +996,11 @@ export default function AnunciosPage() {
           error={detailError}
           onClose={closeCampaignDetail}
           perf={perf}
+          clientId={activeClientId}
+          onChanged={() => {
+            void load();
+            void openCampaignDetail(detailTarget);
+          }}
         />
       )}
     </div>
