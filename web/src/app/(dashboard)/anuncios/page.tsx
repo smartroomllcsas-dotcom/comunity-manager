@@ -136,6 +136,25 @@ function fecha(raw?: string | null): string | null {
   return d.toLocaleDateString("es-CO", { day: "numeric", month: "long", year: "numeric" });
 }
 
+/**
+ * Fecha CON hora, en hora de Colombia. Se usa para la última modificación: sin
+ * la hora no sirve para comprobar que un cambio de hace cinco minutos llegó a
+ * Meta, que es justo para lo que se mira.
+ */
+function fechaHora(raw?: string | null): string | null {
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  return d.toLocaleString("es-CO", {
+    timeZone: "America/Bogota",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 type AdPerf = {
   adId: string | null;
   adName: string;
@@ -339,6 +358,12 @@ function CampaignDetailDialog({
                 <InfoPair label="Tipo de compra" value={COMPRA[campaign.buyingType || ""] || campaign.buyingType || "—"} />
                 <InfoPair label="Inicio" value={fecha(campaign.startTime) || "—"} />
                 <InfoPair label="Fin" value={fecha(campaign.stopTime) || "Sin fecha de fin"} />
+                {/* Lo dice Meta, no nosotros: sirve para comprobar que un
+                    cambio hecho desde aquí llegó de verdad. */}
+                <InfoPair
+                  label="Última modificación en Meta"
+                  value={fechaHora(campaign.updatedTime) || "—"}
+                />
               </div>
               {campaign.specialAdCategories && campaign.specialAdCategories.length > 0 && (
                 <p className="mt-3 text-xs text-[#8b949e]">

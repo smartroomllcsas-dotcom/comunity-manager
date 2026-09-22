@@ -11,6 +11,10 @@ Registro de lo aplicado en producción (rama `visual/os-fusion`, proyecto Vercel
 
 ## Aplicado
 
+### 22 sep 2026
+- **Cómo saber que el cambio llegó a Meta.** El detalle de campaña muestra **«Última modificación en Meta»** con fecha y hora de Colombia — es el dato que informa Meta, así que sirve para cotejar un cambio hecho hace cinco minutos. Y al pausar o reactivar, el aviso ya no dice «Campaña pausada» sino **lo que respondió Meta** («Meta la dejó en pausa · confirmado por Meta, no sólo guardado aquí»), traduciendo también los estados intermedios (ADSET_PAUSED, WITH_ISSUES, IN_PROCESS).
+- Verificadas contra Meta las dos pausas del 21 sep (CTWA - Apps y autom y CTWA - Software V1): los tres estados que devuelve Meta —configurado, efectivo y de lista— en PAUSED, y la hora de modificación que registra Meta coincide con la del clic con dos segundos de diferencia.
+
 ### 21 sep 2026
 - **Pausar y reactivar campañas desde el CRM** (botón dentro del detalle de cada campaña). Es la **única escritura** que la plataforma hace sobre la pauta y es la más reversible que existe: cambia un estado, no crea nada ni mueve presupuesto.
 - Tres candados, con pruebas que los vigilan: acceso a la empresa; **un asesor acotado a una marca no puede** (atiende chats, no decide presupuesto); y la campaña tiene que pertenecer a la cuenta publicitaria de esa marca — el token ve las 25 cuentas del portfolio, así que sin esa comprobación se podría pausar la pauta de otro cliente cambiando un id.

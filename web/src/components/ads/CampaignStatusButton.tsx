@@ -50,7 +50,22 @@ export function CampaignStatusButton({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "No se pudo cambiar el estado");
-      toast.success(accion === "PAUSED" ? "Campaña pausada" : "Campaña reactivada");
+      // Se muestra lo que respondió META, no lo que pedimos: es la diferencia
+      // entre "se envió" y "quedó hecho".
+      const META_ESTADO: Record<string, string> = {
+        ACTIVE: "activa",
+        PAUSED: "en pausa",
+        CAMPAIGN_PAUSED: "en pausa",
+        ADSET_PAUSED: "en pausa (el conjunto)",
+        WITH_ISSUES: "con problemas",
+        ARCHIVED: "archivada",
+        DELETED: "eliminada",
+        IN_PROCESS: "procesándose",
+      };
+      const comoQuedo = META_ESTADO[String(data.status || "").toUpperCase()] || data.status;
+      toast.success(`Meta la dejó ${comoQuedo}`, {
+        description: `${campaignName} · confirmado por Meta, no sólo guardado aquí`,
+      });
       if (data.aviso) toast.warning(data.aviso, { duration: 8000 });
       setConfirming(false);
       onDone?.();
